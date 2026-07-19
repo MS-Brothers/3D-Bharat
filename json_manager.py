@@ -55,7 +55,8 @@ class DesignConstructionManager:
                 "surface_baseline": None,
                 "construction_baseline": None,
                 "road_surface_baseline": None,
-                "operational_config": None
+                "operational_config": None,
+                "polygon_points": None
             },
             "construction": {
                 "zero_line_config": None,
@@ -67,7 +68,9 @@ class DesignConstructionManager:
                 "divider": None,
                 "footpath": None
             },
-            "asset_mapping": None
+            "asset_mapping": None,
+            "underpass_lights": [],
+            "underpass_cctvs": []
         }
     
     @staticmethod
@@ -328,7 +331,37 @@ class DesignConstructionManager:
         """
         data = DesignConstructionManager.load_master(layer_root)
         return data.get("design", {}).get("asset_mapping")
-
+  #### Mayur Wakhare 17-7-2026 tunnel polygon   
+    @staticmethod
+    def set_design_polygon_points(layer_root: str, polygon_points: list) -> bool:
+        """
+        Set polygon points for design layer.
+        
+        Args:
+            layer_root (str): Path to the design layer root directory
+            polygon_points (list): List of polygon points
+            
+        Returns:
+            bool: True if successful
+        """
+        data = DesignConstructionManager.load_master(layer_root)
+        data["design"]["polygon_points"] = polygon_points
+        return DesignConstructionManager.save_master(layer_root, data)
+    
+    @staticmethod
+    def get_design_polygon_points(layer_root: str) -> Optional[list]:
+        """
+        Get polygon points from design layer.
+        
+        Args:
+            layer_root (str): Path to the design layer root directory
+            
+        Returns:
+            list or None: Polygon points or None if not found
+        """
+        data = DesignConstructionManager.load_master(layer_root)
+        return data.get("design", {}).get("polygon_points")
+########################################################################################################
     # ==================== HELPER FUNCTIONS FOR LOADING FROM UNIFIED FILE ====================
     
     @staticmethod
@@ -785,6 +818,7 @@ class DesignConstructionManager:
                 "construction_baseline": None,
                 "road_surface_baseline": None,
                 "operational_config": None,
+                "polygon_points": None,
             }
 
         # Ensure new top-level keys exist

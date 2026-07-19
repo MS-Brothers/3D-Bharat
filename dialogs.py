@@ -6439,7 +6439,9 @@ class MergerLayerConfigDialog(QDialog):
                     print("⚠ No valid primary layer selected – cannot load zero line")
 
                 # --- Map to 3D planes (unchanged) ---
-                if loaded_data_for_3d and hasattr(self.parent(), 'map_baselines_to_3d_planes_from_merger_data'):
+              ## Mayur Wakhare 13-07-2026 tunnel
+                if loaded_data_for_3d and hasattr(self.parent(), 'map_baselines_to_3d_planes_from_data'):
+                ##################################################################################
                     width = 10.0
                     for ltype, data in loaded_data_for_3d.items():
                         if data["polylines"]:
@@ -6453,7 +6455,10 @@ class MergerLayerConfigDialog(QDialog):
                                     break
                         if width != 10.0:
                             break
-                    self.parent().map_baselines_to_3d_planes_from_merger_data(loaded_data_for_3d, width)
+                 ## Mayur Wakhare 13-07-2026
+                  
+                    self.parent().map_baselines_to_3d_planes_from_data(loaded_data_for_3d, width)
+                    ##########################################################################
                     print("3D planes generation attempted")
                 else:
                     print("Cannot map: no 3D data or parent method missing")
@@ -17947,6 +17952,7 @@ class TunnelConfigDialog(QDialog):
         self.setMinimumWidth(450)
         self.parent = parent
         self.arc_points = []
+        self.tunnel_id = None
         
         self.setStyleSheet("""
             QDialog {
@@ -18142,7 +18148,17 @@ class TunnelConfigDialog(QDialog):
         self.accept()
         
     def get_data(self):
+        if not getattr(self, 'tunnel_id', None):
+            skm = int(float(self.start_km.text() or 0.0))
+            sch = int(float(self.start_ch.text() or 0.0))
+            if hasattr(self.parent, '_generate_tunnel_id'):
+                self.tunnel_id = self.parent._generate_tunnel_id(skm, sch)
+            else:
+                self.tunnel_id = f"TN_{skm:03d}_{sch:03d}_001"
+
         return {
+            "tunnel_id": self.tunnel_id,
+            "id": self.tunnel_id,
             "start_km": float(self.start_km.text() or 0.0),
             "start_chainage": float(self.start_ch.text() or 0.0),
             "end_km": float(self.end_km.text() or 0.0),
@@ -18151,7 +18167,7 @@ class TunnelConfigDialog(QDialog):
             "arc_points": [[float(p[0]), float(p[1]), float(p[2])] for p in self.arc_points]
         }
 
-
+#### Mayur 17-7-2026 Tunnel
         # ===========================================================================================================================
 # ** TUNNEL CONFIGURATION DIALOG **
 # ===========================================================================================================================
@@ -18163,6 +18179,7 @@ class TunnelConfigDialog(QDialog):
         self.setMinimumWidth(450)
         self.parent = parent
         self.arc_points = []
+        self.tunnel_id = None
         
         self.setStyleSheet("""
             QDialog {
@@ -18358,7 +18375,17 @@ class TunnelConfigDialog(QDialog):
         self.accept()
         
     def get_data(self):
+        if not getattr(self, 'tunnel_id', None):
+            skm = int(float(self.start_km.text() or 0.0))
+            sch = int(float(self.start_ch.text() or 0.0))
+            if hasattr(self.parent, '_generate_tunnel_id'):
+                self.tunnel_id = self.parent._generate_tunnel_id(skm, sch)
+            else:
+                self.tunnel_id = f"TN_{skm:03d}_{sch:03d}_001"
+            
         return {
+            "tunnel_id": self.tunnel_id,
+            "id": self.tunnel_id,
             "start_km": float(self.start_km.text() or 0.0),
             "start_chainage": float(self.start_ch.text() or 0.0),
             "end_km": float(self.end_km.text() or 0.0),
@@ -19174,14 +19201,19 @@ class FireExtinguisherDialog(QDialog):
         self.end_ch_input = QLineEdit()
         grid.addWidget(self.end_ch_input, 1, 3)
 
-        grid.addWidget(QLabel("Fire Extinguisher Interval (m):"), 2, 0, 1, 2)
+        grid.addWidget(QLabel("Tunnel:"), 2, 0)
+        self.tunnel_combo = QComboBox()
+        self.tunnel_combo.currentIndexChanged.connect(self._on_tunnel_selected)
+        grid.addWidget(self.tunnel_combo, 2, 1, 1, 3)
+
+        grid.addWidget(QLabel("Fire Extinguisher Interval (m):"), 3, 0, 1, 2)
         self.interval_input = QLineEdit()
         self.interval_input.setText("100")
-        grid.addWidget(self.interval_input, 2, 2, 1, 2)
+        grid.addWidget(self.interval_input, 3, 2, 1, 2)
         
         self.verify_btn = QPushButton("Verify")
         self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 6px; font-weight: bold; border-radius: 4px;")
-        grid.addWidget(self.verify_btn, 3, 0, 1, 4)
+        grid.addWidget(self.verify_btn, 4, 0, 1, 4)
         self.verify_btn.clicked.connect(self.verify_chainage)
         
         layout.addLayout(grid)
@@ -19218,7 +19250,7 @@ class FireExtinguisherDialog(QDialog):
         )
         layout.addWidget(self.summary_label)
 
-        # OK / Cancel
+        # OK / Cancel / Undo
         buttons_layout = QHBoxLayout()
         self.ok_btn = QPushButton("OK")
         self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
@@ -19230,36 +19262,27 @@ class FireExtinguisherDialog(QDialog):
         self.cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
         self.cancel_btn.clicked.connect(self.reject)
         buttons_layout.addWidget(self.cancel_btn)
+     ### Mayur Wakhare 4-7-2026 Undo Fire Tunnel   
+        self.undo_once_btn = QPushButton("Undo Once")
+        self.undo_once_btn.setStyleSheet("background-color: #FF9800; color: white;")
+        self.undo_once_btn.clicked.connect(self.on_undo_once_clicked)
+        buttons_layout.addWidget(self.undo_once_btn)
+
+        self.undo_all_btn = QPushButton("Undo All")
+        self.undo_all_btn.setStyleSheet("background-color: #F44336; color: white;")
+        self.undo_all_btn.clicked.connect(self.on_undo_all_clicked)
+        buttons_layout.addWidget(self.undo_all_btn)
+        
+        self.update_undo_state()
+
+        #################################################
         
         layout.addLayout(buttons_layout)
 
-        # ── Auto-populate chainage from tunnel ──
-        tunnel_found = False
-        t_start_km, t_start_ch, t_end_km, t_end_ch = "", "", "", ""
-        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
-        import os
-        if layer_folder and os.path.exists(layer_folder):
-            try:
-                from json_manager import DesignConstructionManager
-                m_data = DesignConstructionManager.load_master(layer_folder)
-                t_conf = m_data.get("design", {}).get("tunnel", {})
-                if t_conf and "start_km" in t_conf:
-                    t_start_km = str(t_conf.get("start_km", ""))
-                    t_start_ch = str(t_conf.get("start_chainage", ""))
-                    t_end_km = str(t_conf.get("end_km", ""))
-                    t_end_ch = str(t_conf.get("end_chainage", ""))
-                    tunnel_found = True
-            except Exception:
-                pass
-                
-        if tunnel_found:
-            def clean_str(val):
-                return val[:-2] if val.endswith(".0") else val
-                
-            self.start_km_input.setText(clean_str(t_start_km))
-            self.start_ch_input.setText(clean_str(t_start_ch))
-            self.end_km_input.setText(clean_str(t_end_km))
-            self.end_ch_input.setText(clean_str(t_end_ch))
+    ## Mayur 18-7-2026 auto populated chainage
+        # ── Auto-populate chainage from tunnels ──
+        self.available_tunnels = []
+        self._populate_tunnels()
             
         # Connections for live update
         self.start_km_input.textChanged.connect(self.invalidate_verification)
@@ -19273,21 +19296,107 @@ class FireExtinguisherDialog(QDialog):
         self.both_sides_rb.toggled.connect(self.update_summary)
         
         self.invalidate_verification()
+#### Mayur 18-7-2026
+    def _populate_tunnels(self):
+        import os
+        import json
+        
+        self.tunnel_combo.blockSignals(True)
+        self.tunnel_combo.clear()
+        self.available_tunnels.clear()
 
+        if not hasattr(self.parent, '_per_layer_actors'):
+            self.tunnel_combo.blockSignals(False)
+            return
+
+        def clean_str(val):
+            return str(val)[:-2] if str(val).endswith(".0") else str(val)
+
+        for layer_path in self.parent._per_layer_actors.keys():
+            layer_name = os.path.basename(layer_path)
+            
+            # Check for merged layer
+            is_merger = False
+            try:
+                merger_jsons = [f for f in os.listdir(layer_path) if f.endswith('.json')]
+                for mj in merger_jsons:
+                    with open(os.path.join(layer_path, mj), 'r', encoding='utf-8') as f:
+                        m_data = json.load(f)
+                    if "merger_points" in m_data:
+                        is_merger = True
+                        for pt in m_data.get("merger_points", []):
+                            def add_cfg(cpath):
+                                if cpath and os.path.exists(cpath):
+                                    with open(cpath, 'r', encoding='utf-8') as cf:
+                                        cdat = json.load(cf)
+                                    t = cdat.get("design", {}).get("tunnel")
+                                    if not t:
+                                        zc = cdat.get("design", {}).get("zero_line_config")
+                                        if zc:
+                                            t = {"id": "fallback_tunnel", "start_km": 0, "start_chainage": 0, "end_km": 0, "end_chainage": 0}
+                                    if t:
+                                        tid = t.get("tunnel_id", t.get("id", "Unknown"))
+                                        disp = f"{tid} ({layer_name})"
+                                        self.available_tunnels.append((t, layer_name, tid))
+                                        self.tunnel_combo.addItem(disp)
+                            add_cfg(pt.get("primary_json_path"))
+                            for lyr in pt.get("layers", []):
+                                add_cfg(lyr.get("json_path"))
+            except Exception:
+                pass
+                
+            if not is_merger:
+                try:
+                    from json_manager import DesignConstructionManager
+                    m_data = DesignConstructionManager.load_master(layer_path)
+                    t = m_data.get("design", {}).get("tunnel")
+                    if not t:
+                        zc = m_data.get("design", {}).get("zero_line_config")
+                        if zc:
+                            t = {"id": "fallback_tunnel", "start_km": 0, "start_chainage": 0, "end_km": 0, "end_chainage": 0}
+                    if t:
+                        tid = t.get("tunnel_id", t.get("id", "Unknown"))
+                        disp = f"{tid} ({layer_name})"
+                        self.available_tunnels.append((t, layer_name, tid))
+                        self.tunnel_combo.addItem(disp)
+                except Exception:
+                    pass
+
+        self.tunnel_combo.blockSignals(False)
+        if self.tunnel_combo.count() > 0:
+            self.tunnel_combo.setCurrentIndex(0)
+            self._on_tunnel_selected(0)
+
+    def _on_tunnel_selected(self, index):
+        if index < 0 or index >= len(self.available_tunnels):
+            return
+            
+        t, layer_name, tid = self.available_tunnels[index]
+        def clean_str(val):
+            return str(val)[:-2] if str(val).endswith(".0") else str(val)
+            
+        self.start_km_input.setText(clean_str(t.get('start_km', '0')))
+        self.start_ch_input.setText(clean_str(t.get('start_chainage', '0')))
+        self.end_km_input.setText(clean_str(t.get('end_km', '0')))
+        self.end_ch_input.setText(clean_str(t.get('end_chainage', '0')))
+        self.invalidate_verification()
+########################################################################
     def invalidate_verification(self):
         self.verified = False
         self.ok_btn.setEnabled(False)
         self.side_group.setEnabled(False)
         self.summary_label.setText("<b>Total Fire Extinguishers : 0</b><br><br>Estimated Placement<br><br>Right Side : 0<br>Left Side  : 0")
-
+## Mayur 18-7-2026
     def verify_chainage(self):
+        from PyQt5.QtWidgets import QMessageBox
+        import os
         try:
             start_km = float(self.start_km_input.text() or 0.0)
             start_ch = float(self.start_ch_input.text() or 0.0)
             end_km = float(self.end_km_input.text() or 0.0)
             end_ch = float(self.end_ch_input.text() or 0.0)
             interval = float(self.interval_input.text() or 100.0)
-        except:
+        except ValueError:
             QMessageBox.warning(self, "Invalid Input", "Please enter numeric values for KM, Chainage, and Interval.")
             return
 
@@ -19295,60 +19404,38 @@ class FireExtinguisherDialog(QDialog):
             QMessageBox.warning(self, "Invalid Interval", "Interval must be greater than 0.")
             return
 
-        abs_start = start_km * 1000 + start_ch
-        abs_end = end_km * 1000 + end_ch
+        start_abs = start_km * 1000 + start_ch
+        end_abs = end_km * 1000 + end_ch
 
-        if abs_start >= abs_end:
-            QMessageBox.warning(self, "Invalid Range", "Start chainage must be strictly less than End chainage.")
+        idx = self.tunnel_combo.currentIndex()
+        if idx < 0 or idx >= len(self.available_tunnels):
+            QMessageBox.warning(self, "No Tunnel", "No valid tunnel selected for verification.")
             return
 
-        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
-        import os
-        if not layer_folder or not os.path.exists(layer_folder):
-            QMessageBox.warning(self, "Error", "No active design layer folder found to verify.")
+        t_data, layer_name, tid = self.available_tunnels[idx]
+        
+        ts_km = float(t_data.get("start_km", 0.0))
+        ts_ch = float(t_data.get("start_chainage", 0.0))
+        te_km = float(t_data.get("end_km", 0.0))
+        te_ch = float(t_data.get("end_chainage", 0.0))
+        
+        t_start = ts_km * 1000 + ts_ch
+        t_end = te_km * 1000 + te_ch
+
+        print("\n--- Fire Extinguisher Verify Debug ---")
+        print(f"Selected Tunnel ID: {tid}")
+        print(f"Selected Layer: {layer_name}")
+        print(f"Tunnel Start Chainage: {t_start}")
+        print(f"Tunnel End Chainage: {t_end}")
+        print(f"Verify Range: {t_start} - {t_end}")
+        print(f"Entered Chainage: {start_abs} - {end_abs}")
+        print("--------------------------------------\n")
+
+        if start_abs < t_start or start_abs > t_end or end_abs < t_start or end_abs > t_end:
+            QMessageBox.warning(self, "Out of Bounds", f"Locations must be within tunnel limits ({t_start} - {t_end}).")
             return
-
-        try:
-            from json_manager import DesignConstructionManager
-            j = DesignConstructionManager.load_baseline_from_unified(layer_folder, 'road_surface_baseline')
-            if not j:
-                j = DesignConstructionManager.load_baseline_from_unified(layer_folder, 'surface_baseline')
-
-            if not j:
-                QMessageBox.warning(self, "No Baseline Data", "No surface or road surface baseline found in design layer.")
-                return
-
-            global_start_offset = 0.0
-            if hasattr(self.parent, '_get_global_start_offset'):
-                global_start_offset = self.parent._get_global_start_offset(layer_folder)
-            else:
-                polylines = j.get("polylines", [])
-                if polylines:
-                    start_str = polylines[0].get("start_chainage_str", "")
-                    if start_str:
-                        start_str = start_str.replace(" ", "")
-                        if "+" in start_str:
-                            parts = start_str.split("+")
-                            global_start_offset = float(parts[0]) * 1000 + float(parts[1])
-                        else:
-                            global_start_offset = float(start_str)
-
-            chs = []
-            for poly in j.get("polylines", []):
-                for pt in poly.get("points", []):
-                    chs.append(pt['chainage_m'] + global_start_offset)
-            if not chs:
-                QMessageBox.warning(self, "No Points", "Baseline has no chainage points.")
-                return
-            min_ch = min(chs)
-            max_ch = max(chs)
-            
-            if abs_start < min_ch - 0.1 or abs_end > max_ch + 0.1:
-                QMessageBox.warning(self, "Out of Bounds", f"Entered chainage range [{start_km}+{start_ch} to {end_km}+{end_ch}] falls outside the baseline boundaries [{min_ch:.2f} to {max_ch:.2f}].")
-                return
-
-        except Exception as e:
-            QMessageBox.warning(self, "Verification Error", f"Failed to verify chainage: {str(e)}")
+        if start_abs >= end_abs:
+            QMessageBox.warning(self, "Invalid Range", "Start chainage must be less than End chainage.")
             return
 
         self.verified = True
@@ -19356,7 +19443,7 @@ class FireExtinguisherDialog(QDialog):
         self.ok_btn.setEnabled(True)
         self.update_summary()
         QMessageBox.information(self, "Verified", "Chainage locations and interval successfully verified.")
-
+######################################################################################################
     def update_summary(self):
         if not getattr(self, 'verified', False):
             return
@@ -19405,7 +19492,7 @@ class FireExtinguisherDialog(QDialog):
             
         lines.append(f"<br>Estimated Covered Length : {end_abs - start_abs:.2f} m")
         self.summary_label.setText("<br>".join(lines))
-
+#### Mayur 18-7-2026
     def get_data(self):
         try:
             side = "both"
@@ -19414,15 +19501,3208 @@ class FireExtinguisherDialog(QDialog):
             elif self.left_side_rb.isChecked():
                 side = "left"
                 
+            idx = self.tunnel_combo.currentIndex()
+            tunnel_id = "Unknown"
+            layer_name = "Unknown"
+            if 0 <= idx < len(getattr(self, 'available_tunnels', [])):
+                _, layer_name, tunnel_id = self.available_tunnels[idx]
+                
             return {
                 "start_km": float(self.start_km_input.text() or 0.0),
                 "start_chainage": float(self.start_ch_input.text() or 0.0),
                 "end_km": float(self.end_km_input.text() or 0.0),
                 "end_chainage": float(self.end_ch_input.text() or 0.0),
                 "interval": float(self.interval_input.text() or 100.0),
-                "installation_side": side
+                "installation_side": side,
+                "tunnel_id": tunnel_id,
+                "layer_name": layer_name
+            }
+        except ValueError:
+            return None
+########### Mayur Wakhare 4-7-2026 Fire Undo option Tuunel
+    def update_undo_state(self):
+        has_multi = False
+        if hasattr(self.parent, 'multiple_fire_extinguisher_batches'):
+            has_multi = len(self.parent.multiple_fire_extinguisher_batches) > 0
+            
+        self.undo_once_btn.setEnabled(has_multi)
+        self.undo_all_btn.setEnabled(has_multi)
+
+    def on_undo_once_clicked(self):
+        if hasattr(self.parent, 'undo_last_multiple_fire_extinguisher'):
+            success = self.parent.undo_last_multiple_fire_extinguisher()
+            if success:
+                self.update_undo_state()
+
+    def on_undo_all_clicked(self):
+        if hasattr(self.parent, 'undo_all_multiple_fire_extinguishers'):
+            success = self.parent.undo_all_multiple_fire_extinguishers()
+            if success:
+                self.update_undo_state()
+############################################################
+            ###############################################################
+### Mayur Wakhare 4-7-2026 cctv tunnel
+### CCTV Camera Dialog Box ###
+class CCTVCameraDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("CCTV Camera")
+        self.setModal(True)
+        self.setMinimumWidth(420)
+        self.parent = parent
+        self.verified = False
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F5F5F5;
+                font-family: Segoe UI;
+            }
+            QLabel { font-size: 13px; color: #333; font-weight: bold; }
+            QLineEdit {
+                padding: 6px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+                background-color: white;
+            }
+            QPushButton {
+                padding: 8px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("CCTV Camera")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1565C0;")
+        layout.addWidget(title)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        grid.addWidget(QLabel("Start KM:"), 0, 0)
+        self.start_km_input = QLineEdit()
+        grid.addWidget(self.start_km_input, 0, 1)
+
+        grid.addWidget(QLabel("+"), 0, 2)
+        self.start_ch_input = QLineEdit()
+        grid.addWidget(self.start_ch_input, 0, 3)
+
+        grid.addWidget(QLabel("End KM:"), 1, 0)
+        self.end_km_input = QLineEdit()
+        grid.addWidget(self.end_km_input, 1, 1)
+
+        grid.addWidget(QLabel("+"), 1, 2)
+        self.end_ch_input = QLineEdit()
+        grid.addWidget(self.end_ch_input, 1, 3)
+
+        grid.addWidget(QLabel("Tunnel:"), 2, 0)
+        self.tunnel_combo = QComboBox()
+        self.tunnel_combo.currentIndexChanged.connect(self._on_tunnel_selected)
+        grid.addWidget(self.tunnel_combo, 2, 1, 1, 3)
+
+        grid.addWidget(QLabel("Camera Interval (m):"), 3, 0, 1, 2)
+        self.interval_input = QLineEdit()
+        self.interval_input.setText("120")
+        grid.addWidget(self.interval_input, 3, 2, 1, 2)
+
+        self.verify_btn = QPushButton("Verify")
+        self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 6px; font-weight: bold; border-radius: 4px;")
+        grid.addWidget(self.verify_btn, 4, 0, 1, 4)
+        self.verify_btn.clicked.connect(self.verify_chainage)
+
+        layout.addLayout(grid)
+
+        note_label = QLabel("Recommended spacing: 100\u2013150 m")
+        note_label.setStyleSheet("font-size: 11px; color: #666; font-weight: normal; font-style: italic;")
+        layout.addWidget(note_label)
+
+        # ── ARC Reference (UI exactly like Tunnel Light) ──
+        self.arc_post_verify_container = QWidget()
+        arc_layout = QGridLayout(self.arc_post_verify_container)
+        arc_layout.setSpacing(10)
+        arc_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.arc_label = QLabel("ARC Reference:")
+        arc_layout.addWidget(self.arc_label, 0, 0)
+        
+        from PyQt5.QtWidgets import QRadioButton, QButtonGroup
+        self.arc_checkbox_layout = QVBoxLayout()
+        self.arc_rb1 = QRadioButton("Left Side (1)")
+        self.arc_rb2 = QRadioButton("Top / Center (2)")
+        self.arc_rb3 = QRadioButton("Right Side (3)")
+        
+        self.arc_btn_group = QButtonGroup(self)
+        self.arc_btn_group.setExclusive(True)
+        self.arc_btn_group.addButton(self.arc_rb1)
+        self.arc_btn_group.addButton(self.arc_rb2)
+        self.arc_btn_group.addButton(self.arc_rb3)
+        
+        self.arc_rb1.setEnabled(False)
+        self.arc_rb2.setEnabled(False)
+        self.arc_rb3.setEnabled(False)
+        
+        self.arc_checkbox_layout.addWidget(self.arc_rb1)
+        self.arc_checkbox_layout.addWidget(self.arc_rb2)
+        self.arc_checkbox_layout.addWidget(self.arc_rb3)
+        arc_layout.addLayout(self.arc_checkbox_layout, 0, 1)
+
+        from PyQt5.QtGui import QDoubleValidator
+        self.distance_label = QLabel("Enter Distance:")
+        self.distance_input = QLineEdit()
+        self.distance_input.setPlaceholderText("Enter distance")
+        self.distance_input.setValidator(QDoubleValidator(0.0, 99999.0, 3))
+        self.distance_label.setVisible(False)
+        self.distance_input.setVisible(False)
+        
+        arc_layout.addWidget(self.distance_label, 1, 0)
+        arc_layout.addWidget(self.distance_input, 1, 1)
+
+        layout.addWidget(self.arc_post_verify_container)
+        
+        # Connect signals
+        self.arc_rb1.toggled.connect(lambda checked: self.on_arc_toggled("Left Side", checked))
+        self.arc_rb2.toggled.connect(lambda checked: self.on_arc_toggled("Center", checked))
+        self.arc_rb3.toggled.connect(lambda checked: self.on_arc_toggled("Right Side", checked))
+        self.distance_input.textChanged.connect(self.update_summary)
+
+        # Variables for Arc preparation backend
+        self.tunnel_arc_length = 0.0
+        self.dummy_arc_points = []
+        self.center_dummy_point = None
+        self.selected_arc_reference = "None"
+
+        # ── Placement Summary (read-only preview) ──
+        self.summary_label = QLabel("")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setStyleSheet(
+            "background-color: #E8F5E9; border: 1px solid #A5D6A7; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #333; font-weight: normal;"
+        )
+        layout.addWidget(self.summary_label)
+
+        # OK / Cancel / Undo
+        buttons_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        self.ok_btn.clicked.connect(self.accept)
+        self.ok_btn.setEnabled(False)
+        buttons_layout.addWidget(self.ok_btn)
+##### Mayur Wakhare 6-7-2026 undo button 
+        self.undo_once_btn = QPushButton("Undo Once")
+        self.undo_once_btn.setStyleSheet("background-color: #FF9800; color: white;")
+        self.undo_once_btn.clicked.connect(self.on_undo_once_clicked)
+        buttons_layout.addWidget(self.undo_once_btn)
+
+        self.undo_all_btn = QPushButton("Undo All")
+        self.undo_all_btn.setStyleSheet("background-color: #F44336; color: white;")
+        self.undo_all_btn.clicked.connect(self.on_undo_all_clicked)
+        buttons_layout.addWidget(self.undo_all_btn)
+        ################################################################################
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
+        self.cancel_btn.clicked.connect(self.reject)
+        buttons_layout.addWidget(self.cancel_btn)
+        
+        self.update_undo_state()
+
+        #################################################
+
+        layout.addLayout(buttons_layout)
+
+
+        # ── Auto-populate chainage from tunnels ──
+        self.available_tunnels = []
+        self._populate_tunnels()
+
+        # Connections for live update
+        self.start_km_input.textChanged.connect(self.invalidate_verification)
+        self.start_ch_input.textChanged.connect(self.invalidate_verification)
+        self.end_km_input.textChanged.connect(self.invalidate_verification)
+        self.end_ch_input.textChanged.connect(self.invalidate_verification)
+        self.interval_input.textChanged.connect(self.update_summary)
+
+        self.invalidate_verification()
+        ### Mayur Wakhare 6-7-2026 undo cctv camera tunnel
+        self.update_undo_state()
+##### Mayur 18-7-2026
+    def on_arc_toggled(self, ref_name, checked):
+        if not checked:
+            return
+            
+        self.selected_arc_reference = ref_name
+        self.distance_label.setText(f"Enter Distance from {ref_name}:")
+        self.distance_label.setVisible(True)
+        self.distance_input.setVisible(True)
+        self.update_summary()
+# Mayur 18-7-2026
+    def _populate_tunnels(self):
+        import os
+        import json
+        
+        self.tunnel_combo.blockSignals(True)
+        self.tunnel_combo.clear()
+        self.available_tunnels.clear()
+
+        if not hasattr(self.parent, '_per_layer_actors'):
+            self.tunnel_combo.blockSignals(False)
+            return
+
+        for layer_path in self.parent._per_layer_actors.keys():
+            layer_name = os.path.basename(layer_path)
+            
+            # Check for merged layer
+            is_merger = False
+            try:
+                merger_jsons = [f for f in os.listdir(layer_path) if f.endswith('.json')]
+                for mj in merger_jsons:
+                    with open(os.path.join(layer_path, mj), 'r', encoding='utf-8') as f:
+                        m_data = json.load(f)
+                    if "merger_points" in m_data:
+                        is_merger = True
+                        for pt in m_data.get("merger_points", []):
+                            def add_cfg(cpath):
+                                if cpath and os.path.exists(cpath):
+                                    with open(cpath, 'r', encoding='utf-8') as cf:
+                                        cdat = json.load(cf)
+                                    t = cdat.get("design", {}).get("tunnel")
+                                    if not t:
+                                        zc = cdat.get("design", {}).get("zero_line_config")
+                                        if zc:
+                                            t = {"id": "fallback_tunnel", "start_km": 0, "start_chainage": 0, "end_km": 0, "end_chainage": 0}
+                                    if t:
+                                        tid = t.get("tunnel_id", t.get("id", "Unknown"))
+                                        disp = f"{tid} ({layer_name})"
+                                        self.available_tunnels.append((t, layer_name, tid))
+                                        self.tunnel_combo.addItem(disp)
+                            add_cfg(pt.get("primary_json_path"))
+                            for lyr in pt.get("layers", []):
+                                add_cfg(lyr.get("json_path"))
+            except Exception:
+                pass
+                
+            if not is_merger:
+                try:
+                    from json_manager import DesignConstructionManager
+                    m_data = DesignConstructionManager.load_master(layer_path)
+                    t = m_data.get("design", {}).get("tunnel")
+                    if not t:
+                        zc = m_data.get("design", {}).get("zero_line_config")
+                        if zc:
+                            t = {"id": "fallback_tunnel", "start_km": 0, "start_chainage": 0, "end_km": 0, "end_chainage": 0}
+                    if t:
+                        tid = t.get("tunnel_id", t.get("id", "Unknown"))
+                        disp = f"{tid} ({layer_name})"
+                        self.available_tunnels.append((t, layer_name, tid))
+                        self.tunnel_combo.addItem(disp)
+                except Exception:
+                    pass
+
+        self.tunnel_combo.blockSignals(False)
+        if self.tunnel_combo.count() > 0:
+            self.tunnel_combo.setCurrentIndex(0)
+            self._on_tunnel_selected(0)
+
+    def _on_tunnel_selected(self, index):
+        if index < 0 or index >= len(self.available_tunnels):
+            return
+            
+        t, layer_name, tid = self.available_tunnels[index]
+        def clean_str(val):
+            return str(val)[:-2] if str(val).endswith(".0") else str(val)
+            
+        self.start_km_input.setText(clean_str(t.get('start_km', '0')))
+        self.start_ch_input.setText(clean_str(t.get('start_chainage', '0')))
+        self.end_km_input.setText(clean_str(t.get('end_km', '0')))
+        self.end_ch_input.setText(clean_str(t.get('end_chainage', '0')))
+        self.invalidate_verification()
+
+    def update_undo_state(self):
+        has_multi = False
+        if hasattr(self.parent, 'cctv_camera_batches'):
+            has_multi = len(self.parent.cctv_camera_batches) > 0
+            
+        self.undo_once_btn.setEnabled(has_multi)
+        self.undo_all_btn.setEnabled(has_multi)
+
+    def on_undo_once_clicked(self):
+        if hasattr(self.parent, 'undo_last_cctv_camera'):
+            success = self.parent.undo_last_cctv_camera()
+            if success:
+                self.update_undo_state()
+
+    def on_undo_all_clicked(self):
+        if hasattr(self.parent, 'undo_all_cctv_cameras'):
+            success = self.parent.undo_all_cctv_cameras()
+            if success:
+                self.update_undo_state()
+                #####################################################################
+### Mayur 18-7-2026 
+    def invalidate_verification(self):
+        self.verified = False
+        self.ok_btn.setEnabled(False)
+        self.arc_rb1.setEnabled(False)
+        self.arc_rb2.setEnabled(False)
+        self.arc_rb3.setEnabled(False)
+        self.summary_label.setText(
+            "• Tunnel Arc Length : --\n"
+            "• Total Dummy Arc Points : --\n"
+            "• Selected ARC Reference : --\n"
+            "• Entered Distance : --"
+        )
+## Mayur 18-7-2026 
+    def verify_chainage(self):
+        try:
+            start_km = float(self.start_km_input.text() or 0.0)
+            start_ch = float(self.start_ch_input.text() or 0.0)
+            end_km = float(self.end_km_input.text() or 0.0)
+            end_ch = float(self.end_ch_input.text() or 0.0)
+            interval = float(self.interval_input.text() or 120.0)
+        except:
+            QMessageBox.warning(self, "Invalid Input", "Please enter numeric values for KM, Chainage, and Interval.")
+            return
+
+        if interval <= 0:
+            QMessageBox.warning(self, "Invalid Interval", "Interval must be greater than 0.")
+            return
+
+        abs_start = start_km * 1000 + start_ch
+        abs_end = end_km * 1000 + end_ch
+
+        idx = self.tunnel_combo.currentIndex()
+        if idx < 0 or idx >= len(self.available_tunnels):
+            QMessageBox.warning(self, "No Tunnel", "No valid tunnel selected for verification.")
+            return
+
+        t_data, layer_name, tid = self.available_tunnels[idx]
+        
+        ts_km = float(t_data.get("start_km", 0.0))
+        ts_ch = float(t_data.get("start_chainage", 0.0))
+        te_km = float(t_data.get("end_km", 0.0))
+        te_ch = float(t_data.get("end_chainage", 0.0))
+        
+        t_start = ts_km * 1000 + ts_ch
+        t_end = te_km * 1000 + te_ch
+
+        if abs_start < t_start or abs_start > t_end or abs_end < t_start or abs_end > t_end:
+            QMessageBox.warning(self, "Out of Bounds", f"Locations must be within tunnel limits ({t_start} - {t_end}).")
+            return
+        if abs_start >= abs_end:
+            QMessageBox.warning(self, "Invalid Range", "Start chainage must be strictly less than End chainage.")
+            return
+
+        self.verified = True
+        self.arc_rb1.setEnabled(True)
+        self.arc_rb2.setEnabled(True)
+        self.arc_rb3.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        
+        # Backend Arc Preparation
+        arc_points_raw = t_data.get("arc_points", [])
+        
+        import numpy as np
+        import math
+        
+        self.tunnel_arc_length = 0.0
+        self.dummy_arc_points = []
+        self.center_dummy_point = None
+        
+        if len(arc_points_raw) >= 3:
+            p1 = np.array(arc_points_raw[0])
+            p2 = np.array(arc_points_raw[1])
+            p3 = np.array(arc_points_raw[2])
+            
+            # Simple circle fit for arc length estimation
+            a = np.linalg.norm(p2 - p1)
+            b = np.linalg.norm(p3 - p2)
+            c = np.linalg.norm(p1 - p3)
+            s = (a + b + c) / 2.0
+            area = math.sqrt(abs(s * (s - a) * (s - b) * (s - c)))
+            if area > 1e-6:
+                R = (a * b * c) / (4.0 * area)
+                # Assuming semicircular tunnel
+                self.tunnel_arc_length = math.pi * R
+            else:
+                self.tunnel_arc_length = a + b
+                
+            num_points = int(self.tunnel_arc_length / 1.0)
+            if num_points > 0:
+                self.dummy_arc_points = [{"id": i, "dist": i * 1.0} for i in range(num_points + 1)]
+                center_idx = len(self.dummy_arc_points) // 2
+                if self.dummy_arc_points:
+                    self.center_dummy_point = self.dummy_arc_points[center_idx]
+                    
+        self.update_summary()
+        QMessageBox.information(self, "Verified", "Chainage locations and interval successfully verified.")
+
+    def update_summary(self):
+        if not getattr(self, 'verified', False):
+            return
+
+        distance = self.distance_input.text() or "0"
+        summary_text = (
+            f"• Tunnel Arc Length : {self.tunnel_arc_length:.2f} m\n"
+            f"• Total Dummy Arc Points : {len(self.dummy_arc_points)}\n"
+            f"• Selected ARC Reference : {self.selected_arc_reference}\n"
+            f"• Entered Distance : {distance} m"
+        )
+        self.summary_label.setText(summary_text)
+#### Mayur 18-7-2026
+    def get_data(self):
+        try:
+            position = "both_roof_corners" # fallback
+            if self.arc_rb1.isChecked():
+                position = "left_roof_corner"
+            elif self.arc_rb3.isChecked():
+                position = "right_roof_corner"
+            elif self.arc_rb2.isChecked():
+                position = "alternate_sides"
+
+            idx = self.tunnel_combo.currentIndex()
+            tunnel_id = "Unknown"
+            layer_name = "Unknown"
+            if 0 <= idx < len(getattr(self, 'available_tunnels', [])):
+                _, layer_name, tunnel_id = self.available_tunnels[idx]
+
+            return {
+                "start_km": float(self.start_km_input.text() or 0.0),
+                "start_chainage": float(self.start_ch_input.text() or 0.0),
+                "end_km": float(self.end_km_input.text() or 0.0),
+                "end_chainage": float(self.end_ch_input.text() or 0.0),
+                "interval": float(self.interval_input.text() or 120.0),
+                "installation_position": position,
+                "arc_reference": self.selected_arc_reference,
+                "distance": float(self.distance_input.text() or 0.0),
+                "tunnel_id": tunnel_id,
+                "layer_name": layer_name
+            }
+        except ValueError:
+            return None
+###############################################################
+######### Mayur Wakhare 4-7-2026 Tunnel Signage Board
+
+class TunnelInfoBoardDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Tunnel Information Board")
+        self.setModal(True)
+        self.setMinimumWidth(380)
+        self.parent = parent
+        self.verified = False
+        
+        self.setStyleSheet("""
+            QDialog { background-color: #F5F5F5; font-family: Segoe UI; }
+            QLabel { font-size: 13px; color: #333; font-weight: bold; }
+            QLineEdit, QTextEdit { padding: 6px; border: 2px solid #BBB; border-radius: 6px; font-size: 13px; background-color: white; }
+            QPushButton { padding: 8px; border-radius: 6px; font-weight: bold; font-size: 13px; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+        
+        title = QLabel("Tunnel Information Board")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1565C0;")
+        layout.addWidget(title)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        
+        # Placement
+        grid.addWidget(QLabel("Placement KM:"), 0, 0)
+        self.km_input = QLineEdit()
+        grid.addWidget(self.km_input, 0, 1)
+
+        grid.addWidget(QLabel("+"), 0, 2)
+        self.ch_input = QLineEdit()
+        grid.addWidget(self.ch_input, 0, 3)
+    #### Mayur Wakhare 5-7-2026 Tunnel information board  
+        # Information Fields
+        from PyQt5.QtWidgets import QTextEdit
+        grid.addWidget(QLabel("Display Text:"), 1, 0, 1, 4)
+        self.text_input = QTextEdit()
+        self.text_input.setPlainText("WELCOME\nDRIVE SAFELY")
+        self.text_input.setMaximumHeight(60)
+        grid.addWidget(self.text_input, 2, 0, 1, 4)
+        
+        grid.addWidget(QLabel("Speed Limit:"), 3, 0, 1, 2)
+        self.speed_limit_input = QLineEdit()
+        self.speed_limit_input.setText("80 km/h")
+        self.speed_limit_input.setPlaceholderText("e.g. 40 km/h, 60 km/h, 80 km/h")
+        grid.addWidget(self.speed_limit_input, 3, 2, 1, 2)
+        
+        layout.addLayout(grid)
+        
+        self.verify_btn = QPushButton("Verify")
+        self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 6px; font-weight: bold; border-radius: 4px;")
+        self.verify_btn.clicked.connect(self.verify_placement)
+        layout.addWidget(self.verify_btn)
+        
+        self.summary_label = QLabel("Please verify placement.")
+        self.summary_label.setStyleSheet("color: #D32F2F; font-size: 12px; font-weight: bold; padding: 5px;")
+        self.summary_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.summary_label)
+        #############################################################################################
+        
+        self.auto_populate()
+        
+        buttons_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+     ##### Mayur Wakhare 5-7-2026  Button Enable disable based on Verification Status. 
+        self.ok_btn.setEnabled(False)
+        ########################################################################################
+        self.ok_btn.clicked.connect(self.accept)
+        buttons_layout.addWidget(self.ok_btn)
+        
+        self.undo_once_btn = QPushButton("Undo Once")
+        self.undo_once_btn.setStyleSheet("background-color: #FF9800; color: white;")
+        self.undo_once_btn.clicked.connect(self.on_undo_once_clicked)
+        buttons_layout.addWidget(self.undo_once_btn)
+
+        self.undo_all_btn = QPushButton("Undo All")
+        self.undo_all_btn.setStyleSheet("background-color: #F44336; color: white;")
+        self.undo_all_btn.clicked.connect(self.on_undo_all_clicked)
+        buttons_layout.addWidget(self.undo_all_btn)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
+        self.cancel_btn.clicked.connect(self.reject)
+        buttons_layout.addWidget(self.cancel_btn)
+        
+        layout.addLayout(buttons_layout)
+     ######### Mayur Wakhare 5-7-2026 tunnel verify button information board   
+        # Connections to invalidate verify
+        self.km_input.textChanged.connect(self.invalidate_verification)
+        self.ch_input.textChanged.connect(self.invalidate_verification)
+        self.text_input.textChanged.connect(self.invalidate_verification)
+        self.speed_limit_input.textChanged.connect(self.invalidate_verification)
+        ## Mayur Wakhare 6-7-2026 undo all tunnel info board 
+        self.update_undo_state()
+
+    def update_undo_state(self):
+        has_multi = False
+        if hasattr(self.parent, 'tunnel_info_board_batches'):
+            has_multi = len(self.parent.tunnel_info_board_batches) > 0
+            
+        self.undo_once_btn.setEnabled(has_multi)
+        self.undo_all_btn.setEnabled(has_multi)
+
+    def on_undo_once_clicked(self):
+        if hasattr(self.parent, 'undo_last_tunnel_info_board'):
+            success = self.parent.undo_last_tunnel_info_board()
+            if success:
+                self.update_undo_state()
+
+    def on_undo_all_clicked(self):
+        if hasattr(self.parent, 'undo_all_tunnel_info_boards'):
+            success = self.parent.undo_all_tunnel_info_boards()
+            if success:
+                self.update_undo_state()
+###########################################################################################
+    def invalidate_verification(self):
+        self.verified = False
+        self.ok_btn.setEnabled(False)
+        self.summary_label.setText("Please verify placement.")
+        self.summary_label.setStyleSheet("color: #D32F2F; font-size: 12px; font-weight: bold; padding: 5px;")
+
+    def verify_placement(self):
+        try:
+            km = float(self.km_input.text() or 0.0)
+            ch = float(self.ch_input.text() or 0.0)
+            text_val = self.text_input.toPlainText().strip()
+            
+            if not text_val:
+                raise ValueError("Display Text is required.")
+                
+            self.verified = True
+            self.ok_btn.setEnabled(True)
+            self.summary_label.setText("✅ Placement Verified")
+            self.summary_label.setStyleSheet("color: #388E3C; font-size: 12px; font-weight: bold; padding: 5px;")
+        except ValueError as e:
+            self.invalidate_verification()
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Verification Failed", str(e) if str(e) else "Please enter valid numeric values.")
+#################################################################################################################
+    def auto_populate(self):
+        tunnel_found = False
+        t_start_km = ""
+        t_start_ch = ""
+        
+        if hasattr(self.parent, 'current_design_layer_path') and self.parent.current_design_layer_path:
+            import os
+            if os.path.exists(self.parent.current_design_layer_path):
+                try:
+                    from json_manager import DesignConstructionManager
+                    m_data = DesignConstructionManager.load_master(self.parent.current_design_layer_path)
+                    t_conf = m_data.get("design", {}).get("tunnel", {})
+                    if t_conf and "start_km" in t_conf:
+                        t_start_km = str(t_conf.get("start_km", ""))
+                        t_start_ch = str(t_conf.get("start_chainage", ""))
+                        tunnel_found = True
+                except Exception:
+                    pass
+
+        if tunnel_found:
+            def clean_str(val):
+                return val[:-2] if val.endswith(".0") else val
+            self.km_input.setText(clean_str(t_start_km))
+            self.ch_input.setText(clean_str(t_start_ch))
+
+    def get_data(self):
+        ######### Mayur Wakhare 5-7-2026 tunnel verify button information board   
+        if not self.verified:
+            return None
+            ##############################################################
+        try:
+            return {
+                "km": float(self.km_input.text() or 0.0),
+            ####### Mayur 5-7-2026 Tunnel information board   
+                "chainage": float(self.ch_input.text() or 0.0),
+                "display_text": self.text_input.toPlainText().strip(),
+                "speed_limit": self.speed_limit_input.text().strip()
+                ##################################################################
             }
         except ValueError:
             return None
 
-            ###############################################################
+class SpeedLimitBoardDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Speed Limit Board")
+        self.setModal(True)
+        self.setMinimumWidth(320)
+        self.parent = parent
+        
+        self.setStyleSheet("""
+            QDialog { background-color: #F5F5F5; font-family: Segoe UI; }
+            QLabel { font-size: 13px; color: #333; font-weight: bold; }
+            QLineEdit { padding: 6px; border: 2px solid #BBB; border-radius: 6px; font-size: 13px; background-color: white; }
+            QPushButton { padding: 8px; border-radius: 6px; font-weight: bold; font-size: 13px; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+        
+        title = QLabel("Speed Limit Board")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1565C0;")
+        layout.addWidget(title)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        grid.addWidget(QLabel("KM:"), 0, 0)
+        self.km_input = QLineEdit()
+        grid.addWidget(self.km_input, 0, 1)
+
+        grid.addWidget(QLabel("+"), 0, 2)
+        self.ch_input = QLineEdit()
+        grid.addWidget(self.ch_input, 0, 3)
+        layout.addLayout(grid)
+        
+        speed_grid = QGridLayout()
+        speed_grid.setSpacing(10)
+        speed_grid.addWidget(QLabel("Speed Limit (km/h):"), 0, 0)
+        self.speed_limit_input = QLineEdit()
+        self.speed_limit_input.setText("80")
+        speed_grid.addWidget(self.speed_limit_input, 0, 1)
+        layout.addLayout(speed_grid)
+        
+        self.auto_populate()
+        
+        buttons_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        self.ok_btn.clicked.connect(self.accept)
+        buttons_layout.addWidget(self.ok_btn)
+        
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
+        self.cancel_btn.clicked.connect(self.reject)
+        buttons_layout.addWidget(self.cancel_btn)
+        
+        layout.addLayout(buttons_layout)
+
+    def auto_populate(self):
+        tunnel_found = False
+        t_start_km = ""
+        t_start_ch = ""
+        if hasattr(self.parent, 'current_design_layer_path') and self.parent.current_design_layer_path:
+            import os
+            if os.path.exists(self.parent.current_design_layer_path):
+                try:
+                    from json_manager import DesignConstructionManager
+                    m_data = DesignConstructionManager.load_master(self.parent.current_design_layer_path)
+                    t_conf = m_data.get("design", {}).get("tunnel", {})
+                    if t_conf and "start_km" in t_conf:
+                        t_start_km = str(t_conf.get("start_km", ""))
+                        t_start_ch = str(t_conf.get("start_chainage", ""))
+                        tunnel_found = True
+                except Exception:
+                    pass
+
+        if tunnel_found:
+            def clean_str(val):
+                return val[:-2] if val.endswith(".0") else val
+            self.km_input.setText(clean_str(t_start_km))
+            self.ch_input.setText(clean_str(t_start_ch))
+
+    def get_data(self):
+        try:
+            return {
+                "km": float(self.km_input.text() or 0.0),
+                "chainage": float(self.ch_input.text() or 0.0),
+                "speed_limit": int(self.speed_limit_input.text() or 80)
+            }
+        except ValueError:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric values for KM/Chainage.")
+            return None
+
+def create_board_dialog_class(class_name, title_text):
+    class CustomBoardDialog(QDialog):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.setWindowTitle(title_text)
+            self.setModal(True)
+            self.setMinimumWidth(320)
+            self.parent = parent
+            
+            self.setStyleSheet("""
+                QDialog { background-color: #F5F5F5; font-family: Segoe UI; }
+                QLabel { font-size: 13px; color: #333; font-weight: bold; }
+                QLineEdit { padding: 6px; border: 2px solid #BBB; border-radius: 6px; font-size: 13px; background-color: white; }
+                QPushButton { padding: 8px; border-radius: 6px; font-weight: bold; font-size: 13px; }
+            """)
+            
+            layout = QVBoxLayout(self)
+            layout.setContentsMargins(20, 20, 20, 20)
+            layout.setSpacing(12)
+            
+            title = QLabel(title_text)
+            title.setAlignment(Qt.AlignCenter)
+            title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1565C0;")
+            layout.addWidget(title)
+            
+            grid = QGridLayout()
+            grid.setSpacing(10)
+            grid.addWidget(QLabel("KM:"), 0, 0)
+            self.km_input = QLineEdit()
+            grid.addWidget(self.km_input, 0, 1)
+            
+            grid.addWidget(QLabel("+"), 0, 2)
+            self.ch_input = QLineEdit()
+            grid.addWidget(self.ch_input, 0, 3)
+            layout.addLayout(grid)
+            
+            self.auto_populate()
+            
+            buttons_layout = QHBoxLayout()
+            self.ok_btn = QPushButton("OK")
+            self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+            self.ok_btn.clicked.connect(self.accept)
+            buttons_layout.addWidget(self.ok_btn)
+            
+            self.cancel_btn = QPushButton("Cancel")
+            self.cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
+            self.cancel_btn.clicked.connect(self.reject)
+            buttons_layout.addWidget(self.cancel_btn)
+            
+            layout.addLayout(buttons_layout)
+            
+        def auto_populate(self):
+            tunnel_found = False
+            t_start_km = ""
+            t_start_ch = ""
+            if hasattr(self.parent, 'current_design_layer_path') and self.parent.current_design_layer_path:
+                import os
+                if os.path.exists(self.parent.current_design_layer_path):
+                    try:
+                        from json_manager import DesignConstructionManager
+                        m_data = DesignConstructionManager.load_master(self.parent.current_design_layer_path)
+                        t_conf = m_data.get("design", {}).get("tunnel", {})
+                        if t_conf and "start_km" in t_conf:
+                            t_start_km = str(t_conf.get("start_km", ""))
+                            t_start_ch = str(t_conf.get("start_chainage", ""))
+                            tunnel_found = True
+                    except Exception:
+                        pass
+            
+            if tunnel_found:
+                def clean_str(val):
+                    return val[:-2] if val.endswith(".0") else val
+                self.km_input.setText(clean_str(t_start_km))
+                self.ch_input.setText(clean_str(t_start_ch))
+                
+        def get_data(self):
+            try:
+                return {
+                    "km": float(self.km_input.text() or 0.0),
+                    "chainage": float(self.ch_input.text() or 0.0)
+                }
+            except ValueError:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric values for KM/Chainage.")
+                return None
+    CustomBoardDialog.__name__ = class_name
+    return CustomBoardDialog
+
+EmergencyExitBoardDialog = create_board_dialog_class("EmergencyExitBoardDialog", "Emergency Exit Board")
+FireExtinguisherDirBoardDialog = create_board_dialog_class("FireExtinguisherDirBoardDialog", "Fire Extinguisher Direction Board")
+CCTVSurveillanceBoardDialog = create_board_dialog_class("CCTVSurveillanceBoardDialog", "CCTV Surveillance Board")
+HeadlightsONBoardDialog = create_board_dialog_class("HeadlightsONBoardDialog", "Headlights ON Board")
+NoOvertakingBoardDialog = create_board_dialog_class("NoOvertakingBoardDialog", "No Overtaking Board")
+ExitDistanceBoardDialog = create_board_dialog_class("ExitDistanceBoardDialog", "Exit Distance Board")
+###############################################################
+###### Mayur Wakhare 6-7-2026 Telephone dailog box tunnel
+class EmergencyTelephoneBoardDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Emergency Telephone Board")
+        self.setModal(True)
+        self.setMinimumWidth(400)
+        self.parent = parent
+        self.verified = False
+        
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F5F5F5;
+                font-family: Segoe UI;
+            }
+            QLabel { font-size: 13px; color: #333; font-weight: bold; }
+            QLineEdit, QDoubleSpinBox {
+                padding: 6px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+                background-color: white;
+            }
+            QPushButton {
+                padding: 8px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Emergency Telephone Board")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #D32F2F;")
+        layout.addWidget(title)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        grid.addWidget(QLabel("Start KM:"), 0, 0)
+        self.start_km_input = QLineEdit()
+        grid.addWidget(self.start_km_input, 0, 1)
+
+        grid.addWidget(QLabel("+"), 0, 2)
+        self.start_ch_input = QLineEdit()
+        grid.addWidget(self.start_ch_input, 0, 3)
+
+        self.verify_btn = QPushButton("Verify")
+        self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 6px; font-weight: bold; border-radius: 4px;")
+        grid.addWidget(self.verify_btn, 1, 0, 1, 4)
+        self.verify_btn.clicked.connect(self.verify_chainage)
+        
+        layout.addLayout(grid)
+
+        # ── Installation Side ──
+        self.side_group = QGroupBox("Installation Side")
+        self.side_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CCC; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
+        self.side_group.setEnabled(False)
+        side_layout = QHBoxLayout(self.side_group)
+        
+        from PyQt5.QtWidgets import QRadioButton
+        self.left_side_rb = QRadioButton("Left")
+        self.right_side_rb = QRadioButton("Right")
+        self.left_side_rb.setChecked(True)
+        
+        side_layout.addWidget(self.left_side_rb)
+        side_layout.addWidget(self.right_side_rb)
+        
+        layout.addWidget(self.side_group)
+
+        # Board Settings
+        settings_grid = QGridLayout()
+        settings_grid.addWidget(QLabel("Board Height from Ground (m):"), 0, 0)
+        self.height_input = QLineEdit("2.3")
+        settings_grid.addWidget(self.height_input, 0, 1)
+
+        settings_grid.addWidget(QLabel("Display Text:"), 1, 0)
+        self.display_text_input = QLineEdit("EMERGENCY TELEPHONE")
+        settings_grid.addWidget(self.display_text_input, 1, 1)
+        
+        layout.addLayout(settings_grid)
+
+        # ── Placement Summary (read-only preview) ──
+        self.summary_label = QLabel("")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setStyleSheet(
+            "background-color: #FFEBEE; border: 1px solid #FFCDD2; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #333; font-weight: normal;"
+        )
+        layout.addWidget(self.summary_label)
+
+        # OK / Cancel
+        buttons_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        self.ok_btn.clicked.connect(self.accept)
+        self.ok_btn.setEnabled(False)
+        buttons_layout.addWidget(self.ok_btn)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
+        self.cancel_btn.clicked.connect(self.reject)
+        buttons_layout.addWidget(self.cancel_btn)
+        
+        layout.addLayout(buttons_layout)
+
+        # ── Auto-populate chainage from tunnel ──
+        tunnel_found = False
+        t_start_km, t_start_ch = "", ""
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        import os
+        if layer_folder and os.path.exists(layer_folder):
+            try:
+                from json_manager import DesignConstructionManager
+                m_data = DesignConstructionManager.load_master(layer_folder)
+                t_conf = m_data.get("design", {}).get("tunnel", {})
+                if t_conf and "start_km" in t_conf:
+                    t_start_km = str(t_conf.get("start_km", ""))
+                    t_start_ch = str(t_conf.get("start_chainage", ""))
+                    tunnel_found = True
+            except Exception:
+                pass
+                
+        if tunnel_found:
+            def clean_str(val):
+                return val[:-2] if val.endswith(".0") else val
+                
+            self.start_km_input.setText(clean_str(t_start_km))
+            self.start_ch_input.setText(clean_str(t_start_ch))
+            
+        # Connections for live update
+        self.start_km_input.textChanged.connect(self.invalidate_verification)
+        self.start_ch_input.textChanged.connect(self.invalidate_verification)
+
+        self.left_side_rb.toggled.connect(self.update_summary)
+        self.right_side_rb.toggled.connect(self.update_summary)
+        
+        self.update_summary()
+
+    def invalidate_verification(self):
+        self.verified = False
+        self.ok_btn.setEnabled(False)
+        self.side_group.setEnabled(False)
+        self.summary_label.setText("Please Verify chainage location first.")
+        self.summary_label.setStyleSheet(
+            "background-color: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #E65100; font-weight: normal;"
+        )
+
+    def verify_chainage(self):
+        from PyQt5.QtWidgets import QMessageBox
+        import os
+        try:
+            s_km = float(self.start_km_input.text() or 0.0)
+            s_ch = float(self.start_ch_input.text() or 0.0)
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric values for KM and Chainage.")
+            return
+
+        start_abs = s_km * 1000 + s_ch
+
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        if layer_folder and os.path.exists(layer_folder):
+            from json_manager import DesignConstructionManager
+            master_data = DesignConstructionManager.load_master(layer_folder)
+            tunnel_data = master_data.get("design", {}).get("tunnel")
+            if tunnel_data:
+                ts_km = tunnel_data.get("start_km", 0.0)
+                ts_ch = tunnel_data.get("start_chainage", 0.0)
+                te_km = tunnel_data.get("end_km", 0.0)
+                te_ch = tunnel_data.get("end_chainage", 0.0)
+                t_start = ts_km * 1000 + ts_ch
+                t_end = te_km * 1000 + te_ch
+
+                if start_abs < t_start or start_abs > t_end:
+                    QMessageBox.warning(self, "Out of Bounds", f"Location {start_abs} is outside tunnel limits ({t_start} - {t_end}).")
+                    return
+        
+        self.verified = True
+        self.side_group.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        self.update_summary()
+        QMessageBox.information(self, "Verified", "Chainage location successfully verified.")
+
+    def update_summary(self):
+        if not self.verified:
+            self.invalidate_verification()
+            return
+            
+        self.summary_label.setStyleSheet(
+            "background-color: #E8F5E9; border: 1px solid #C8E6C9; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #2E7D32; font-weight: bold;"
+        )
+        self.summary_label.setText("✅ Ready to Place\n\n1 Emergency Telephone Board will be created.")
+
+    def get_data(self):
+        if not self.verified:
+            return None
+            
+        try:
+            if self.left_side_rb.isChecked():
+                side = "left"
+            else:
+                side = "right"
+                
+            return {
+                "start_km": float(self.start_km_input.text() or 0.0),
+                "start_chainage": float(self.start_ch_input.text() or 0.0),
+                "display_text": self.display_text_input.text(),
+                "installation_side": side,
+                "height_from_ground": float(self.height_input.text() or 2.3)
+            }
+        except ValueError:
+            return None
+            ############################################################################################
+##### Mayur Wakhare 6-7-2026 tunnel fan 
+class TunnelExhaustFanDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Tunnel Exhaust Fan")
+        self.setModal(True)
+        self.setMinimumWidth(450)
+        self.parent = parent
+        self.verified = False
+        
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F5F5F5;
+                font-family: Segoe UI;
+            }
+            QLabel { font-size: 13px; color: #333; font-weight: bold; }
+            QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox {
+                padding: 6px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+                background-color: white;
+            }
+            QPushButton {
+                padding: 8px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Tunnel Exhaust Fan")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #D32F2F;")
+        layout.addWidget(title)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        grid.addWidget(QLabel("Start KM:"), 0, 0)
+        self.start_km_input = QLineEdit()
+        grid.addWidget(self.start_km_input, 0, 1)
+
+        grid.addWidget(QLabel("+"), 0, 2)
+        self.start_ch_input = QLineEdit()
+        grid.addWidget(self.start_ch_input, 0, 3)
+
+        grid.addWidget(QLabel("End KM:"), 1, 0)
+        self.end_km_input = QLineEdit()
+        grid.addWidget(self.end_km_input, 1, 1)
+
+        grid.addWidget(QLabel("+"), 1, 2)
+        self.end_ch_input = QLineEdit()
+        grid.addWidget(self.end_ch_input, 1, 3)
+
+        self.verify_btn = QPushButton("Verify")
+        self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 6px; font-weight: bold; border-radius: 4px;")
+        grid.addWidget(self.verify_btn, 2, 0, 1, 4)
+        self.verify_btn.clicked.connect(self.verify_chainage)
+        
+        layout.addLayout(grid)
+
+        # Main controls container (enabled after verify)
+        self.controls_widget = QWidget()
+        controls_layout = QVBoxLayout(self.controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        self.controls_widget.setEnabled(False)
+
+        # ── Installation Type ──
+        self.inst_type_group = QGroupBox("Installation Type")
+        self.inst_type_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CCC; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
+        inst_type_layout = QHBoxLayout(self.inst_type_group)
+        
+        from PyQt5.QtWidgets import QRadioButton, QStackedWidget, QSpinBox, QDoubleSpinBox
+        self.pair_inst_rb = QRadioButton("Pair Installation")
+        self.single_inst_rb = QRadioButton("Single Installation")
+        self.pair_inst_rb.setChecked(True)
+        
+        inst_type_layout.addWidget(self.pair_inst_rb)
+        inst_type_layout.addWidget(self.single_inst_rb)
+        controls_layout.addWidget(self.inst_type_group)
+
+        # Stack for Pair / Single settings
+        self.settings_stack = QStackedWidget()
+        
+        # --- Pair Settings ---
+        self.pair_widget = QWidget()
+        pair_layout = QGridLayout(self.pair_widget)
+        
+        pair_layout.addWidget(QLabel("Number of Pairs:"), 0, 0)
+        self.num_pairs_input = QSpinBox()
+        self.num_pairs_input.setRange(1, 100)
+        self.num_pairs_input.setValue(2)
+        pair_layout.addWidget(self.num_pairs_input, 0, 1)
+        
+        pair_layout.addWidget(QLabel("Distance Between Pairs (m):"), 1, 0)
+        self.dist_between_pairs_input = QDoubleSpinBox()
+        self.dist_between_pairs_input.setRange(1.0, 5000.0)
+        self.dist_between_pairs_input.setMaximum(5000.0)
+        self.dist_between_pairs_input.setValue(250.0)
+        pair_layout.addWidget(self.dist_between_pairs_input, 1, 1)
+        
+        pair_layout.addWidget(QLabel("Distance Between Fans in a Pair (m):"), 2, 0)
+        self.dist_in_pair_input = QDoubleSpinBox()
+        self.dist_in_pair_input.setRange(0.5, 50.0)
+        self.dist_in_pair_input.setValue(5.0)
+        pair_layout.addWidget(self.dist_in_pair_input, 2, 1)
+        
+        pair_layout.addWidget(QLabel("Pair Arrangement:"), 3, 0)
+        self.pair_arrange_layout = QHBoxLayout()
+        self.side_by_side_rb = QRadioButton("Side by Side")
+        self.inline_rb = QRadioButton("Inline")
+        self.side_by_side_rb.setChecked(True)
+        self.pair_arrange_layout.addWidget(self.side_by_side_rb)
+        self.pair_arrange_layout.addWidget(self.inline_rb)
+        pair_layout.addLayout(self.pair_arrange_layout, 3, 1)
+        
+        self.settings_stack.addWidget(self.pair_widget)
+        
+        # --- Single Settings ---
+        self.single_widget = QWidget()
+        single_layout = QGridLayout(self.single_widget)
+        
+        single_layout.addWidget(QLabel("Number of Fans:"), 0, 0)
+        self.num_fans_input = QSpinBox()
+        self.num_fans_input.setRange(1, 100)
+        self.num_fans_input.setValue(4)
+        single_layout.addWidget(self.num_fans_input, 0, 1)
+        
+        single_layout.addWidget(QLabel("Spacing Between Fans (m):"), 1, 0)
+        self.spacing_fans_input = QDoubleSpinBox()
+        self.spacing_fans_input.setRange(1.0, 5000.0)
+        self.spacing_fans_input.setMaximum(5000.0)
+        self.spacing_fans_input.setValue(120.0)
+        single_layout.addWidget(self.spacing_fans_input, 1, 1)
+        
+        single_layout.setRowStretch(2, 1) # pad layout
+        
+        self.settings_stack.addWidget(self.single_widget)
+        
+        controls_layout.addWidget(self.settings_stack)
+
+        # ── Global Settings ──
+        global_grid = QGridLayout()
+        
+        global_grid.addWidget(QLabel("Airflow Direction:"), 0, 0)
+        self.airflow_layout = QHBoxLayout()
+        self.towards_exit_rb = QRadioButton("Towards Tunnel Exit")
+        self.towards_entry_rb = QRadioButton("Towards Tunnel Entry")
+        self.towards_exit_rb.setChecked(True)
+        self.airflow_layout.addWidget(self.towards_exit_rb)
+        self.airflow_layout.addWidget(self.towards_entry_rb)
+        global_grid.addLayout(self.airflow_layout, 0, 1)
+        
+        global_grid.addWidget(QLabel("Ceiling Offset (m):"), 1, 0)
+        self.ceiling_offset_input = QDoubleSpinBox()
+        self.ceiling_offset_input.setRange(0.0, 5.0)
+        self.ceiling_offset_input.setSingleStep(0.1)
+        self.ceiling_offset_input.setValue(0.40)
+        global_grid.addWidget(self.ceiling_offset_input, 1, 1)
+
+        controls_layout.addLayout(global_grid)
+        layout.addWidget(self.controls_widget)
+
+        # ── Placement Summary (read-only preview) ──
+        self.summary_label = QLabel("")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setStyleSheet(
+            "background-color: #FFEBEE; border: 1px solid #FFCDD2; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #333; font-weight: normal;"
+        )
+        layout.addWidget(self.summary_label)
+
+        # OK / Cancel / Undo
+        buttons_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        self.ok_btn.clicked.connect(self.accept)
+        self.ok_btn.setEnabled(False)
+        buttons_layout.addWidget(self.ok_btn)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
+        self.cancel_btn.clicked.connect(self.reject)
+        buttons_layout.addWidget(self.cancel_btn)
+        ### Mayur Wakhare 7-7-2026 undo jet fan tunnel
+        self.undo_btn = QPushButton("Undo")
+        self.undo_btn.setStyleSheet("background-color: #FF9800; color: white;")
+        self.undo_btn.clicked.connect(self.on_undo_clicked)
+        # Enable if there's an undo state
+        has_undo_state = bool(getattr(self.parent, 'last_jet_fan_undo_state', None))
+        self.undo_btn.setEnabled(has_undo_state)
+        buttons_layout.addWidget(self.undo_btn)
+       ########################################################################## 
+        layout.addLayout(buttons_layout)
+
+        # ── Auto-populate chainage from tunnel ──
+        tunnel_found = False
+        t_start_km, t_start_ch = "", ""
+        t_end_km, t_end_ch = "", ""
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        import os
+        if layer_folder and os.path.exists(layer_folder):
+            try:
+                from json_manager import DesignConstructionManager
+                m_data = DesignConstructionManager.load_master(layer_folder)
+                t_conf = m_data.get("design", {}).get("tunnel", {})
+                if t_conf and "start_km" in t_conf:
+                    t_start_km = str(t_conf.get("start_km", ""))
+                    t_start_ch = str(t_conf.get("start_chainage", ""))
+                    t_end_km = str(t_conf.get("end_km", ""))
+                    t_end_ch = str(t_conf.get("end_chainage", ""))
+                    tunnel_found = True
+            except Exception:
+                pass
+                
+        if tunnel_found:
+            def clean_str(val):
+                return val[:-2] if val.endswith(".0") else val
+                
+            self.start_km_input.setText(clean_str(t_start_km))
+            self.start_ch_input.setText(clean_str(t_start_ch))
+            self.end_km_input.setText(clean_str(t_end_km))
+            self.end_ch_input.setText(clean_str(t_end_ch))
+            
+        # Connections for live update
+        self.start_km_input.textChanged.connect(self.invalidate_verification)
+        self.start_ch_input.textChanged.connect(self.invalidate_verification)
+        self.end_km_input.textChanged.connect(self.invalidate_verification)
+        self.end_ch_input.textChanged.connect(self.invalidate_verification)
+
+        self.pair_inst_rb.toggled.connect(self.toggle_mode)
+        self.num_pairs_input.valueChanged.connect(self.update_summary)
+        self.num_fans_input.valueChanged.connect(self.update_summary)
+        
+        self.update_summary()
+
+    def toggle_mode(self):
+        if self.pair_inst_rb.isChecked():
+            self.settings_stack.setCurrentIndex(0)
+        else:
+            self.settings_stack.setCurrentIndex(1)
+        self.update_summary()
+
+    def invalidate_verification(self):
+        self.verified = False
+        self.ok_btn.setEnabled(False)
+        self.controls_widget.setEnabled(False)
+        self.summary_label.setText("Please Verify chainage location first.")
+        self.summary_label.setStyleSheet(
+            "background-color: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #E65100; font-weight: normal;"
+        )
+
+    def verify_chainage(self):
+        from PyQt5.QtWidgets import QMessageBox
+        import os
+        try:
+            s_km = float(self.start_km_input.text() or 0.0)
+            s_ch = float(self.start_ch_input.text() or 0.0)
+            e_km = float(self.end_km_input.text() or 0.0)
+            e_ch = float(self.end_ch_input.text() or 0.0)
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric values for KM and Chainage.")
+            return
+
+        start_abs = s_km * 1000 + s_ch
+        end_abs = e_km * 1000 + e_ch
+
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        if layer_folder and os.path.exists(layer_folder):
+            from json_manager import DesignConstructionManager
+            master_data = DesignConstructionManager.load_master(layer_folder)
+            tunnel_data = master_data.get("design", {}).get("tunnel")
+            if tunnel_data:
+                ts_km = tunnel_data.get("start_km", 0.0)
+                ts_ch = tunnel_data.get("start_chainage", 0.0)
+                te_km = tunnel_data.get("end_km", 0.0)
+                te_ch = tunnel_data.get("end_chainage", 0.0)
+                t_start = ts_km * 1000 + ts_ch
+                t_end = te_km * 1000 + te_ch
+
+                if start_abs < t_start or start_abs > t_end or end_abs < t_start or end_abs > t_end:
+                    QMessageBox.warning(self, "Out of Bounds", f"Locations must be within tunnel limits ({t_start} - {t_end}).")
+                    return
+                if start_abs >= end_abs:
+                    QMessageBox.warning(self, "Invalid Range", "Start chainage must be less than End chainage.")
+                    return
+        
+        self.verified = True
+        self.controls_widget.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        self.update_summary()
+        QMessageBox.information(self, "Verified", "Chainage location successfully verified.")
+
+    def update_summary(self):
+        if not self.verified:
+            self.invalidate_verification()
+            return
+            
+        self.summary_label.setStyleSheet(
+            "background-color: #E8F5E9; border: 1px solid #C8E6C9; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #2E7D32; font-weight: bold;"
+        )
+        if self.pair_inst_rb.isChecked():
+            total = self.num_pairs_input.value() * 2
+        else:
+            total = self.num_fans_input.value()
+            
+        self.summary_label.setText(f"✅ Ready to Place\n\nTotal Fans : {total}")
+
+    def get_data(self):
+        if not self.verified:
+            return None
+            
+        try:
+            data = {
+                "start_km": float(self.start_km_input.text() or 0.0),
+                "start_chainage": float(self.start_ch_input.text() or 0.0),
+                "end_km": float(self.end_km_input.text() or 0.0),
+                "end_chainage": float(self.end_ch_input.text() or 0.0),
+                "airflow_direction": "exit" if self.towards_exit_rb.isChecked() else "entry",
+                "ceiling_offset": float(self.ceiling_offset_input.value())
+            }
+            if self.pair_inst_rb.isChecked():
+                data["installation_type"] = "pair"
+                data["num_pairs"] = self.num_pairs_input.value()
+                data["distance_between_pairs"] = self.dist_between_pairs_input.value()
+                data["distance_in_pair"] = self.dist_in_pair_input.value()
+                data["pair_arrangement"] = "side_by_side" if self.side_by_side_rb.isChecked() else "inline"
+            else:
+                data["installation_type"] = "single"
+                data["num_fans"] = self.num_fans_input.value()
+                data["spacing_fans"] = self.spacing_fans_input.value()
+                
+            return data
+        except ValueError:
+            return None
+
+    def on_undo_clicked(self):
+        """Handle Undo button click."""
+        if hasattr(self.parent, 'undo_last_jet_fan_placement'):
+            success = self.parent.undo_last_jet_fan_placement()
+            if success:
+                self.undo_btn.setEnabled(False)
+            ##############################################################################################
+### Mayur Wakhare 7-7-2026 pipe dailog box tunnel
+class WaterPipeDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Water Pipe")
+        self.setModal(True)
+        self.setMinimumWidth(400)
+        self.parent = parent
+        self.verified = False
+        
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F5F5F5;
+                font-family: Segoe UI;
+            }
+            QLabel { font-size: 13px; color: #333; font-weight: bold; }
+            QLineEdit {
+                padding: 6px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+                background-color: white;
+            }
+            QPushButton {
+                padding: 8px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Water Pipe")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #2196F3;")
+        layout.addWidget(title)
+        
+        # ── Tunnel Information Section ──
+        from PyQt5.QtWidgets import QGroupBox, QComboBox, QHBoxLayout
+        tunnel_info_group = QGroupBox("Tunnel Information")
+        tunnel_info_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CCC; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
+        tunnel_info_layout = QHBoxLayout(tunnel_info_group)
+        
+        tunnel_info_layout.addWidget(QLabel("Tunnel ID:"))
+        self.tunnel_combo = QComboBox()
+        self.tunnel_combo.setStyleSheet("padding: 4px; border: 1px solid #BBB; border-radius: 4px;")
+        tunnel_info_layout.addWidget(self.tunnel_combo)
+        layout.addWidget(tunnel_info_group)
+        
+        self.tunnel_combo.currentIndexChanged.connect(self._on_tunnel_selected)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        grid.addWidget(QLabel("Start KM:"), 0, 0)
+        self.start_km_input = QLineEdit()
+        grid.addWidget(self.start_km_input, 0, 1)
+
+        grid.addWidget(QLabel("+"), 0, 2)
+        self.start_ch_input = QLineEdit()
+        grid.addWidget(self.start_ch_input, 0, 3)
+
+        grid.addWidget(QLabel("End KM:"), 1, 0)
+        self.end_km_input = QLineEdit()
+        grid.addWidget(self.end_km_input, 1, 1)
+
+        grid.addWidget(QLabel("+"), 1, 2)
+        self.end_ch_input = QLineEdit()
+        grid.addWidget(self.end_ch_input, 1, 3)
+
+        self.verify_btn = QPushButton("Verify")
+        self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 6px; font-weight: bold; border-radius: 4px;")
+        grid.addWidget(self.verify_btn, 2, 0, 1, 4)
+        self.verify_btn.clicked.connect(self.verify_chainage)
+        
+        layout.addLayout(grid)
+
+        # ── Controls Area (Disabled until verified) ──
+        self.controls_widget = QWidget()
+        controls_layout = QVBoxLayout(self.controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(10)
+        self.controls_widget.setEnabled(False)
+
+        # ── Installation Side ──
+        self.side_group = QGroupBox("Installation Side")
+        self.side_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CCC; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
+        side_layout = QHBoxLayout(self.side_group)
+        
+        from PyQt5.QtWidgets import QRadioButton
+        self.left_side_rb = QRadioButton("Left (Default)")
+        self.right_side_rb = QRadioButton("Right")
+        self.left_side_rb.setChecked(True)
+        
+        side_layout.addWidget(self.left_side_rb)
+        side_layout.addWidget(self.right_side_rb)
+        controls_layout.addWidget(self.side_group)
+
+        # ── Dimensions Grid ──
+        dim_grid = QGridLayout()
+        dim_grid.setSpacing(10)
+
+        dim_grid.addWidget(QLabel("Height From Ground:"), 0, 0)
+        self.height_input = QLineEdit()
+        self.height_input.setText("2.50")
+        dim_grid.addWidget(self.height_input, 0, 1)
+        dim_grid.addWidget(QLabel("m"), 0, 2)
+
+        dim_grid.addWidget(QLabel("Wall Offset:"), 1, 0)
+        self.wall_offset_input = QLineEdit()
+        self.wall_offset_input.setText("0.08")
+        dim_grid.addWidget(self.wall_offset_input, 1, 1)
+        dim_grid.addWidget(QLabel("m"), 1, 2)
+
+        dim_grid.addWidget(QLabel("Pipe Diameter:"), 2, 0)
+        self.diameter_input = QLineEdit()
+      ### Mayur wakhare 7-7-2026 pipe daimeter 
+        self.diameter_input.setText("500")
+        dim_grid.addWidget(self.diameter_input, 2, 1)
+        dim_grid.addWidget(QLabel("mm"), 2, 2)
+
+        controls_layout.addLayout(dim_grid)
+
+        # ── Pipe Color ──
+        self.color_group = QGroupBox("Pipe Color")
+        self.color_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CCC; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
+        color_layout = QHBoxLayout(self.color_group)
+        
+        self.color_red_rb = QRadioButton("Fire Red")
+        self.color_custom_rb = QRadioButton("Custom")
+        self.color_red_rb.setChecked(True)
+        
+        color_layout.addWidget(self.color_red_rb)
+        color_layout.addWidget(self.color_custom_rb)
+        controls_layout.addWidget(self.color_group)
+
+        layout.addWidget(self.controls_widget)
+        
+        # ── Placement Summary (read-only preview) ──
+        self.summary_label = QLabel("Pipe Length : Auto\nTunnel Length : Auto")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setStyleSheet(
+            "background-color: #FFEBEE; border: 1px solid #FFCDD2; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #333; font-weight: normal;"
+        )
+        layout.addWidget(self.summary_label)
+
+        # OK / Cancel / Undo
+        buttons_layout = QHBoxLayout()
+        
+        self.undo_btn = QPushButton("Undo")
+        self.undo_btn.setStyleSheet("background-color: #FF9800; color: white;")
+        self.undo_btn.clicked.connect(self.on_undo_clicked)
+        buttons_layout.addWidget(self.undo_btn)
+        
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        self.ok_btn.clicked.connect(self.accept)
+        self.ok_btn.setEnabled(False)
+        buttons_layout.addWidget(self.ok_btn)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
+        self.cancel_btn.clicked.connect(self.reject)
+        buttons_layout.addWidget(self.cancel_btn)
+        
+        layout.addLayout(buttons_layout)
+
+      ## Mayur 18-7-2026 
+        # ── Auto-populate chainage from tunnels ──
+        self.available_tunnels = []
+        self._populate_tunnels()
+
+        self.start_km_input.textChanged.connect(self.invalidate_verification)
+        self.start_ch_input.textChanged.connect(self.invalidate_verification)
+        self.end_km_input.textChanged.connect(self.invalidate_verification)
+        self.end_ch_input.textChanged.connect(self.invalidate_verification)
+        ####################################################
+### Mayur 18-7-2026 tunnel seperate add
+    def _populate_tunnels(self):
+        import os
+        import json
+        if not self.parent:
+            return
+            
+        active_layer_paths = list(getattr(self.parent, '_per_layer_actors', {}).keys())
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        if layer_folder and os.path.exists(layer_folder) and layer_folder not in active_layer_paths:
+            active_layer_paths.append(layer_folder)
+            
+        subfolder = getattr(self.parent, 'current_subfolder_type', 'designs')
+        config_paths = []
+        
+        for p in active_layer_paths:
+            if not p or not isinstance(p, str) or not os.path.exists(p):
+                continue
+            is_merger = False
+            if "merger" in p.lower() or subfolder == "merger":
+                merger_jsons = [f for f in os.listdir(p) if f.endswith('.json')]
+                for mj in merger_jsons:
+                    try:
+                        with open(os.path.join(p, mj), 'r', encoding='utf-8') as f:
+                            merger_data = json.load(f)
+                        if "merger_points" in merger_data:
+                            is_merger = True
+                            for pt in merger_data.get("merger_points", []):
+                                def add_cfg(json_file_path):
+                                    if json_file_path:
+                                        d_path = os.path.dirname(json_file_path)
+                                        cfg = os.path.join(d_path, 'design_construction_config.json')
+                                        if os.path.exists(cfg) and cfg not in config_paths:
+                                            config_paths.append(cfg)
+                                add_cfg(pt.get("primary_json_path"))
+                                for lyr in pt.get("layers", []):
+                                    add_cfg(lyr.get("json_path"))
+                                
+                    except Exception:
+                        pass
+            if not is_merger:
+                cfg = os.path.join(p, 'design_construction_config.json')
+                if os.path.exists(cfg) and cfg not in config_paths:
+                    config_paths.append(cfg)
+                    
+        found_tunnels = []
+        for cp in config_paths:
+            try:
+                with open(cp, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                tunnel_obj = data.get('design', {}).get('tunnel')
+                if not tunnel_obj:
+                    zero_config = data.get('design', {}).get('zero_line_config')
+                    if zero_config:
+                        tunnel_obj = {
+                            'id': 'fallback_tunnel',
+                            'start_km': zero_config.get('point1', {}).get('from_km', 0),
+                            'start_chainage': zero_config.get('point1', {}).get('from_chainage', 0),
+                            'end_km': zero_config.get('point2', {}).get('to_km', 0),
+                            'end_chainage': zero_config.get('point2', {}).get('to_chainage', 0)
+                        }
+                if tunnel_obj and isinstance(tunnel_obj, dict):
+                    tunnel_obj['source_layer_folder'] = os.path.dirname(cp)
+                    found_tunnels.append(tunnel_obj)
+            except Exception:
+                pass
+                
+        unique_tunnels = {}
+        for t in found_tunnels:
+            tid = t.get('tunnel_id', t.get('id', 'Unknown'))
+            layer_folder = t.get('source_layer_folder', '')
+            layer_name = os.path.basename(layer_folder) if layer_folder else 'Unknown'
+            key = (layer_name, tid)
+            if key not in unique_tunnels:
+                unique_tunnels[key] = (t, layer_name, tid)
+                
+        self.available_tunnels = list(unique_tunnels.values())
+        
+        self.tunnel_combo.blockSignals(True)
+        self.tunnel_combo.clear()
+        for t, layer_name, tid in self.available_tunnels:
+            display_text = f"{tid} ({layer_name})"
+            self.tunnel_combo.addItem(display_text)
+        self.tunnel_combo.blockSignals(False)
+        
+        self.start_km_input.textChanged.connect(self.invalidate_verification)
+        self.start_ch_input.textChanged.connect(self.invalidate_verification)
+        self.end_km_input.textChanged.connect(self.invalidate_verification)
+        self.end_ch_input.textChanged.connect(self.invalidate_verification)
+        
+        if self.available_tunnels:
+            self._on_tunnel_selected(0)
+
+    def _on_tunnel_selected(self, index):
+        if index < 0 or index >= len(self.available_tunnels):
+            return
+        t, layer_name, tid = self.available_tunnels[index]
+        
+        def clean_str(val):
+            val = str(val)
+            return val[:-2] if val.endswith(".0") else val
+            
+        self.start_km_input.setText(clean_str(t.get('start_km', '0')))
+        self.start_ch_input.setText(clean_str(t.get('start_chainage', '0')))
+        self.end_km_input.setText(clean_str(t.get('end_km', '0')))
+        self.end_ch_input.setText(clean_str(t.get('end_chainage', '0')))
+        self.invalidate_verification()
+#####################################################################################################
+    def invalidate_verification(self):
+        self.verified = False
+        self.ok_btn.setEnabled(False)
+        self.controls_widget.setEnabled(False)
+        self.summary_label.setText("Pipe Length : Auto\nTunnel Length : Auto")
+        self.summary_label.setStyleSheet(
+            "background-color: #FFEBEE; border: 1px solid #FFCDD2; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #333; font-weight: normal;"
+        )
+##### Mayur 18-7-2026 
+    def verify_chainage(self):
+        from PyQt5.QtWidgets import QMessageBox
+        import os
+        try:
+            s_km = float(self.start_km_input.text() or 0.0)
+            s_ch = float(self.start_ch_input.text() or 0.0)
+            e_km = float(self.end_km_input.text() or 0.0)
+            e_ch = float(self.end_ch_input.text() or 0.0)
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric values for KM and Chainage.")
+            return
+
+        start_abs = s_km * 1000 + s_ch
+        end_abs = e_km * 1000 + e_ch
+
+        idx = self.tunnel_combo.currentIndex()
+        if idx < 0 or idx >= len(self.available_tunnels):
+            QMessageBox.warning(self, "No Tunnel", "No valid tunnel selected for verification.")
+            return
+
+        t_data, layer_name, tid = self.available_tunnels[idx]
+        
+        ts_km = float(t_data.get("start_km", 0.0))
+        ts_ch = float(t_data.get("start_chainage", 0.0))
+        te_km = float(t_data.get("end_km", 0.0))
+        te_ch = float(t_data.get("end_chainage", 0.0))
+        
+        t_start = ts_km * 1000 + ts_ch
+        t_end = te_km * 1000 + te_ch
+
+        print("\n--- Water Pipe Verify Debug ---")
+        print(f"Selected Tunnel ID: {tid}")
+        print(f"Selected Layer: {layer_name}")
+        print(f"Tunnel Start Chainage: {t_start}")
+        print(f"Tunnel End Chainage: {t_end}")
+        print(f"Verify Range: {t_start} - {t_end}")
+        print(f"Entered Chainage: {start_abs} - {end_abs}")
+        print("-------------------------------\n")
+
+        if start_abs < t_start or start_abs > t_end or end_abs < t_start or end_abs > t_end:
+            QMessageBox.warning(self, "Out of Bounds", f"Locations must be within tunnel limits ({t_start} - {t_end}).")
+            return
+        if start_abs >= end_abs:
+            QMessageBox.warning(self, "Invalid Range", "Start chainage must be less than End chainage.")
+            return
+        
+        self.verified = True
+        self.controls_widget.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        length = end_abs - start_abs
+        self.summary_label.setText(f"Pipe Length : {length:.2f} m\nTunnel Length : {length:.2f} m")
+        self.summary_label.setStyleSheet(
+            "background-color: #E8F5E9; border: 1px solid #C8E6C9; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #2E7D32; font-weight: bold;"
+        )
+        QMessageBox.information(self, "Verified", "Chainage location successfully verified.")
+##### Mayur 18-7-2026
+    def on_undo_clicked(self):
+        """Handle Undo button click using common Asset History Manager."""
+        ## Mayur Wakhare 7-7-2026 pipe undo tunnel 
+        if hasattr(self.parent, 'undo_last_water_pipe'):
+            success = self.parent.undo_last_water_pipe()
+            if success:
+                self.undo_btn.setEnabled(False)
+                ##################################################################################
+        else:
+            print("Undo triggered (Asset History Manager integration pending execution)")
+
+    def get_data(self):
+        if not self.verified:
+            return None
+            
+        try:
+            idx = self.tunnel_combo.currentIndex()
+            t_id = "Unknown"
+            l_name = "Unknown"
+            if idx >= 0 and idx < len(self.available_tunnels):
+                _, l_name, t_id = self.available_tunnels[idx]
+                
+            return {
+                "start_km": float(self.start_km_input.text() or 0.0),
+                "start_chainage": float(self.start_ch_input.text() or 0.0),
+                "end_km": float(self.end_km_input.text() or 0.0),
+                "end_chainage": float(self.end_ch_input.text() or 0.0),
+                "installation_side": "left" if self.left_side_rb.isChecked() else "right",
+                "height_from_ground": float(self.height_input.text() or 2.50),
+                "wall_offset": float(self.wall_offset_input.text() or 0.08),
+                "pipe_diameter": float(self.diameter_input.text() or 500.0),
+                "pipe_color": "fire_red" if self.color_red_rb.isChecked() else "custom",
+                "tunnel_id": t_id,
+                "layer_name": l_name
+            }
+        except ValueError:
+            return None
+
+            #######################################################################################################
+        self.start_chainage_label.setText(start_chainage_val)
+        self.end_km_label.setText(start_km_val)
+        self.end_chainage_label.setText(start_chainage_val)
+
+    # ────────────────────────────────────────────
+    #  Mode & Position Toggling
+    # ────────────────────────────────────────────
+    def _on_mode_toggled(self, is_single_checked):
+        """Toggle between Single Light and Multiple Lights (Coming Soon)."""
+        self.single_light_container.setVisible(is_single_checked)
+        self.coming_soon_label.setVisible(not is_single_checked)
+
+    def _on_position_toggled(self, button, checked):
+        """Enable only the offset field for the selected position radio button."""
+        self.left_offset_input.setEnabled(self.left_radio.isChecked())
+        self.right_offset_input.setEnabled(self.right_radio.isChecked())
+        self.center_offset_input.setEnabled(self.center_radio.isChecked())
+
+        # Clear non-active fields
+        if not self.left_radio.isChecked():
+            self.left_offset_input.clear()
+        if not self.right_radio.isChecked():
+            self.right_offset_input.clear()
+        if not self.center_radio.isChecked():
+            self.center_offset_input.setText("0")
+
+########### Underpass Light Dialog
+class UnderPassLightDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Underpass Light")
+        self.setModal(True)
+        self.setMinimumWidth(450)
+        self.selected_option = "single"
+        self.parent = parent
+        self.verified = False
+        self.multi_verified = False
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F5F5F5;
+                font-family: Segoe UI;
+            }
+            QLabel { font-size: 13px; color: #333; font-weight: bold; }
+            QRadioButton { font-size: 13px; padding: 6px; }
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                border: 2px solid #888;
+                border-radius: 10px;
+                background-color: white;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #4CAF50;
+                border: 2px solid #388E3C;
+            }
+            QLineEdit {
+                padding: 6px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+                background-color: white;
+            }
+            QComboBox {
+                padding: 6px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+                background-color: white;
+            }
+            QPushButton {
+                padding: 8px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+        """)
+
+        ## Mayur Wakhare 3-7-2026 Underpass light Dialog box Design scroll
+        # ── Scroll Area wrapper ──
+        from PyQt5.QtWidgets import QScrollArea
+        from PyQt5.QtCore import Qt as QtCore_Qt
+
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setVerticalScrollBarPolicy(QtCore_Qt.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(QtCore_Qt.ScrollBarAlwaysOff)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #F5F5F5; }")
+        outer_layout.addWidget(scroll_area)
+
+        scroll_container = QWidget()
+        scroll_container.setStyleSheet("background-color: #F5F5F5;")
+        scroll_area.setWidget(scroll_container)
+
+        layout = QVBoxLayout(scroll_container)
+        ###########################################################
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Underpass Light")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1565C0;")
+        layout.addWidget(title)
+
+        # Radio buttons
+        self.single_radio = QRadioButton("Single Light")
+        self.multiple_radio = QRadioButton("Multiple Lights")
+        self.single_radio.setChecked(True)
+
+        self.light_group = QButtonGroup(self)
+        self.light_group.addButton(self.single_radio)
+        self.light_group.addButton(self.multiple_radio)
+
+        layout.addWidget(self.single_radio)
+        layout.addWidget(self.multiple_radio)
+
+        # ── Single Light Controls ──
+        self.single_light_container = QWidget()
+        single_layout = QVBoxLayout(self.single_light_container)
+        single_layout.setContentsMargins(0, 5, 0, 0)
+        single_layout.setSpacing(10)
+
+        # KM, Chainage, Interval grid
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        grid.addWidget(QLabel("KM:"), 0, 0)
+        self.km_input = QLineEdit()
+        self.km_input.setPlaceholderText("e.g. 1")
+        grid.addWidget(self.km_input, 0, 1)
+
+        grid.addWidget(QLabel("Chainage:"), 0, 2)
+        self.chainage_input = QLineEdit()
+        self.chainage_input.setPlaceholderText("e.g. 200")
+        grid.addWidget(self.chainage_input, 0, 3)
+
+        grid.addWidget(QLabel("Interval:"), 1, 0)
+        self.interval_input = QLineEdit()
+        self.interval_input.setText("20")
+        grid.addWidget(self.interval_input, 1, 1)
+
+        single_layout.addLayout(grid)
+
+        # Verify button
+        self.verify_btn = QPushButton("Verify")
+        self.verify_btn.setStyleSheet("background-color: #1E88E5; color: white;")
+        self.verify_btn.clicked.connect(self.verify_chainage)
+        single_layout.addWidget(self.verify_btn)
+
+        # Status label
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: #888; font-size: 11px;")
+        single_layout.addWidget(self.status_label)
+
+        # ── Post-verification controls (visible but disabled initially) ──
+        self.post_verify_container = QWidget()
+        post_layout = QGridLayout(self.post_verify_container)
+        post_layout.setSpacing(10)
+        post_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.arc_label = QLabel("ARC Reference:")
+        post_layout.addWidget(self.arc_label, 0, 0)
+        self.arc_combo = QComboBox()
+        self.arc_combo.addItems(["Left Side (1)", "Top / Center (2)", "Right Side (3)"])
+        self.arc_combo.setEnabled(False)
+        post_layout.addWidget(self.arc_combo, 0, 1)
+
+        self.distance_label = QLabel("Enter Distance from Right Side (1):")
+        post_layout.addWidget(self.distance_label, 1, 0)
+        self.distance_input = QLineEdit()
+        self.distance_input.setPlaceholderText("Enter distance")
+        self.distance_input.setValidator(QDoubleValidator(0.0, 99999.0, 3))
+        self.distance_input.setEnabled(False)
+        post_layout.addWidget(self.distance_input, 1, 1)
+        
+        self.arc_combo.currentTextChanged.connect(
+            lambda text: self.distance_label.setText(f"Enter Distance from {text}:")
+        )
+
+        single_layout.addWidget(self.post_verify_container)
+
+        layout.addWidget(self.single_light_container)
+
+        # ── Multiple Lights Controls ──
+        self.multiple_light_container = QWidget()
+        multi_layout = QVBoxLayout(self.multiple_light_container)
+        multi_layout.setContentsMargins(0, 5, 0, 0)
+        multi_layout.setSpacing(10)
+
+        multi_grid = QGridLayout()
+        
+        multi_grid.addWidget(QLabel("Start KM:"), 0, 0)
+        self.multi_start_km_input = QLineEdit()
+        self.multi_start_km_input.setPlaceholderText("e.g. 101")
+        multi_grid.addWidget(self.multi_start_km_input, 0, 1)
+
+        multi_grid.addWidget(QLabel("+"), 0, 2)
+        self.multi_start_chainage_input = QLineEdit()
+        self.multi_start_chainage_input.setPlaceholderText("e.g. 0")
+        multi_grid.addWidget(self.multi_start_chainage_input, 0, 3)
+
+        multi_grid.addWidget(QLabel("End KM:"), 1, 0)
+        self.multi_end_km_input = QLineEdit()
+        self.multi_end_km_input.setPlaceholderText("e.g. 101")
+        multi_grid.addWidget(self.multi_end_km_input, 1, 1)
+
+        multi_grid.addWidget(QLabel("+"), 1, 2)
+        self.multi_end_chainage_input = QLineEdit()
+        self.multi_end_chainage_input.setPlaceholderText("e.g. 200")
+        multi_grid.addWidget(self.multi_end_chainage_input, 1, 3)
+
+        multi_grid.addWidget(QLabel("Interval (m):"), 2, 0)
+        self.multi_interval_input = QLineEdit()
+        self.multi_interval_input.setText("20")
+        multi_grid.addWidget(self.multi_interval_input, 2, 1)
+
+        multi_layout.addLayout(multi_grid)
+
+        self.multi_verify_btn = QPushButton("Verify")
+        self.multi_verify_btn.setStyleSheet("background-color: #1E88E5; color: white;")
+        self.multi_verify_btn.clicked.connect(self.verify_multi_chainage)
+        multi_layout.addWidget(self.multi_verify_btn)
+
+        self.multi_status_label = QLabel("")
+        self.multi_status_label.setStyleSheet("color: #888; font-size: 11px;")
+        multi_layout.addWidget(self.multi_status_label)
+
+        self.multi_post_verify_container = QWidget()
+        multi_post_layout = QGridLayout(self.multi_post_verify_container)
+        multi_post_layout.setSpacing(10)
+        multi_post_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.multi_arc_label = QLabel("ARC Reference:")
+        multi_post_layout.addWidget(self.multi_arc_label, 0, 0)
+        import PyQt5.QtWidgets as _qt_widgets
+        
+        self.multi_arc_checkbox_layout = _qt_widgets.QVBoxLayout()
+        self.multi_arc_cb1 = _qt_widgets.QCheckBox("Left Side (1)")
+        self.multi_arc_cb2 = _qt_widgets.QCheckBox("Top / Center (2)")
+        self.multi_arc_cb3 = _qt_widgets.QCheckBox("Right Side (3)")
+        self.multi_arc_cb1.setEnabled(False)
+        self.multi_arc_cb2.setEnabled(False)
+        self.multi_arc_cb3.setEnabled(False)
+        self.multi_arc_checkbox_layout.addWidget(self.multi_arc_cb1)
+        self.multi_arc_checkbox_layout.addWidget(self.multi_arc_cb2)
+        self.multi_arc_checkbox_layout.addWidget(self.multi_arc_cb3)
+        multi_post_layout.addLayout(self.multi_arc_checkbox_layout, 0, 1)
+
+        self.multi_distance_container = _qt_widgets.QWidget()
+        self.multi_distance_layout = _qt_widgets.QVBoxLayout(self.multi_distance_container)
+        self.multi_distance_layout.setContentsMargins(0, 0, 0, 0)
+        multi_post_layout.addWidget(self.multi_distance_container, 1, 0, 1, 2)
+
+        self.multi_distance_inputs = {}
+
+        self.multi_arc_cb1.stateChanged.connect(lambda state: self.update_multi_distance_inputs("Right Side (1)", state))
+        self.multi_arc_cb2.stateChanged.connect(lambda state: self.update_multi_distance_inputs("Top / Center (2)", state))
+        self.multi_arc_cb3.stateChanged.connect(lambda state: self.update_multi_distance_inputs("Left Side (3)", state))
+
+        multi_layout.addWidget(self.multi_post_verify_container)
+        ### Mayur Wakhare 3-7-2026 Underpass dialog box automatic value put for start km and end km
+        # ── Placement Summary (read-only preview) ──
+        self.multi_summary_label = QLabel("")
+        self.multi_summary_label.setWordWrap(True)
+        self.multi_summary_label.setStyleSheet(
+            "background-color: #E8F5E9; border: 1px solid #A5D6A7; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #333; font-weight: normal;"
+        )
+        self.multi_summary_label.setVisible(False)
+        multi_layout.addWidget(self.multi_summary_label)
+
+        # Connect input changes to auto-update summary
+        self.multi_start_km_input.textChanged.connect(self._update_multi_summary)
+        self.multi_start_chainage_input.textChanged.connect(self._update_multi_summary)
+        self.multi_end_km_input.textChanged.connect(self._update_multi_summary)
+        self.multi_end_chainage_input.textChanged.connect(self._update_multi_summary)
+        self.multi_interval_input.textChanged.connect(self._update_multi_summary)
+        self.multi_arc_cb1.stateChanged.connect(lambda _: self._update_multi_summary())
+        self.multi_arc_cb2.stateChanged.connect(lambda _: self._update_multi_summary())
+        self.multi_arc_cb3.stateChanged.connect(lambda _: self._update_multi_summary())
+        ##########################################################
+
+        self.multiple_light_container.setVisible(False)
+        layout.addWidget(self.multiple_light_container)
+
+        # ── OK / Cancel / Undo ──
+        buttons_layout = QHBoxLayout()
+
+        ok_btn = QPushButton("OK")
+        ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        ok_btn.clicked.connect(self.on_ok_clicked)
+        buttons_layout.addWidget(ok_btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
+        cancel_btn.clicked.connect(self.reject)
+        buttons_layout.addWidget(cancel_btn)
+        
+        self.undo_btn = QPushButton("Undo")
+        self.undo_btn.setStyleSheet("background-color: #FF9800; color: white;")
+        self.undo_btn.clicked.connect(self.on_undo_clicked)
+        buttons_layout.addWidget(self.undo_btn)
+
+        self.undo_once_btn = QPushButton("Undo Once")
+        self.undo_once_btn.setStyleSheet("background-color: #FF9800; color: white;")
+        self.undo_once_btn.clicked.connect(self.on_undo_once_clicked)
+        buttons_layout.addWidget(self.undo_once_btn)
+
+        self.undo_all_btn = QPushButton("Undo All")
+        self.undo_all_btn.setStyleSheet("background-color: #F44336; color: white;")
+        self.undo_all_btn.clicked.connect(self.on_undo_all_clicked)
+        buttons_layout.addWidget(self.undo_all_btn)
+
+        layout.addLayout(buttons_layout)
+        
+        # Connect radio toggle
+        self.single_radio.toggled.connect(self.on_mode_toggled)
+        
+        self.update_undo_state()
+        ## Mayur Wakhare 3-7-2026 Underpass light automatic value put up from design file
+        # ── Auto-populate chainage from underpass ──
+        underpass_found = False
+        t_start_km, t_start_ch, t_end_km, t_end_ch = "", "", "", ""
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        import os
+        if layer_folder and os.path.exists(layer_folder):
+            try:
+                from json_manager import DesignConstructionManager
+                m_data = DesignConstructionManager.load_master(layer_folder)
+                # For underpasses, data might be a list
+                up_list = m_data.get("under_passes", [])
+                ref_ups = m_data.get("reference_assets", {}).get("under_pass", [])
+                if isinstance(ref_ups, list): up_list.extend(ref_ups)
+                elif isinstance(ref_ups, dict): up_list.append(ref_ups)
+                t_conf = up_list[0] if up_list else {}
+                if t_conf and "start_km" in t_conf:
+                    t_start_km = str(t_conf.get("start_km", ""))
+                    t_start_ch = str(t_conf.get("start_chainage", ""))
+                    t_end_km = str(t_conf.get("end_km", ""))
+                    t_end_ch = str(t_conf.get("end_chainage", ""))
+                    underpass_found = True
+            except Exception:
+                pass
+                
+        if underpass_found:
+            # Set integer part if it ends with .0 for cleaner display
+            def clean_str(val):
+                return val[:-2] if val.endswith(".0") else val
+                
+            self.km_input.setText(clean_str(t_start_km))
+            self.chainage_input.setText(clean_str(t_start_ch))
+            self.multi_start_km_input.setText(clean_str(t_start_km))
+            self.multi_start_chainage_input.setText(clean_str(t_start_ch))
+            self.multi_end_km_input.setText(clean_str(t_end_km))
+            self.multi_end_chainage_input.setText(clean_str(t_end_ch))
+        else:
+            self.status_label.setText("No active underpass found.")
+            self.multi_status_label.setText("No active underpass found.")
+#########################################################################
+        self.on_mode_toggled(self.single_radio.isChecked())
+
+    def update_undo_state(self):
+        # Single Light Undo
+        has_lights = False
+        if hasattr(self.parent, 'underpass_light_groups') and self.parent.underpass_light_groups:
+            has_lights = True
+            
+        self.undo_btn.setEnabled(has_lights)
+        if not has_lights:
+            self.undo_btn.setToolTip("No Underpass Lights to undo.")
+        else:
+            self.undo_btn.setToolTip("Undo the most recently placed Underpass Light.")
+            
+        # Multiple Lights Undo
+        has_multi = False
+        if hasattr(self.parent, 'multiple_underpass_light_batches') and self.parent.multiple_underpass_light_batches:
+            has_multi = True
+            
+        self.undo_once_btn.setEnabled(has_multi)
+        self.undo_all_btn.setEnabled(has_multi)
+        if not has_multi:
+            self.undo_once_btn.setToolTip("No Multiple Underpass Lights to undo.")
+            self.undo_all_btn.setToolTip("No Multiple Underpass Lights to undo.")
+        else:
+            self.undo_once_btn.setToolTip("Undo the most recently placed light from the current Multiple Lights placement.")
+            self.undo_all_btn.setToolTip("Undo ALL lights from the most recent Multiple Lights placement.")
+
+    def on_undo_clicked(self):
+        if hasattr(self.parent, 'undo_last_underpass_light'):
+            success = self.parent.undo_last_underpass_light()
+            if success:
+                self.update_undo_state()
+            else:
+                QMessageBox.information(self, "Undo", "No Underpass Lights to undo.")
+
+    def on_undo_once_clicked(self):
+        if hasattr(self.parent, 'undo_last_multiple_underpass_light'):
+            success = self.parent.undo_last_multiple_underpass_light()
+            if success:
+                self.update_undo_state()
+            else:
+                QMessageBox.information(self, "Undo", "No Multiple Underpass Lights to undo.")
+
+    def on_undo_all_clicked(self):
+        if hasattr(self.parent, 'undo_all_multiple_underpass_lights'):
+            success = self.parent.undo_all_multiple_underpass_lights()
+            if success:
+                self.update_undo_state()
+            else:
+                QMessageBox.information(self, "Undo", "No Multiple Underpass Lights to undo.")
+
+    def update_multi_distance_inputs(self, name, state):
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QLineEdit
+        from PyQt5.QtGui import QDoubleValidator
+
+        if state == Qt.Checked or state == 2:  # 2 is Qt.Checked
+            if name not in self.multi_distance_inputs:
+                row_widget = QWidget()
+                row_layout = QHBoxLayout(row_widget)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                
+                label = QLabel(f"Enter Distance from {name}:")
+                input_field = QLineEdit()
+                input_field.setPlaceholderText("Enter distance")
+                input_field.setValidator(QDoubleValidator(0.0, 99999.0, 3))
+                
+                row_layout.addWidget(label)
+                row_layout.addWidget(input_field)
+                
+                self.multi_distance_layout.addWidget(row_widget)
+                self.multi_distance_inputs[name] = {"widget": row_widget, "input": input_field}
+                ## Mayur Wakhare 3-7-2026 Underpass light dailog box
+                input_field.textChanged.connect(self._update_multi_summary)
+                #################################################
+        else:
+            if name in self.multi_distance_inputs:
+                data = self.multi_distance_inputs.pop(name)
+                data["widget"].setParent(None)
+                data["widget"].deleteLater()
+
+    def on_mode_toggled(self, checked):
+        self.single_light_container.setVisible(checked)
+        self.multiple_light_container.setVisible(not checked)
+        self.undo_btn.setVisible(checked)
+        self.undo_once_btn.setVisible(not checked)
+        self.undo_all_btn.setVisible(not checked)
+        self.update_undo_state()
+
+    def verify_chainage(self):
+        try:
+            km = float(self.km_input.text() or 0.0)
+            ch = float(self.chainage_input.text() or 0.0)
+            interval = float(self.interval_input.text() or 0.0)
+        except:
+            QMessageBox.warning(self, "Invalid Input", "Please enter numeric values for KM, Chainage, and Interval.")
+            return
+
+        if interval <= 0:
+            QMessageBox.warning(self, "Invalid Interval", "Interval must be greater than 0.")
+            return
+
+        abs_chainage = km * 1000 + ch
+
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        if not layer_folder or not os.path.exists(layer_folder):
+            QMessageBox.warning(self, "Error", "No active design layer folder found to verify.")
+            return
+
+        try:
+            j = DesignConstructionManager.load_baseline_from_unified(layer_folder, 'road_surface_baseline')
+            if not j:
+                j = DesignConstructionManager.load_baseline_from_unified(layer_folder, 'surface_baseline')
+
+            if not j:
+                QMessageBox.warning(self, "No Baseline Data", "No surface or road surface baseline found in design layer.")
+                return
+
+            global_start_offset = 0.0
+            if hasattr(self.parent, '_get_global_start_offset'):
+                global_start_offset = self.parent._get_global_start_offset(layer_folder)
+            else:
+                polylines = j.get("polylines", [])
+                if polylines:
+                    start_str = polylines[0].get("start_chainage_str", "")
+                    if start_str:
+                        start_str = start_str.replace(" ", "")
+                        if "+" in start_str:
+                            parts = start_str.split("+")
+                            global_start_offset = float(parts[0]) * 1000 + float(parts[1])
+                        else:
+                            global_start_offset = float(start_str)
+
+            chs = []
+            for poly in j.get("polylines", []):
+                for pt in poly.get("points", []):
+                    chs.append(pt['chainage_m'] + global_start_offset)
+            if not chs:
+                QMessageBox.warning(self, "No Points", "Baseline has no chainage points.")
+                return
+
+            min_ch = min(chs)
+            max_ch = max(chs)
+
+            if abs_chainage < min_ch or abs_chainage > max_ch:
+                self.verified = False
+                self.arc_combo.setEnabled(False)
+                self.distance_input.setEnabled(False)
+                self.status_label.setText("Verification failed — chainage out of range.")
+                self.status_label.setStyleSheet("color: red; font-size: 11px;")
+                QMessageBox.warning(self, "Out of Range",
+                    f"Chainage is out of design layer range.\n"
+                    f"Range: KM {min_ch//1000:.0f} + {min_ch%1000:.2f}m  to  KM {max_ch//1000:.0f} + {max_ch%1000:.2f}m")
+            else:
+                self.verified = True
+                self.arc_combo.setEnabled(True)
+                self.distance_input.setEnabled(True)
+                self.status_label.setText("Verification successful!")
+                self.status_label.setStyleSheet("color: green; font-size: 11px;")
+        except Exception as e:
+            self.verified = False
+            self.arc_combo.setEnabled(False)
+            self.distance_input.setEnabled(False)
+            self.status_label.setText(f"Verification error.")
+            self.status_label.setStyleSheet("color: red; font-size: 11px;")
+            QMessageBox.warning(self, "Error", f"Failed to verify chainage: {e}")
+
+    def verify_multi_chainage(self):
+        try:
+            start_km = float(self.multi_start_km_input.text() or 0.0)
+            start_ch = float(self.multi_start_chainage_input.text() or 0.0)
+            end_km = float(self.multi_end_km_input.text() or 0.0)
+            end_ch = float(self.multi_end_chainage_input.text() or 0.0)
+            interval = float(self.multi_interval_input.text() or 20.0)
+        except:
+            QMessageBox.warning(self, "Invalid Input", "Please enter numeric values for KM, Chainage, and Interval.")
+            return
+
+        if interval <= 0:
+            QMessageBox.warning(self, "Invalid Interval", "Interval must be greater than 0.")
+            return
+
+        abs_start = start_km * 1000 + start_ch
+        abs_end = end_km * 1000 + end_ch
+
+        if abs_start >= abs_end:
+            QMessageBox.warning(self, "Invalid Range", "Start chainage must be strictly less than End chainage.")
+            return
+
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        if not layer_folder or not os.path.exists(layer_folder):
+            QMessageBox.warning(self, "Error", "No active design layer folder found to verify.")
+            return
+
+        try:
+            j = DesignConstructionManager.load_baseline_from_unified(layer_folder, 'road_surface_baseline')
+            if not j:
+                j = DesignConstructionManager.load_baseline_from_unified(layer_folder, 'surface_baseline')
+
+            if not j:
+                QMessageBox.warning(self, "No Baseline Data", "No surface or road surface baseline found in design layer.")
+                return
+
+            global_start_offset = 0.0
+            if hasattr(self.parent, '_get_global_start_offset'):
+                global_start_offset = self.parent._get_global_start_offset(layer_folder)
+            else:
+                polylines = j.get("polylines", [])
+                if polylines:
+                    start_str = polylines[0].get("start_chainage_str", "")
+                    if start_str:
+                        start_str = start_str.replace(" ", "")
+                        if "+" in start_str:
+                            parts = start_str.split("+")
+                            global_start_offset = float(parts[0]) * 1000 + float(parts[1])
+                        else:
+                            global_start_offset = float(start_str)
+
+            chs = []
+            for poly in j.get("polylines", []):
+                for pt in poly.get("points", []):
+                    chs.append(pt['chainage_m'] + global_start_offset)
+            if not chs:
+                QMessageBox.warning(self, "No Points", "Baseline has no chainage points.")
+                return
+
+            min_ch = min(chs)
+            max_ch = max(chs)
+
+            if abs_start < min_ch or abs_end > max_ch:
+                self.multi_verified = False
+                self.multi_arc_cb1.setEnabled(False)
+                self.multi_arc_cb2.setEnabled(False)
+                self.multi_arc_cb3.setEnabled(False)
+                self.multi_status_label.setText("Verification failed — range out of bounds.")
+                self.multi_status_label.setStyleSheet("color: red; font-size: 11px;")
+                QMessageBox.warning(self, "Out of Range",
+                    f"Selected range is out of design layer bounds.\n"
+                    f"Layer Range: KM {min_ch//1000:.0f} + {min_ch%1000:.2f}m  to  KM {max_ch//1000:.0f} + {max_ch%1000:.2f}m")
+            else:
+                self.multi_verified = True
+                self.multi_arc_cb1.setEnabled(True)
+                self.multi_arc_cb2.setEnabled(True)
+                self.multi_arc_cb3.setEnabled(True)
+                self.multi_status_label.setText("Verification successful!")
+                self.multi_status_label.setStyleSheet("color: green; font-size: 11px;")
+                ### Mayur Wakhare 3-7-2026 Underpass light dailog box
+                self._update_multi_summary()
+                #####################################################
+        except Exception as e:
+            self.multi_verified = False
+            self.multi_arc_cb1.setEnabled(False)
+            self.multi_arc_cb2.setEnabled(False)
+            self.multi_arc_cb3.setEnabled(False)
+            self.multi_status_label.setText(f"Verification error.")
+            self.multi_status_label.setStyleSheet("color: red; font-size: 11px;")
+            QMessageBox.warning(self, "Error", f"Failed to verify chainage: {e}")
+            ## Mayur Wakhare 3-7-2026 underpass light dailog box how many lights are required for these underpass 
+            self._update_multi_summary()
+
+    def _update_multi_summary(self):
+        """Calculate and display the Multiple Lights placement preview.
+        Uses the exact same boundary-skipping interval logic as _place_multiple_underpass_lights:
+            current_abs = start_abs + interval
+            while current_abs < end_abs - 0.001: place; current_abs += interval
+        """
+        zero_html = (
+            "<b>Placement Summary</b><br><br>"
+            "Total Underpass Lights : 0"
+        )
+
+        # If not verified, show zero and hide details
+        if not self.multi_verified:
+            self.multi_summary_label.setText(zero_html)
+            self.multi_summary_label.setVisible(True)
+            return
+
+        try:
+            start_km = float(self.multi_start_km_input.text() or 0.0)
+            start_ch = float(self.multi_start_chainage_input.text() or 0.0)
+            end_km = float(self.multi_end_km_input.text() or 0.0)
+            end_ch = float(self.multi_end_chainage_input.text() or 0.0)
+            interval = float(self.multi_interval_input.text() or 20.0)
+        except (ValueError, TypeError):
+            self.multi_summary_label.setText(zero_html)
+            self.multi_summary_label.setVisible(True)
+            return
+
+        if interval <= 0:
+            self.multi_summary_label.setText(zero_html)
+            self.multi_summary_label.setVisible(True)
+            return
+
+        start_abs = start_km * 1000 + start_ch
+        end_abs = end_km * 1000 + end_ch
+
+        # Collect selected ARC references (same structure as multi_configs in get_data)
+        selected_arcs = []
+        for name, d in self.multi_distance_inputs.items():
+            arc_ref = int(name.split("(")[-1].replace(")", ""))
+            selected_arcs.append({"name": name, "arc_reference": arc_ref})
+
+        if not selected_arcs or start_abs >= end_abs:
+            self.multi_summary_label.setText(zero_html)
+            self.multi_summary_label.setVisible(True)
+            return
+
+        # ── Exact same loop as _place_multiple_underpass_lights ──
+        # current_abs = start_abs + interval
+        # while current_abs < end_abs - 0.001: count position; current_abs += interval
+        current_abs = start_abs + interval
+        chainage_positions = []
+        while current_abs < end_abs - 0.001:
+            chainage_positions.append(current_abs)
+            current_abs += interval
+
+        num_positions = len(chainage_positions)
+        num_arcs = len(selected_arcs)
+        total_lights = num_positions * num_arcs
+
+        if total_lights == 0:
+            self.multi_summary_label.setText(zero_html)
+            self.multi_summary_label.setVisible(True)
+            return
+
+        # Sort: Right Side (1), Top / Center (2), Left Side (3)
+        arc_order = {1: 0, 2: 1, 3: 2}
+        selected_arcs_sorted = sorted(selected_arcs, key=lambda a: arc_order.get(a["arc_reference"], 99))
+
+        # Estimated Covered Length = last placed position - first placed position
+        covered_length = chainage_positions[-1] - chainage_positions[0]
+
+        # Build HTML
+        lines = ["<b>Placement Summary</b><br>"]
+        lines.append(f"<br>Total Underpass Lights : <b>{total_lights}</b><br>")
+        lines.append("<br><b>Estimated Placement</b><br><br>")
+        for arc in selected_arcs_sorted:
+            lines.append(f"{arc['name']} : {num_positions}<br>")
+        lines.append(f"<br>Estimated Covered Length : <b>{covered_length:.0f} m</b>")
+
+        self.multi_summary_label.setText("".join(lines))
+        self.multi_summary_label.setVisible(True)
+
+        #########################################################
+
+    def on_ok_clicked(self):
+        if self.single_radio.isChecked():
+            self.selected_option = "single"
+            # Validate single light inputs before accepting
+            if not self.verified:
+                QMessageBox.warning(self, "Not Verified", "Please verify the chainage first.")
+                return
+            distance_text = self.distance_input.text().strip()
+            if not distance_text:
+                QMessageBox.warning(self, "Missing Distance", "Please enter a Distance / Length value.")
+                return
+            try:
+                dist_val = float(distance_text)
+                if dist_val < 0:
+                    QMessageBox.warning(self, "Invalid Distance", "Distance must be a positive value.")
+                    return
+            except ValueError:
+                QMessageBox.warning(self, "Invalid Distance", "Please enter a valid numeric distance.")
+                return
+            self.accept()
+        else:
+            self.selected_option = "multiple"
+            if not self.multi_verified:
+                QMessageBox.warning(self, "Not Verified", "Please verify the chainage range first.")
+                return
+            if not self.multi_distance_inputs:
+                QMessageBox.warning(self, "No Selection", "Please select at least one ARC Reference.")
+                return
+            for name, d in self.multi_distance_inputs.items():
+                distance_text = d["input"].text().strip()
+                if not distance_text:
+                    QMessageBox.warning(self, "Missing Distance", f"Please enter a distance for {name}.")
+                    return
+                try:
+                    dist_val = float(distance_text)
+                    if dist_val < 0:
+                        QMessageBox.warning(self, "Invalid Distance", f"Distance for {name} must be a positive value.")
+                        return
+                except ValueError:
+                    QMessageBox.warning(self, "Invalid Distance", f"Please enter a valid numeric distance for {name}.")
+                    return
+            self.accept()
+
+    def get_data(self):
+        data = {"light_mode": self.selected_option}
+        if self.selected_option == "single":
+            data["km"] = float(self.km_input.text() or 0.0)
+            data["chainage"] = float(self.chainage_input.text() or 0.0)
+            data["interval"] = float(self.interval_input.text() or 20)
+            data["verified"] = self.verified
+            if self.verified:
+                text = self.arc_combo.currentText()
+                data["arc_reference"] = int(text.split("(")[-1].replace(")", ""))
+                data["distance"] = float(self.distance_input.text() or 0.0)
+        else:
+            data["start_km"] = float(self.multi_start_km_input.text() or 0.0)
+            data["start_chainage"] = float(self.multi_start_chainage_input.text() or 0.0)
+            data["end_km"] = float(self.multi_end_km_input.text() or 0.0)
+            data["end_chainage"] = float(self.multi_end_chainage_input.text() or 0.0)
+            data["interval"] = float(self.multi_interval_input.text() or 20.0)
+            data["verified"] = self.multi_verified
+            if self.multi_verified:
+                configs = []
+                for name, d in self.multi_distance_inputs.items():
+                    arc_ref = int(name.split("(")[-1].replace(")", ""))
+                    dist = float(d["input"].text() or 0.0)
+                    configs.append({"arc_reference": arc_ref, "distance": dist})
+                data["multi_configs"] = configs
+        return data
+#####################################################################
+
+
+### Mayur Wakhare 14-7-2026 underpass lights 
+class UnderpassLightDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Underpass Light")
+        self.setModal(True)
+        self.setMinimumWidth(450)
+        self.setMinimumHeight(600)
+        self.parent = parent
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F5F5F5;
+                font-family: Segoe UI;
+            }
+            QLabel { font-size: 13px; color: #333; font-weight: bold; }
+            QRadioButton { font-size: 13px; padding: 6px; }
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                border: 2px solid #888;
+                border-radius: 10px;
+                background-color: white;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #4CAF50;
+                border: 2px solid #388E3C;
+            }
+            QLineEdit {
+                padding: 6px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+                background-color: white;
+            }
+            QComboBox {
+                padding: 6px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+                background-color: white;
+            }
+            QPushButton {
+                padding: 8px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QGroupBox {
+                border: 1px solid #CCC;
+                border-radius: 6px;
+                margin-top: 15px;
+                font-weight: bold;
+                color: #1565C0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 3px 0 3px;
+            }
+        """)
+
+        from PyQt5.QtWidgets import QScrollArea, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QRadioButton, QButtonGroup, QLineEdit, QGroupBox, QLabel, QComboBox, QPushButton, QSpacerItem, QSizePolicy
+        from PyQt5.QtGui import QDoubleValidator
+        from PyQt5.QtCore import Qt as QtCore_Qt
+
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setVerticalScrollBarPolicy(QtCore_Qt.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(QtCore_Qt.ScrollBarAlwaysOff)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #F5F5F5; }")
+        outer_layout.addWidget(scroll_area)
+
+        scroll_container = QWidget()
+        scroll_container.setStyleSheet("background-color: #F5F5F5;")
+        scroll_area.setWidget(scroll_container)
+
+        layout = QVBoxLayout(scroll_container)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
+
+        title = QLabel("Underpass Light")
+        title.setAlignment(QtCore_Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1565C0; margin-bottom: 10px;")
+        layout.addWidget(title)
+
+        # ── Underpass Information ──
+        info_group = QGroupBox("Underpass Information")
+        info_layout = QVBoxLayout(info_group)
+        
+        self.id_label = QLabel("Underpass ID")
+        self.id_label.setAlignment(QtCore_Qt.AlignCenter)
+        info_layout.addWidget(self.id_label)
+
+        combo_layout = QHBoxLayout()
+        self.id_combo = QComboBox()
+        combo_layout.addWidget(self.id_combo, 1)
+
+        self.verify_btn = QPushButton("Verify")
+        self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
+        self.verify_btn.clicked.connect(self.on_verify_clicked)
+        combo_layout.addWidget(self.verify_btn)
+        
+        info_layout.addLayout(combo_layout)
+
+        # Details
+        details_layout = QHBoxLayout()
+        self.km_label = QLabel("Start KM : --")
+        self.chainage_label = QLabel("Start Chainage : --")
+        self.length_label = QLabel("Length : --")
+        
+        self.km_label.setAlignment(QtCore_Qt.AlignCenter)
+        self.chainage_label.setAlignment(QtCore_Qt.AlignCenter)
+        self.length_label.setAlignment(QtCore_Qt.AlignCenter)
+        
+        details_layout.addWidget(self.km_label)
+        details_layout.addWidget(self.chainage_label)
+        details_layout.addWidget(self.length_label)
+        info_layout.addLayout(details_layout)
+        
+        layout.addWidget(info_group)
+
+        # ── Data Loading Logic ──
+        self.underpass_data = {}
+        found_underpasses = []
+        base_dir = getattr(self.parent, 'WORKSHEETS_BASE_DIR', '')
+        ws_name = getattr(self.parent, 'current_worksheet_name', '')
+        
+        import os
+        import json
+        if base_dir and ws_name:
+            designs_dir = os.path.join(base_dir, ws_name, "designs")
+            if os.path.exists(designs_dir):
+                for layer_folder in os.listdir(designs_dir):
+                    layer_path = os.path.join(designs_dir, layer_folder)
+                    if os.path.isdir(layer_path) and not layer_folder.endswith('_merged'):
+                        config_file = os.path.join(layer_path, "design_construction_config.json")
+                        if os.path.exists(config_file):
+                            try:
+                                with open(config_file, "r", encoding="utf-8") as f:
+                                    data = json.load(f)
+                                
+                                ups = data.get("under_passes")
+                                if isinstance(ups, dict):
+                                    if "id" in ups or "length" in ups:
+                                        ups = [ups]
+                                    else:
+                                        ups = list(ups.values())
+                                elif not isinstance(ups, list):
+                                    ups = []
+                                
+                                if not ups:
+                                    ref_ups = data.get("reference_assets", {}).get("under_pass")
+                                    if isinstance(ref_ups, dict):
+                                        if "id" in ref_ups or "length" in ref_ups:
+                                            ups = [ref_ups]
+                                        else:
+                                            ups = list(ref_ups.values())
+                                    elif isinstance(ref_ups, list):
+                                        ups = ref_ups
+                                
+                                if ups:
+                                    found_underpasses.extend(ups)
+                            except Exception:
+                                pass
+
+        if found_underpasses:
+            for up in found_underpasses:
+                if isinstance(up, dict):
+                    up_id = up.get("id", up.get("underpass_id", "Unknown"))
+                    self.underpass_data[str(up_id)] = up
+                    self.id_combo.addItem(str(up_id))
+        else:
+            self.id_combo.addItem("No Underpass Available")
+            self.id_combo.setEnabled(False)
+            
+        self.id_combo.currentTextChanged.connect(self.on_underpass_selected)
+
+        # ── Light Mode ──
+        self.mode_group = QGroupBox("Light Mode")
+        mode_layout = QVBoxLayout(self.mode_group)
+
+        self.single_radio = QRadioButton("Single Light")
+        self.single_radio.setChecked(True)
+
+        self.mode_group_btn = QButtonGroup(self)
+        self.mode_group_btn.addButton(self.single_radio)
+
+        mode_layout.addWidget(self.single_radio)
+        layout.addWidget(self.mode_group)
+
+
+        # ── Placement ──
+        self.placement_group = QGroupBox("Placement")
+        place_layout = QVBoxLayout(self.placement_group)
+        
+        top_slab_label = QLabel("Top Slab")
+        top_slab_label.setStyleSheet("color: #1565C0; font-size: 14px;")
+        place_layout.addWidget(top_slab_label)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        # Center
+        self.center_radio = QRadioButton("Center")
+        self.center_offset_input = QLineEdit()
+        self.center_offset_input.setText("0")
+        self.center_offset_input.setEnabled(False)
+        grid.addWidget(self.center_radio, 0, 0)
+        grid.addWidget(QLabel("Offset :"), 0, 1)
+        grid.addWidget(self.center_offset_input, 0, 2)
+
+        place_layout.addLayout(grid)
+        layout.addWidget(self.placement_group)
+
+        self.placement_btn_group = QButtonGroup(self)
+        self.placement_btn_group.addButton(self.center_radio)
+
+        # Connect radio buttons
+        self.center_radio.toggled.connect(self.on_placement_toggled)
+        # ── Buttons ──
+        btn_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
+        
+        if not found_underpasses:
+            self.ok_btn.setEnabled(False)
+        
+        self.ok_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.ok_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        
+        layout.addLayout(btn_layout)
+
+        # Initialize
+        if hasattr(self, 'mode_group'):
+            self.mode_group.setEnabled(False)
+        self.placement_group.setEnabled(False)
+        self.ok_btn.setEnabled(False)
+
+        if found_underpasses:
+            self.on_underpass_selected(self.id_combo.currentText())
+            self.center_radio.setChecked(True)
+
+    def get_data(self):
+        placement = "center"
+        
+        offset = 0.0
+        try:
+            offset = float(self.center_offset_input.text() or 0.0)
+        except ValueError:
+            offset = 0.0
+            
+        return {
+            "up_id": self.id_combo.currentText(),
+            "verified": self.verify_btn.text() == "Verified ✓",
+            "light_mode": "single",
+            "placement": placement,
+            "offset": offset
+        }
+
+    def on_placement_toggled(self):
+        self.center_offset_input.setEnabled(self.center_radio.isChecked())
+
+    def on_verify_clicked(self):
+        up_id = self.id_combo.currentText()
+        if not up_id or up_id == "No Underpass Available":
+            return
+            
+        self.verify_btn.setText("Verified ✓")
+        self.verify_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        
+        if hasattr(self, 'mode_group'):
+            self.mode_group.setEnabled(True)
+        if hasattr(self, 'placement_group'):
+            self.placement_group.setEnabled(True)
+        if hasattr(self, 'ok_btn'):
+            self.ok_btn.setEnabled(True)
+
+    def on_underpass_selected(self, up_id):
+        if hasattr(self, 'verify_btn'):
+            self.verify_btn.setText("Verify")
+            self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
+            if hasattr(self, 'mode_group'):
+                self.mode_group.setEnabled(False)
+            if hasattr(self, 'placement_group'):
+                self.placement_group.setEnabled(False)
+            if hasattr(self, 'ok_btn'):
+                self.ok_btn.setEnabled(False)
+
+        if not up_id or up_id == "No Underpass Available":
+            self.km_label.setText("Start KM : --")
+            self.chainage_label.setText("Start Chainage : --")
+            self.length_label.setText("Length : --")
+            return
+            
+        up = self.underpass_data.get(up_id, {})
+        km = up.get("km", "--")
+        chainage = up.get("chainage", "--")
+        length = up.get("length", "--")
+        
+        if length != "--":
+            length = f"{length} m"
+            
+        self.km_label.setText(f"Start KM : {km}")
+        self.chainage_label.setText(f"Start Chainage : {chainage}")
+        self.length_label.setText(f"Length : {length}")
+
+#### Mayur Wakhare 15-07-2026 Tunnel CCTV
+class UnderpassCCTVDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Underpass CCTV")
+        self.setModal(True)
+        self.setMinimumWidth(450)
+        self.setMinimumHeight(600)
+        self.parent = parent
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F5F5F5;
+                font-family: Segoe UI;
+            }
+            QLabel { font-size: 13px; color: #333; font-weight: bold; }
+            QRadioButton { font-size: 13px; padding: 6px; }
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                border: 2px solid #888;
+                border-radius: 10px;
+                background-color: white;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #4CAF50;
+                border: 2px solid #388E3C;
+            }
+            QLineEdit {
+                padding: 6px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+                background-color: white;
+            }
+            QComboBox {
+                padding: 6px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+                background-color: white;
+            }
+            QPushButton {
+                padding: 8px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QGroupBox {
+                border: 1px solid #CCC;
+                border-radius: 6px;
+                margin-top: 15px;
+                font-weight: bold;
+                color: #1565C0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 3px 0 3px;
+            }
+        """)
+
+        from PyQt5.QtWidgets import QScrollArea, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QRadioButton, QButtonGroup, QLineEdit, QGroupBox, QLabel, QComboBox, QPushButton, QSpacerItem, QSizePolicy
+        from PyQt5.QtGui import QDoubleValidator
+        from PyQt5.QtCore import Qt as QtCore_Qt
+
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setVerticalScrollBarPolicy(QtCore_Qt.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(QtCore_Qt.ScrollBarAlwaysOff)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #F5F5F5; }")
+        outer_layout.addWidget(scroll_area)
+
+        scroll_container = QWidget()
+        scroll_container.setStyleSheet("background-color: #F5F5F5;")
+        scroll_area.setWidget(scroll_container)
+
+        layout = QVBoxLayout(scroll_container)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
+
+        title = QLabel("Underpass CCTV")
+        title.setAlignment(QtCore_Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1565C0; margin-bottom: 10px;")
+        layout.addWidget(title)
+
+        # ── Underpass Information ──
+        info_group = QGroupBox("Underpass Information")
+        info_layout = QVBoxLayout(info_group)
+        
+        self.id_label = QLabel("Underpass ID")
+        self.id_label.setAlignment(QtCore_Qt.AlignCenter)
+        info_layout.addWidget(self.id_label)
+
+        combo_layout = QHBoxLayout()
+        self.id_combo = QComboBox()
+        combo_layout.addWidget(self.id_combo, 1)
+
+        self.verify_btn = QPushButton("Verify")
+        self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
+        self.verify_btn.clicked.connect(self.on_verify_clicked)
+        combo_layout.addWidget(self.verify_btn)
+        
+        info_layout.addLayout(combo_layout)
+
+        # Details
+        details_layout = QHBoxLayout()
+        self.km_label = QLabel("Start KM : --")
+        self.chainage_label = QLabel("Start Chainage : --")
+        self.length_label = QLabel("Length : --")
+        
+        self.km_label.setAlignment(QtCore_Qt.AlignCenter)
+        self.chainage_label.setAlignment(QtCore_Qt.AlignCenter)
+        self.length_label.setAlignment(QtCore_Qt.AlignCenter)
+        
+        details_layout.addWidget(self.km_label)
+        details_layout.addWidget(self.chainage_label)
+        details_layout.addWidget(self.length_label)
+        info_layout.addLayout(details_layout)
+        
+        layout.addWidget(info_group)
+
+        # ── Data Loading Logic ──
+        self.underpass_data = {}
+        self.load_underpass_ids()
+
+        self.id_combo.currentTextChanged.connect(self.on_underpass_selected)
+
+        # ── Placement ──
+        self.placement_group = QGroupBox("Placement")
+        place_layout = QVBoxLayout(self.placement_group)
+
+        # Left Side
+        self.left_radio = QRadioButton("Left Side")
+        place_layout.addWidget(self.left_radio)
+
+        # Right Side
+        self.right_radio = QRadioButton("Right Side")
+        place_layout.addWidget(self.right_radio)
+
+        # Both
+        self.both_radio = QRadioButton("Both")
+        place_layout.addWidget(self.both_radio)
+
+        layout.addWidget(self.placement_group)
+
+        self.placement_btn_group = QButtonGroup(self)
+        self.placement_btn_group.addButton(self.left_radio)
+        self.placement_btn_group.addButton(self.right_radio)
+        self.placement_btn_group.addButton(self.both_radio)
+
+        # ── Buttons ──
+        btn_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
+        
+        if not self.underpass_data:
+            self.ok_btn.setEnabled(False)
+        
+        self.ok_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.ok_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        
+        layout.addLayout(btn_layout)
+
+        # Initialize
+        self.placement_group.setEnabled(False)
+        self.ok_btn.setEnabled(False)
+
+        if self.underpass_data:
+            self.on_underpass_selected(self.id_combo.currentText())
+            self.left_radio.setChecked(True)
+
+    def load_underpass_ids(self):
+        found_underpasses = []
+        base_dir = getattr(self.parent, 'WORKSHEETS_BASE_DIR', '')
+        ws_name = getattr(self.parent, 'current_worksheet_name', '')
+        
+        import os
+        import json
+        if base_dir and ws_name:
+            designs_dir = os.path.join(base_dir, ws_name, "designs")
+            if os.path.exists(designs_dir):
+                for layer_folder in os.listdir(designs_dir):
+                    layer_path = os.path.join(designs_dir, layer_folder)
+                    if os.path.isdir(layer_path) and not layer_folder.endswith('_merged'):
+                        config_file = os.path.join(layer_path, "design_construction_config.json")
+                        if os.path.exists(config_file):
+                            try:
+                                with open(config_file, "r", encoding="utf-8") as f:
+                                    data = json.load(f)
+                                
+                                ups = data.get("under_passes")
+                                if isinstance(ups, dict):
+                                    if "id" in ups or "length" in ups:
+                                        ups = [ups]
+                                    else:
+                                        ups = list(ups.values())
+                                elif not isinstance(ups, list):
+                                    ups = []
+                                
+                                if not ups:
+                                    ref_ups = data.get("reference_assets", {}).get("under_pass")
+                                    if isinstance(ref_ups, dict):
+                                        if "id" in ref_ups or "length" in ref_ups:
+                                            ups = [ref_ups]
+                                        else:
+                                            ups = list(ref_ups.values())
+                                    elif isinstance(ref_ups, list):
+                                        ups = ref_ups
+                                
+                                if ups:
+                                    found_underpasses.extend(ups)
+                            except Exception:
+                                pass
+
+        if found_underpasses:
+            for up in found_underpasses:
+                if isinstance(up, dict):
+                    up_id = up.get("id", up.get("underpass_id", "Unknown"))
+                    self.underpass_data[str(up_id)] = up
+                    self.id_combo.addItem(str(up_id))
+        else:
+            self.id_combo.addItem("No Underpass Available")
+            self.id_combo.setEnabled(False)
+
+    def get_data(self):
+        if self.left_radio.isChecked():
+            placement = "left"
+        elif self.right_radio.isChecked():
+            placement = "right"
+        else:
+            placement = "both"
+            
+        return {
+            "up_id": self.id_combo.currentText(),
+            "verified": self.verify_btn.text() == "Verified ✓",
+            "placement": placement
+        }
+
+    def on_verify_clicked(self):
+        up_id = self.id_combo.currentText()
+        if not up_id or up_id == "No Underpass Available":
+            return
+            
+        self.verify_btn.setText("Verified ✓")
+        self.verify_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        
+        self.placement_group.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+
+    def on_underpass_selected(self, up_id):
+        self.verify_btn.setText("Verify")
+        self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
+        self.placement_group.setEnabled(False)
+        self.ok_btn.setEnabled(False)
+
+        if not up_id or up_id == "No Underpass Available":
+            self.km_label.setText("Start KM : --")
+            self.chainage_label.setText("Start Chainage : --")
+            self.length_label.setText("Length : --")
+            return
+            
+        up = self.underpass_data.get(up_id, {})
+        km = up.get("km", "--")
+        chainage = up.get("chainage", "--")
+        length = up.get("length", "--")
+        
+        if length != "--":
+            length = f"{length} m"
+            
+        self.km_label.setText(f"Start KM : {km}")
+        self.chainage_label.setText(f"Start Chainage : {chainage}")
+        self.length_label.setText(f"Length : {length}")
+        ######################################################################################

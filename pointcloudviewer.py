@@ -39,7 +39,7 @@ from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, Mate
                     StreetLightDialog, SignalPoleDialog, LaneMarkingDialog, PoleAssetDialog, BuddyDialog, BuddiesWorksheetsDialog, OneDirectionStreetLightDialog, 
                     TwoDirectionStreetLightDialog, FourDirectionStreetLightDialog, OneDirectionSignalPoleDialog, TwoDirectionSignalPoleDialog, FourDirectionSignalPoleDialog, 
                     ##### Mayur Wakhare 1-7-2026 Tunnel Light
-                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog)
+                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog)
                     ###########################################################
 from measurement_widget import MeasurementWidget
 from digging_point import DiggingPointInput
@@ -77,7 +77,9 @@ class PointCloudViewer(ApplicationUI):
         
         # Update User Menu with Initials
         self.update_user_info(self.current_user_full_name)
-
+    ## Mayur Wakhare 7-7-2026 undo jet fan tunnel
+        self.last_jet_fan_undo_state = None  # Dedicated undo state for Jet Fans
+######################################################################
         # Handle input file from command line (taskbar opening)
         if input_file and os.path.exists(input_file):
             QTimer.singleShot(1000, lambda: self.load_point_cloud_from_path(input_file))
@@ -3325,50 +3327,19 @@ class PointCloudViewer(ApplicationUI):
                 break
         
         self._refresh_2d_layers_for_worksheets()
-        ############################################################################################################################################  Mayur Wakhare 16-06-2026 New code added
-        self._refresh_3d_layers_for_worksheets()
-
-    def _refresh_3d_layers_for_worksheets(self):
-        if hasattr(self, 'three_D_layers_layout') and self.three_D_layers_layout:
-            while self.three_D_layers_layout.count() > 1: # keeping stretch
-                item = self.three_D_layers_layout.itemAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-                self.three_D_layers_layout.removeItem(item)
-            
-            if hasattr(self, 'layer_panel_buttons'):
-                self.layer_panel_buttons = [btn for btn in self.layer_panel_buttons if str(btn.property("dimension") or "") != "3D"]
-
-        if not hasattr(self, 'opened_worksheets_data'):
-            return
-
-        for ws in self.opened_worksheets_data:
-            if ws.get("checked"):
-                self._load_worksheet_3d_layers(ws)
-
-    def _load_worksheet_3d_layers(self, ws):
-        folder_path = ws["data"]["folder_path"]
-        
-        merger_path = os.path.join(folder_path, "merger")
-        if os.path.exists(merger_path):
-            merger_folders = sorted([f for f in os.listdir(merger_path) if os.path.isdir(os.path.join(merger_path, f))])
-            for layer_name in merger_folders:
-                full_path = os.path.join(merger_path, layer_name)
-                if hasattr(self, 'add_layer_to_panel'):
-                    self.add_layer_to_panel(layer_name, "3D", full_path, "merger")
-###################################################################################################################################################
 
     def _refresh_2d_layers_for_worksheets(self):
         # Clear existing 2D layers from UI and logic
         self._clear_2d_layers_ui()
+        if hasattr(self, '_clear_3d_layers_ui'):
+            self._clear_3d_layers_ui()
         
-        if not hasattr(self, 'opened_worksheets_data'):
-            self.opened_worksheets_data = []
-
         # Now go through all checked worksheets and load their design/material layers
         for ws in self.opened_worksheets_data:
-            if ws.get("checked"):
+            if ws["checked"]:
                 self._load_worksheet_2d_layers(ws)
+                if hasattr(self, '_load_worksheet_3d_layers'):
+                    self._load_worksheet_3d_layers(ws)
                 
         # Update 2D scroll height dynamically based on new contents
         if hasattr(self, '_update_two_D_scroll_height'):
@@ -3432,6 +3403,7 @@ class PointCloudViewer(ApplicationUI):
         row_layout.setContentsMargins(0, 0, 0, 0)
         
         label = QLabel(display_name)
+###################################################################################################################################################
 
         # ── Helper: apply eye-open/closed style to a button and row ────────
         def _apply_eye_style(btn_w, rw_w, lbl_w, is_open):
@@ -4079,6 +4051,9 @@ class PointCloudViewer(ApplicationUI):
                         if fp not in self._per_layer_actors:
                             self._per_layer_actors[fp] = []
                         self._per_layer_actors[fp].extend(list(new_actors))
+
+                    if hasattr(self, 'herarchy_section'):
+                        self.herarchy_section.setVisible(True)
             else:
                 if hasattr(self, '_per_layer_actors'):
                     layer_actors = self._per_layer_actors.pop(fp, [])
@@ -4093,6 +4068,14 @@ class PointCloudViewer(ApplicationUI):
                             self.vtk_widget.GetRenderWindow().Render()
                 if hasattr(self, 'clear_merger_markers'):
                     self.clear_merger_markers()
+                
+                any_layer_open = any(
+                    self._eye_open_states.get(k, False) 
+                    for k in self._eye_open_states if k != fp
+                )
+                if not any_layer_open:
+                    if hasattr(self, 'herarchy_section'):
+                        self.herarchy_section.setVisible(False)
 
         btn_eye.clicked.connect(toggle_eye)
 
@@ -4849,6 +4832,896 @@ class PointCloudViewer(ApplicationUI):
     #         self.vtk_widget.GetRenderWindow().Render()
 
 
+    # # def _open_worksheet_from_data(self, data):
+    #     config = data["worksheet_data"]
+    #     worksheet_name = config.get("worksheet_name")
+    #     layer_name = data["layer_name"]
+    #     subfolder_type = data["subfolder_type"]  # "designs" or "construction" or "merger"
+    #     full_layer_path = data.get("full_layer_path")
+
+    #     if not full_layer_path:
+    #         if hasattr(self, 'message_text'):
+    #             self.message_text.append(f"ERROR: full_layer_path is missing for layer {layer_name}")
+    #         return
+
+    #     # =================================================================================================================================================================
+    #     # Decide whether this is the SAME worksheet or a new one
+    #     # =================================================================================================================================================================
+    #     is_same_worksheet = (
+    #         hasattr(self, 'current_worksheet_name') and
+    #         self.current_worksheet_name == worksheet_name
+    #     )
+
+    #     # Remember previous states (important for bridge road switches)
+    #     previous_subfolder = getattr(self, 'current_subfolder_type', None)
+    #     previous_reference = getattr(self, 'reference_type', None)
+
+    #     # =================================================================================================================================================================
+    #     # Detect switching FROM merger TO design/construction
+    #     # =================================================================================================================================================================
+    #     coming_from_merger = False
+    #     if is_same_worksheet:
+    #         if previous_subfolder == "merger" and subfolder_type in ("designs", "construction"):
+    #             coming_from_merger = True
+    #             self.message_text.append("Switching from Merger → Design/Construction — cleaning merger UI & deck actors/labels")
+
+    #     # =================================================================================================================================================================
+    #     # Reset / cleanup depending on same or different worksheet
+    #     # =================================================================================================================================================================
+    #     # If _skip_layer_clear is set (multi-layer eye toggle), do NOT clear previous layers
+    #     skip_clear = getattr(self, '_skip_layer_clear', False)
+
+    #     # ── Snapshot actors BEFORE loading (for auto-sync when NOT from toggle_eye) ──
+    #     _actors_before_load = set()
+    #     if not skip_clear and hasattr(self, 'renderer') and self.renderer:
+    #         _ac = self.renderer.GetActors()
+    #         _ac.InitTraversal()
+    #         for _i in range(_ac.GetNumberOfItems()):
+    #             _actors_before_load.add(_ac.GetNextActor())
+
+    #     if not is_same_worksheet and not skip_clear:
+    #         # Full reset only when opening a genuinely new worksheet AND
+    #         # we are NOT in multi-layer eye-toggle mode (skip_clear=True).
+    #         self.reset_all()
+    #         self.message_text.append("Opened new worksheet — full reset performed.")
+    #     elif not is_same_worksheet and skip_clear:
+    #         # Multi-layer toggle on a "new" worksheet: skip reset to preserve
+    #         # existing panel widgets and eye states. Just reset point cloud.
+    #         self.message_text.append("Multi-layer mode (new worksheet): skipping reset to preserve eye states.")
+    #     elif not skip_clear:
+    #         # Same worksheet, normal layer switch → clear previous design layer only
+    #         if hasattr(self, 'clear_current_design_layer'):
+    #             self.clear_current_design_layer()
+    #             self.message_text.append("Switched layer inside same worksheet — point cloud preserved.")
+    #         else:
+    #             self.reset_all()
+    #             self.message_text.append("Warning: Using full reset (clear_current_design_layer not found)")
+    #     else:
+    #         self.message_text.append("Multi-layer mode: preserving existing layers on point cloud.")
+
+    #     # =================================================================================================================================================================
+    #     # Cleanup when leaving merger layer
+    #     # =================================================================================================================================================================
+    #     if coming_from_merger:
+    #         if hasattr(self, 'herarchy_section') and self.herarchy_section is not None:
+    #             self.herarchy_section.setVisible(False)
+    #         if hasattr(self, 'mode_banner') and self.mode_banner is not None:
+    #             self.mode_banner.setVisible(False)
+
+    #         self.clear_merger_markers()
+    #         self.merger_markers = []
+
+    #         if hasattr(self, 'clear_deck_actors_and_labels'):
+    #             self.clear_deck_actors_and_labels()
+    #             self.message_text.append("Deck actors, components and labels cleared (merger → design/construction)")
+    #         else:
+    #             self.message_text.append("Warning: clear_deck_actors_and_labels() not found")
+
+    #         if hasattr(self, 'merger_data'):
+    #             self.merger_data = None
+    #         if hasattr(self, 'merger_hierarchy_items'):
+    #             self.merger_hierarchy_items = []
+
+    #     self.merger_hide_chainage_labels = False
+
+    #     # =================================================================================================================================================================
+    #     # Update current worksheet state
+    #     # =================================================================================================================================================================
+    #     self.current_worksheet_name = worksheet_name
+    #     self.current_project_name = config.get("project_name")
+    #     self.current_worksheet_data = config
+    #     self.current_layer_name = layer_name
+    #     self.current_subfolder_type = subfolder_type
+    #     self.display_current_worksheet(config)
+
+    #     # ── FIX 1: Always set current_design_layer_path from the real full_layer_path.
+    #     # This is the critical fix for buddy worksheets: WORKSHEETS_BASE_DIR always
+    #     # points to the logged-in user's folder. Without setting this here,
+    #     # create_road_asset_actor() builds a completely wrong fallback path and
+    #     # silently returns without rendering anything (road_surface_points stays empty).
+    #     if subfolder_type == "designs":
+    #         self.current_design_layer_path = full_layer_path
+    #     else:
+    #         # For construction/merger, set to full_layer_path for now;
+    #         # it will be updated to the design layer path after design_layer_path resolves.
+    #         self.current_design_layer_path = full_layer_path
+
+    #     dimension = config.get("dimension", "2D")
+    #     category = config.get("worksheet_category", "None")
+    #     if not getattr(self, '_skip_layer_clear', False):
+    #         self.three_D_frame.setVisible(dimension == "3D")
+    #         self.two_D_frame.setVisible(dimension == "2D")
+
+    #     worksheet_root = os.path.dirname(os.path.dirname(full_layer_path))
+    #     if not os.path.exists(full_layer_path):
+    #         QMessageBox.critical(self, "Path Error", f"Layer folder not found:\n{full_layer_path}")
+    #         return
+
+    #     # Load layer config
+    #     config_filename = "Construction_Layer_config.txt" if subfolder_type == "construction" else "design_layer_config.txt"
+    #     layer_config_path = os.path.join(full_layer_path, config_filename)
+    #     layer_config = {}
+    #     if os.path.exists(layer_config_path):
+    #         try:
+    #             with open(layer_config_path, 'r', encoding='utf-8') as f:
+    #                 layer_config = json.load(f)
+    #         except Exception as e:
+    #             self.message_text.append(f"ERROR loading {config_filename}: {str(e)}")
+
+    #     referenced_design_layer = layer_config.get("reference_layer_2d") if subfolder_type == "construction" else None
+    #     design_layer_path = None
+    #     if referenced_design_layer:
+    #         design_layer_path = os.path.join(worksheet_root, "designs", referenced_design_layer)
+    #         design_layer_path = os.path.normpath(design_layer_path)
+    #         # ── FIX 2: For construction layers, road_surface_baseline lives in the
+    #         # DESIGN layer, not the construction layer. Update current_design_layer_path
+    #         # so visualize_road_asset() / create_road_asset_actor() load from the
+    #         # correct folder (especially critical for buddy worksheets).
+    #         if os.path.exists(design_layer_path):
+    #             self.current_design_layer_path = design_layer_path
+
+    #     # =================================================================================================================================================================
+    #     # POINT CLOUD LOADING
+    #     # =================================================================================================================================================================
+    #     pc_loaded = False
+    #     pc_file = config.get("point_cloud_file")
+    #     if is_same_worksheet and hasattr(self, 'point_cloud') and self.point_cloud is not None:
+    #         pc_loaded = True
+    #         file_to_log = pc_file if pc_file else "active point cloud"
+    #         self.message_text.append(f"Point cloud reused (already loaded for worksheet): {os.path.basename(file_to_log)}")
+    #     else:
+    #         loaded_from = None
+    #         if pc_file and os.path.exists(pc_file):
+    #             try:
+    #                 self.load_point_cloud_from_path(pc_file)
+    #                 pc_loaded = True
+    #                 loaded_from = "worksheet config"
+    #             except Exception as e:
+    #                 self.message_text.append(f"Error loading point cloud from worksheet config: {str(e)}")
+
+    #         if not pc_loaded:
+    #             layer_pc = layer_config.get("point_cloud_file")
+    #             if layer_pc:
+    #                 candidate = layer_pc if os.path.exists(layer_pc) else os.path.normpath(os.path.join(worksheet_root, layer_pc))
+    #                 if os.path.exists(candidate):
+    #                     try:
+    #                         self.load_point_cloud_from_path(candidate)
+    #                         pc_loaded = True
+    #                         loaded_from = "layer config"
+    #                         config["point_cloud_file"] = candidate
+    #                         self.current_worksheet_data["point_cloud_file"] = candidate
+    #                     except Exception as e:
+    #                         self.message_text.append(f"Error loading from layer config: {str(e)}")
+
+    #         if not pc_loaded:
+    #             self.message_text.append("No valid point cloud file found in configs.")
+    #             reply = QMessageBox.question(
+    #                 self,
+    #                 "Point Cloud Not Found",
+    #                 "The point cloud file could not be located.\n\nWould you like to select it manually?",
+    #                 QMessageBox.Yes | QMessageBox.No,
+    #                 QMessageBox.Yes
+    #             )
+    #             if reply == QMessageBox.Yes:
+    #                 file_path, _ = QFileDialog.getOpenFileName(
+    #                     self,
+    #                     "Select Point Cloud File",
+    #                     worksheet_root,
+    #                     "Point Cloud Files (*.las *.laz *.ply *.bin)"
+    #                 )
+    #                 if file_path and os.path.exists(file_path):
+    #                     try:
+    #                         self.load_point_cloud_from_path(file_path)
+    #                         pc_loaded = True
+    #                         loaded_from = "manual selection"
+    #                         config["point_cloud_file"] = file_path
+    #                         self.current_worksheet_data["point_cloud_file"] = file_path
+    #                     except Exception as e:
+    #                         self.message_text.append(f"Failed to load selected point cloud: {str(e)}")
+
+    #         if pc_loaded:
+    #             self.current_point_cloud_path = config.get("point_cloud_file")
+    #             if loaded_from:
+    #                 self.message_text.append(f"Point cloud loaded from {loaded_from}: {os.path.basename(self.current_point_cloud_path)}")
+    #         else:
+    #             self.current_point_cloud_path = None
+
+    #     zero_loaded = False
+    #     design_points_loaded = False
+    #     loaded_baselines = {}
+
+    #     # =================================================================================================================================================================
+    #     # Layer loading logic
+    #     # =================================================================================================================================================================
+    #     reference_type = category  # default
+
+    #     if subfolder_type == "designs":
+    #         self.switch_to_design_mode()
+    #         self.add_material_line_button.setVisible(False)
+    #         self.right_section.setMinimumHeight(1200)
+
+    #         loaded_baselines = self.load_all_baselines_from_layer(full_layer_path)
+    #         design_points_loaded = self.load_json_files_to_3d_pointcloud(full_layer_path)
+
+    #         self.load_lane_markings_from_json(full_layer_path)
+
+    #         # Recreate curve labels
+    #         self.clear_curve_labels()
+    #         recreated_curve_count = 0
+    #         for ltype, baseline_data in loaded_baselines.items():
+    #             for poly in baseline_data.get("polylines", []):
+    #                 for pt in poly.get("points", []):
+    #                     if "angle_deg" in pt:
+    #                         chainage = pt["chainage_m"]
+    #                         config_dict = {
+    #                             'angle': pt["angle_deg"],
+    #                             'inner_curve': pt.get("inner_curve", False),
+    #                             'outer_curve': pt.get("outer_curve", False)
+    #                         }
+    #                         self.curve_labels.append({'chainage': chainage, 'config': config_dict})
+    #                         self.add_curve_label_at_x(chainage, config_dict)
+    #                         recreated_curve_count += 1
+    #         if recreated_curve_count > 0:
+    #             self.message_text.append(f"Recreated {recreated_curve_count} curve label(s) — curved road ready!")
+    #         else:
+    #             self.message_text.append("No curve angles found — straight road.")
+
+    #         # Recreate elevation angle labels
+    #         for label in getattr(self, 'elevation_angle_labels', []):
+    #             try:
+    #                 if label and hasattr(label, 'remove'):
+    #                     label.remove()
+    #             except:
+    #                 pass
+    #         self.elevation_angle_labels = []
+    #         recreated_elev_angle_count = 0
+    #         for ltype, baseline_data in loaded_baselines.items():
+    #             if ltype == 'road_surface' and "elevation_angles" in baseline_data:
+    #                 for elev_entry in baseline_data["elevation_angles"]:
+    #                     start_chainage_m = elev_entry.get("start_chainage_m", 0.0)
+    #                     start_chainage_str = elev_entry.get("start_chainage_str", "")
+    #                     angle = elev_entry.get("elevation_angle", 0.0)
+    #                     is_upward = elev_entry.get("upward", True)
+    #                     direction = "upward" if is_upward else "downward"
+    #                     if not start_chainage_str or '+' not in start_chainage_str or len(start_chainage_str) < 5:
+    #                         for poly in baseline_data.get("polylines", []):
+    #                             for pt in poly.get("points", []):
+    #                                 pt_chainage_m = pt.get("chainage_m", 0)
+    #                                 if abs(pt_chainage_m - start_chainage_m) < 1.0:
+    #                                     pt_chainage_str = pt.get("chainage_str", "")
+    #                                     if pt_chainage_str and '+' in pt_chainage_str:
+    #                                         start_chainage_str = pt_chainage_str
+    #                                         break
+    #                             if start_chainage_str and '+' in start_chainage_str:
+    #                                 break
+    #                     self.add_elevation_angle_label_at_x(start_chainage_m, angle, direction, start_chainage_str)
+    #                     recreated_elev_angle_count += 1
+    #         if recreated_elev_angle_count > 0:
+    #             self.message_text.append(f"Recreated {recreated_elev_angle_count} elevation angle label(s)!")
+
+    #         # Redraw baselines on graph
+    #         for ltype in loaded_baselines.keys():
+    #             self.redraw_baseline_on_graph(ltype, style="solid")
+    #             self.message_text.append(f"  Redrawn baseline: {ltype.replace('_', ' ').title()}")
+
+    #         zero_loaded = self.load_zero_line_from_layer(full_layer_path)
+
+    #         # Determine if this is Road or Bridge
+    #         layer_config_file = os.path.join(full_layer_path, "design_layer_config.txt")
+    #         if os.path.exists(layer_config_file):
+    #             try:
+    #                 with open(layer_config_file, 'r', encoding='utf-8') as f:
+    #                     design_config = json.load(f)
+    #                     reference_type = design_config.get("reference_type", category)
+    #             except Exception as e:
+    #                 self.message_text.append(f"ERROR reading design_layer_config.txt: {e}")
+
+    #         self.reference_type = reference_type
+
+    #         # Clean deck actors when leaving Bridge mode
+    #         if is_same_worksheet and previous_reference == "Bridge" and reference_type != "Bridge":
+    #             if hasattr(self, 'clear_deck_actors_and_labels'):
+    #                 self.clear_deck_actors_and_labels()
+    #                 self.message_text.append("Cleared deck slabs, actors & labels (switched from Bridge to Road)")
+    #             else:
+    #                 self.message_text.append("Warning: clear_deck_actors_and_labels() method not found")
+
+    #         if reference_type == "Bridge":
+    #             self.message_text.append("🌉 Bridge Mode: Rendering all baselines to 3D...")
+    #             self.render_loaded_baselines_to_3d(loaded_baselines)
+
+    #         self.message_text.append(f"Design layer loaded: {len(loaded_baselines)} baselines")
+
+    #     elif subfolder_type == "construction":
+    #         self.right_section.setMinimumHeight(1200)
+    #         referenced_baselines = layer_config.get("base_lines_reference", [])
+    #         if isinstance(referenced_baselines, str):
+    #             referenced_baselines = [referenced_baselines]
+    #         dotted_lines_drawn = 0
+    #         for baseline_filename in referenced_baselines:
+    #             if not baseline_filename:
+    #                 continue
+    #             baseline_path = os.path.join(full_layer_path, baseline_filename)
+    #             source = "construction layer"
+    #             if not os.path.exists(baseline_path) and design_layer_path and os.path.exists(design_layer_path):
+    #                 baseline_path = os.path.join(design_layer_path, baseline_filename)
+    #                 source = "referenced design layer"
+    #             if os.path.exists(baseline_path):
+    #                 try:
+    #                     with open(baseline_path, 'r', encoding='utf-8') as f:
+    #                         data = json.load(f)
+    #                     ltype = data.get("baseline_key", "construction")
+    #                     color = data.get("color", "gray")
+    #                     polylines_2d = []
+    #                     for poly in data.get("polylines", []):
+    #                         poly_2d = [(pt["chainage_m"], pt["relative_elevation_m"]) for pt in poly.get("points", [])]
+    #                         if len(poly_2d) >= 2:
+    #                             polylines_2d.append(poly_2d)
+    #                     if ltype not in self.line_types:
+    #                         self.line_types[ltype] = {'color': color, 'polylines': [], 'artists': []}
+    #                     for artist in self.line_types[ltype]['artists']:
+    #                         try:
+    #                             artist.remove()
+    #                         except:
+    #                             pass
+    #                     self.line_types[ltype]['artists'].clear()
+    #                     self.line_types[ltype]['polylines'] = polylines_2d
+    #                     all_x, all_y = [], []
+    #                     for poly in polylines_2d:
+    #                         xs, ys = zip(*poly)
+    #                         all_x.extend(xs)
+    #                         all_y.extend(ys)
+    #                     if all_x:
+    #                         artist, = self.ax.plot(all_x, all_y, color=color, linestyle=':', linewidth=3, alpha=0.8, zorder=5)
+    #                         self.line_types[ltype]['artists'].append(artist)
+    #                         dotted_lines_drawn += 1
+    #                     self.message_text.append(f"Loaded reference baseline: {baseline_filename} ({source})")
+    #                 except Exception as e:
+    #                     self.message_text.append(f"Failed to load {baseline_filename}: {str(e)}")
+    #             else:
+    #                 self.message_text.append(f"Referenced baseline not found: {baseline_filename}")
+
+    #         if design_layer_path and os.path.exists(design_layer_path):
+    #             loaded_baselines = self.load_all_baselines_from_layer(design_layer_path)
+    #             design_points_loaded = self.load_json_files_to_3d_pointcloud(design_layer_path)
+    #             self.message_text.append(f"Loaded {len(loaded_baselines)} baselines for 3D from design layer")
+
+    #             # Recreate curve labels for construction layer
+    #             self.clear_curve_labels()
+    #             recreated_curve_count = 0
+    #             for ltype, baseline_data in loaded_baselines.items():
+    #                 for poly in baseline_data.get("polylines", []):
+    #                     for pt in poly.get("points", []):
+    #                         if "angle_deg" in pt:
+    #                             chainage = pt["chainage_m"]
+    #                             config_dict = {
+    #                                 'angle': pt["angle_deg"],
+    #                                 'inner_curve': pt.get("inner_curve", False),
+    #                                 'outer_curve': pt.get("outer_curve", False)
+    #                             }
+    #                             self.curve_labels.append({'chainage': chainage, 'config': config_dict})
+    #                             self.add_curve_label_at_x(chainage, config_dict)
+    #                             recreated_curve_count += 1
+    #             if recreated_curve_count > 0:
+    #                 self.message_text.append(f"Recreated {recreated_curve_count} curve label(s) from design layer.")
+    #             else:
+    #                 self.message_text.append("No curve angles found in design layer — straight material.")
+
+    #         if design_layer_path and os.path.exists(design_layer_path):
+    #             zero_loaded = self.load_zero_line_from_layer(design_layer_path)
+    #         if not zero_loaded:
+    #             zero_loaded = self.load_zero_line_from_layer(full_layer_path)
+
+    #         self.current_construction_layer_path = full_layer_path
+
+    #         # Material lines
+    #         config_path = os.path.join(full_layer_path, "material_lines_config.txt")
+    #         if os.path.exists(config_path):
+    #             try:
+    #                 with open(config_path, 'r', encoding='utf-8') as f:
+    #                     config_data = json.load(f)
+    #                 material_lines = config_data.get("material_line", [])
+    #                 self.material_configs = []
+    #                 for mat in material_lines:
+    #                     name = mat.get("name")
+    #                     folder_name = name.strip()
+    #                     mat_config = {
+    #                         'name': name,
+    #                         'folder_name': folder_name,
+    #                         'material_type': mat.get("material_type"),
+    #                         'ref_layer': mat.get("ref_layer"),
+    #                         'road_surfacing': self._as_bool_flag(mat.get("road_surfacing", mat.get("road_resurfacing", False))),
+    #                         'dialog_segments': mat.get("dialog_segments", []),
+    #                         'visible': True,
+    #                         'path': os.path.join(full_layer_path, folder_name)
+    #                     }
+    #                     self.material_configs.append(mat_config)
+    #                     self.create_material_line_entry(mat_config)
+    #                     if self.material_line_widgets:
+    #                         material_widget = self.material_line_widgets[-1]
+    #                         checkbox = material_widget.findChild(QCheckBox)
+    #                         if checkbox:
+    #                             checkbox.setChecked(True)
+    #                 for idx in range(len(self.material_configs)):
+    #                     self.load_and_draw_material_filling(idx)
+    #                 self.message_text.append(f"Loaded {len(self.material_configs)} material lines")
+
+    #                 # Visualize baselines when reopening material layer
+    #                 if design_layer_path and os.path.exists(design_layer_path):
+    #                     try:
+    #                         loaded_baselines_for_material = self.load_all_baselines_from_layer(design_layer_path)
+    #                         for ltype in loaded_baselines_for_material.keys():
+    #                             self.redraw_baseline_on_graph(ltype, style="dotted")
+    #                         if loaded_baselines_for_material:
+    #                             self.message_text.append(f"  Material Layer: Visualized {len(loaded_baselines_for_material)} baseline(s) in graph section")
+    #                     except Exception as e:
+    #                         self.message_text.append(f"  Note: Could not load baselines for material visualization: {str(e)}")
+    #             except Exception as e:
+    #                 self.message_text.append(f"Error loading material config: {str(e)}")
+
+    #     elif subfolder_type == "merger":
+    #         self.merger_hide_chainage_labels = True
+    #         self.right_section.setMinimumHeight(1200)
+    #         merger_json_files = [f for f in os.listdir(full_layer_path) if f.endswith('.json')]
+    #         if not merger_json_files:
+    #             QMessageBox.warning(self, "No Merger JSON", f"No JSON file found in merger layer: {full_layer_path}")
+    #             return
+    #         merger_json_path = os.path.join(full_layer_path, merger_json_files[0])
+    #         try:
+    #             with open(merger_json_path, 'r', encoding='utf-8') as f:
+    #                 merger_data = json.load(f)
+    #             self.create_merger_hierarchy(merger_data, full_layer_path)
+                
+    #             # Directly load underlying design layers to render full tunnels, lane markings, etc.
+    #             design_layers_to_open = set()
+    #             for merger_point in merger_data.get("merger_points", []):
+    #                 for layer in merger_point.get("layers", []):
+    #                     jpath = layer.get("json_path")
+    #                     if jpath and os.path.exists(jpath):
+    #                         design_layers_to_open.add(os.path.dirname(jpath))
+                
+    #             original_skip = getattr(self, '_skip_layer_clear', False)
+    #             self._skip_layer_clear = True
+                
+    #             for layer_folder in design_layers_to_open:
+    #                 l_name = os.path.basename(layer_folder)
+    #                 d_to_open = {
+    #                     "worksheet_data": data.get("worksheet_data", {}),
+    #                     "worksheet_name": data.get("worksheet_name", ""),
+    #                     "subfolder_type": "designs",
+    #                     "layer_name": l_name,
+    #                     "full_layer_path": layer_folder
+    #                 }
+    #                 self._open_worksheet_from_data(d_to_open)
+                
+    #             self._skip_layer_clear = original_skip
+                
+    #             return # Bypass the rest of merger processing since design layers handled it
+                
+    #         except Exception as e:
+    #             QMessageBox.critical(self, "Merger JSON Error", f"Failed to load merger JSON: {str(e)}")
+    #             import traceback
+    #             traceback.print_exc()
+    #             return
+
+    #     # =================================================================================================================================================================
+    #     # ZERO LINE FALLBACK FIX
+    #     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+    #     # When opening a BUDDY worksheet, load_zero_line_from_layer() may succeed at reading the file
+    #     # but self.zero_line_set can still be False if the internal flag was never set (e.g. the
+    #     # zero-line JSON lives only inside design_construction_config.json for that user's layer).
+    #     # Without zero_line_set=True, visualize_road_asset() silently skips ALL reference assets
+    #     # (side walls, divider, footpath) — they exist in the JSON but never render.
+    #     #
+    #     # Fix: after all normal loading paths, if zero_line_set is still False, read the zero line
+    #     # directly from design_construction_config.json and set every required field manually.
+    #     # =================================================================================================================================================================
+    #     if not getattr(self, 'zero_line_set', False):
+    #         self.message_text.append("Zero line not set via normal loaders — attempting fallback from design_construction_config.json...")
+    #         try:
+    #             dc_config_path = os.path.join(full_layer_path, "design_construction_config.json")
+    #             if not os.path.exists(dc_config_path) and design_layer_path and os.path.exists(design_layer_path):
+    #                 dc_config_path = os.path.join(design_layer_path, "design_construction_config.json")
+
+    #             if os.path.exists(dc_config_path):
+    #                 with open(dc_config_path, 'r', encoding='utf-8') as f:
+    #                     dc_data = json.load(f)
+
+    #                 zl = dc_data.get("design", {}).get("zero_line_config", {})
+
+    #                 if zl and zl.get("zero_line_set"):
+    #                     p1_coords = zl["point1"]["coordinates"]   # [x, y, z]
+    #                     p2_coords = zl["point2"]["coordinates"]   # [x, y, z]
+
+    #                     self.zero_start_point  = p1_coords
+    #                     self.zero_end_point    = p2_coords
+    #                     self.zero_start_z      = p1_coords[2]
+    #                     self.total_distance    = zl.get("length_m_used", zl.get("length_m_measured", 0.0))
+    #                     self.zero_line_set     = True
+    #                     zero_loaded            = True
+
+    #                     self.message_text.append(
+    #                         f"✔ Zero line restored from design_construction_config.json "
+    #                         f"(length: {self.total_distance:.2f} m)"
+    #                     )
+    #                 else:
+    #                     self.message_text.append("Fallback: zero_line_config missing or zero_line_set=False in design_construction_config.json")
+    #             else:
+    #                 self.message_text.append("Fallback: design_construction_config.json not found in layer or design path")
+
+    #         except Exception as e:
+    #             self.message_text.append(f"Fallback zero line restore failed: {str(e)}")
+
+    #     # =================================================================================================================================================================
+    #     # Generate 3D planes
+    #     # =================================================================================================================================================================
+    #     if subfolder_type == "merger":
+    #         if self.zero_line_set and loaded_baselines:
+    #             self.generate_3d_planes_from_baselines(loaded_baselines)
+    #     else:
+    #         planes_generated = 0
+    #         width_summary = []
+
+    #         is_design_layer = (subfolder_type == "designs")
+    #         construction_exists = 'construction' in loaded_baselines
+
+    #         # Restore widths for all baselines first
+    #         for ltype, baseline_data in loaded_baselines.items():
+    #             width_m = baseline_data.get("width_meters", 0.0)
+    #             points_widths = [pt.get("width_m", 0.0) for poly in baseline_data.get("polylines", []) for pt in poly.get("points", [])]
+    #             max_pt_width = max(points_widths) if points_widths else 0.0
+    #             if width_m <= 0 and max_pt_width > 0:
+    #                 width_m = max_pt_width
+    #             if width_m > 0:
+    #                 self.baseline_widths[ltype] = float(width_m)
+
+    #         # Check if ANY baseline has curves
+    #         any_has_curves = False
+    #         for bl_data in loaded_baselines.values():
+    #             for poly in bl_data.get("polylines", []):
+    #                 if any("angle_deg" in pt for pt in poly.get("points", [])):
+    #                     any_has_curves = True
+    #                     break
+    #             if any_has_curves:
+    #                 break
+
+    #         if any_has_curves and self.zero_line_set:
+    #             self.generate_3d_planes_from_baselines(loaded_baselines)
+    #             planes_generated = len(loaded_baselines)
+    #             for ltype, baseline_data in loaded_baselines.items():
+    #                 width_m = self.baseline_widths.get(ltype, 10.0)
+    #                 width_summary.append(f"{ltype.replace('_', ' ').title()}: {width_m:.2f} m")
+    #         else:
+    #             for ltype, baseline_data in loaded_baselines.items():
+    #                 width_m = baseline_data.get("width_meters", 0.0)
+    #                 points_widths = [pt.get("width_m", 0.0) for poly in baseline_data.get("polylines", []) for pt in poly.get("points", [])]
+    #                 max_pt_width = max(points_widths) if points_widths else 0.0
+    #                 if width_m <= 0 and max_pt_width > 0:
+    #                     width_m = max_pt_width
+
+    #                 if width_m <= 0:
+    #                     self.message_text.append(
+    #                         f"Warning: Invalid width in {ltype}_baseline.json (found: {width_m}). Skipping 3D plane."
+    #                     )
+    #                     continue
+
+    #                 self.baseline_widths[ltype] = float(width_m)
+
+    #                 if is_design_layer and ltype == 'road_surface':
+    #                     config = getattr(self, 'baseline_configs', {}).get(ltype, {'mode': 'normal', 'width': width_m})
+    #                     added = self._recreate_road_surface_with_walls(
+    #                         baseline_data,
+    #                         loaded_baselines.get('construction') if construction_exists else None,
+    #                         config,
+    #                         np.array(self.zero_start_point),
+    #                         np.array(self.zero_end_point),
+    #                         self.total_distance,
+    #                         self.zero_start_z
+    #                     )
+    #                     if added > 0:
+    #                         planes_generated += 1
+    #                         width_summary.append(f"{ltype.replace('_', ' ').title()}: {width_m:.2f} m (with walls)")
+    #                         self.message_text.append(f"Generated road surface with walls for '{ltype}' — width {width_m:.2f} m")
+    #                 else:
+    #                     rgba = self.plane_colors.get(ltype, (0.5, 0.5, 0.5, 0.4))
+    #                     added = self._generate_baseline_plane(ltype, baseline_data, width_m, rgba)
+    #                     if added > 0:
+    #                         planes_generated += added
+    #                         width_summary.append(f"{ltype.replace('_', ' ').title()}: {width_m:.2f} m")
+    #                         self.message_text.append(f"Generated 3D plane for '{ltype}' — width {width_m:.2f} m")
+
+    #         if planes_generated > 0:
+    #             width_list = "\n".join(width_summary)
+    #             self.message_text.append(f"Total 3D planes generated: {planes_generated}")
+    #             self.message_text.append(f"Widths loaded from saved baselines:\n{width_list}")
+
+    #     # Now that 3D planes and curves are generated, we can load assets (like tunnels)
+    #     # which depend on the curved master path.
+    #     if subfolder_type == "designs":
+    #         self.load_design_layer_assets_from_json(full_layer_path)
+
+    #     # =================================================================================================================================================================
+    #     # Final UI setup
+    #     # =================================================================================================================================================================
+    #     self.show_graph_section(category)
+    #     self.canvas.draw_idle()
+
+    #     is_construction_layer = (subfolder_type == "construction")
+    #     if is_construction_layer:
+    #         self.switch_to_construction_mode()
+    #         self.zero_container.setVisible(False)
+    #         self.scale_section.setVisible(True)
+    #         self.add_material_line_button.setVisible(True)
+    #         self.message_text.append("Switched to Construction mode")
+    #         self.construction_layer_info = {'folder': full_layer_path, 'name': layer_name}
+    #         self.message_text.append(f"Construction layer ready: {layer_name}")
+    #     else:
+    #         for cont in [self.surface_container, self.construction_container, self.road_surface_container,
+    #                      self.zero_container, self.deck_line_container, self.projection_container,
+    #                      self.construction_dots_container]:
+    #             if cont:
+    #                 cont.setVisible(False)
+    #         if hasattr(self, 'bridge_zero_container'):
+    #             self.bridge_zero_container.setVisible(False)
+
+    #         if reference_type == "Road":
+    #             self.surface_container.setVisible(True)
+    #             self.construction_container.setVisible(True)
+    #             self.road_surface_container.setVisible(True)
+    #             self.zero_container.setVisible(True)
+    #         elif reference_type == "Bridge":
+    #             self.deck_line_container.setVisible(True)
+    #             self.projection_container.setVisible(True)
+    #             self.construction_dots_container.setVisible(True)
+    #             if hasattr(self, 'bridge_zero_container'):
+    #                 self.bridge_zero_container.setVisible(True)
+
+    #         self.preview_button.setVisible(True)
+    #         self.elivation_angle_button.setVisible(True)
+    #         self.threed_map_button.setVisible(True)
+    #         self.save_button.setVisible(True)
+
+    #     # Merger UI visibility
+    #     if subfolder_type == "merger":
+    #         self.two_D_frame.setVisible(False)
+    #         self.three_D_frame.setVisible(True)
+    #         self.bottom_section.setVisible(False)
+    #         if hasattr(self, 'herarchy_section') and self.herarchy_section is not None:
+    #             self.herarchy_section.setVisible(True)
+    #         if hasattr(self, 'mode_banner') and self.mode_banner is not None:
+    #             self.mode_banner.setText("MERGER MODE")
+    #             self.mode_banner.setVisible(True)
+    #     else:
+    #         if hasattr(self, 'herarchy_section') and self.herarchy_section is not None:
+    #             self.herarchy_section.setVisible(False)
+    #         if hasattr(self, 'mode_banner') and self.mode_banner is not None:
+    #             self.mode_banner.setVisible(False)
+
+    #     if dimension == "2D":
+    #         if hasattr(self, 'clear_2d_layer_panel'):
+    #             self.clear_2d_layer_panel()
+    #     else:
+    #         if hasattr(self, 'clear_3d_layer_panel'):
+    #             self.clear_3d_layer_panel()
+
+    #     try:
+    #         for cat in ["designs", "construction"]:
+    #             cat_path = os.path.join(worksheet_root, cat)
+    #             if os.path.exists(cat_path):
+    #                 for lyr in sorted(os.listdir(cat_path)):
+    #                     lyr_path = os.path.join(cat_path, lyr)
+    #                     if os.path.isdir(lyr_path):
+    #                         self.add_layer_to_panel(lyr, dimension, full_path=lyr_path, subfolder=cat)
+    #     except Exception as e:
+    #         self.message_text.append(f"Error loading layer names to panel: {e}")
+
+    #     linked_design = referenced_design_layer if subfolder_type == "construction" else None
+    #     if hasattr(self, 'set_layer_panel_highlight'):
+    #         self.set_layer_panel_highlight(
+    #             active_layer_name=layer_name,
+    #             active_subfolder=subfolder_type,
+    #             linked_design_layer_name=linked_design
+    #         )
+
+    #     self.load_bridge_components_from_json(full_layer_path)
+    #     self.load_decks_from_json(full_layer_path)
+
+    #     from json_manager import DesignConstructionManager
+
+    #     # =================================================================================================================================================================
+    #     # Load Lane Markings
+    #     # =================================================================================================================================================================
+    #     lane_data = DesignConstructionManager.get_lane_marking(full_layer_path)
+    #     if lane_data:
+    #         try:
+    #             self.visualize_lane_markings(lane_data)
+    #             self.message_text.append("✔ Lane markings restored from design_construction_config.json")
+    #         except Exception as e:
+    #             self.message_text.append(f"✘ Error loading lane markings: {str(e)}")
+    #             print(f"Error loading lane_marking: {e}")
+
+    #     # =================================================================================================================================================================
+    #     # Load Road Assets (Side Wall, Divider, Footpath)
+    #     # NOTE: These were silently skipped on buddy worksheets because zero_line_set was False.
+    #     #       The fallback block above now guarantees zero_line_set=True before we reach here.
+    #     # =================================================================================================================================================================
+    #     ref_assets = DesignConstructionManager.get_all_reference_assets(full_layer_path)
+    #     for asset_key, asset_data in ref_assets.items():
+    #         if asset_data:
+    #             try:
+    #                 if isinstance(asset_data, list):
+    #                     for sub_asset in asset_data:
+    #                         lane_offset = self._compute_lane_offset_from_json(
+    #                             full_layer_path, sub_asset.get('lane_name', '')
+    #                         )
+    #                         sub_asset['lane_offset'] = lane_offset
+    #                         self.visualize_road_asset(sub_asset)
+    #                     self.message_text.append(f"✔ {asset_key} restored from design_construction_config.json")
+    #                 else:
+    #                     lane_offset = self._compute_lane_offset_from_json(
+    #                         full_layer_path, asset_data.get('lane_name', '')
+    #                     )
+    #                     asset_data['lane_offset'] = lane_offset
+    #                     self.visualize_road_asset(asset_data)
+    #                     self.message_text.append(
+    #                         f"✔ {asset_data.get('asset_name', asset_key)} restored from design_construction_config.json"
+    #                     )
+    #             except Exception as e:
+    #                 self.message_text.append(f"✘ Error loading {asset_key}: {str(e)}")
+    #                 print(f"Error loading {asset_key}: {e}")
+
+    #     # =================================================================================================================================================================
+    #     # Load Pole Assets (Street Lights, Signal Poles)
+    #     # =================================================================================================================================================================
+    #     mappings = DesignConstructionManager.get_asset_mapping(full_layer_path)
+    #     if mappings:
+    #         try:
+    #             if not isinstance(mappings, list):
+    #                 mappings = [mappings]
+    #             for mapping in mappings:
+    #                 lane_offset = self._compute_lane_offset_from_json(
+    #                     full_layer_path, mapping.get('lane_name', '')
+    #                 )
+    #                 ref_asset_name = mapping.get('ref_asset_name', '').lower()
+    #                 ref_height = 0.0
+
+    #                 lane_n = mapping.get('lane_name', '')
+    #                 if "footpath" in ref_asset_name:
+    #                     rdata = DesignConstructionManager.get_reference_asset(full_layer_path, "footpath", lane_name=lane_n)
+    #                     if isinstance(rdata, dict):
+    #                         ref_height = float(rdata.get('height', 0.0))
+    #                 elif "side wall" in ref_asset_name:
+    #                     rdata = DesignConstructionManager.get_reference_asset(full_layer_path, "side_wall", lane_name=lane_n)
+    #                     if isinstance(rdata, dict):
+    #                         ref_height = float(rdata.get('height', 0.0))
+    #                 elif "divider" in ref_asset_name:
+    #                     rdata = DesignConstructionManager.get_reference_asset(full_layer_path, "divider", lane_name=lane_n)
+    #                     if isinstance(rdata, dict):
+    #                         ref_height = float(rdata.get('height', 0.0))
+
+    #                 pole_config = mapping.get('pole_config', {})
+    #                 pole_height = float(pole_config.get('pole.height', 12.0))
+    #                 pole_diameter = float(pole_config.get('pole.diameter', 0.12))
+
+    #                 cantilever_config = {
+    #                     'diameter': float(pole_config.get('cantilever.diameter', 0.07)),
+    #                     'length': float(pole_config.get('cantilever.length', 2.0)),
+    #                     'angle_from_vertical_deg': float(pole_config.get('cantilever.angle_from_vertical_deg', 90))
+    #                 }
+
+    #                 traffic_light_config = None
+    #                 m_pole_type = mapping.get('pole_type', 'street_light')
+    #                 if m_pole_type == 'signal_pole':
+    #                     traffic_light_config = {
+    #                         'plate_height': float(pole_config.get('traffic_light.plate_height', 3.0)),
+    #                         'plate_width': float(pole_config.get('traffic_light.plate_width', 0.5)),
+    #                         'plate_thickness': float(pole_config.get('traffic_light.plate_thickness', 0.5)),
+    #                         'light_radius': float(pole_config.get('traffic_light.light_radius', 0.15))
+    #                     }
+
+    #                 pole_positions = [p['chainage_abs'] for p in mapping.get('poles', [])]
+
+    #                 if pole_positions:
+    #                     self.create_pole_actors(
+    #                         pole_positions_abs=pole_positions,
+    #                         lane_offset=lane_offset,
+    #                         ref_height=ref_height,
+    #                         pole_height=pole_height,
+    #                         pole_diameter=pole_diameter,
+    #                         layer_folder=full_layer_path,
+    #                         pole_type=m_pole_type,
+    #                         cantilever_config=cantilever_config,
+    #                         traffic_light_config=traffic_light_config,
+    #                         pole_color_hex=mapping.get('pole_color', '#808080'),
+    #                         cantilever_color_hex=mapping.get('cantilever_color', '#808080')
+    #                     )
+    #                     self.message_text.append(
+    #                         f"✔ {mapping.get('title', 'Poles')} restored ({len(pole_positions)} poles)"
+    #                     )
+    #         except Exception as e:
+    #             self.message_text.append(f"✘ Error loading pole assets: {str(e)}")
+    #             print(f"Error loading pole mappings: {e}")
+
+    #     # =================================================================================================================================================================
+    #     # Final messages
+    #     # =================================================================================================================================================================
+    #     self.message_text.append(f"Opened: {worksheet_name} — {subfolder_type}/{layer_name}")
+    #     self.message_text.append(f" • Point Cloud: {'Reused' if is_same_worksheet and pc_loaded else 'Loaded' if pc_loaded else 'Not loaded'}")
+    #     self.message_text.append(f" • Baselines: {len(loaded_baselines)}")
+    #     self.message_text.append(f" • Zero Line: {'Loaded' if zero_loaded else 'Not loaded'}")
+    #     self.message_text.append(f" • Curve Labels: {len(self.curve_labels)}")
+
+    #     QMessageBox.information(self, "Worksheet Opened",
+    #                             f"<b>{worksheet_name}</b> — {layer_name}\n\n"
+    #                             f"Type: {subfolder_type.capitalize()}\n"
+    #                             f"Point Cloud: {'Reused (same worksheet)' if is_same_worksheet and pc_loaded else 'Loaded' if pc_loaded else 'No'}\n"
+    #                             f"3D Planes: {len(loaded_baselines)}\n"
+    #                             f"Zero Line: {'Yes' if zero_loaded else 'No'}")
+
+    #     self.canvas.draw_idle()
+    #     if hasattr(self, 'scale_canvas'):
+    #         self.update_chainage_ticks()
+    #         self.update_scale_ticks()
+    #         self.scale_canvas.draw_idle()
+    #     if hasattr(self, 'vtk_widget'):
+    #         self.vtk_widget.GetRenderWindow().Render()
+
+    #     # =================================================================================================================================================================
+    #     # Auto-sync eye state & track actors (only when NOT called from toggle_eye)
+    #     # =================================================================================================================================================================
+    #     if not skip_clear:
+    #         # ── Snapshot actors AFTER loading ──────────────────────────────────
+    #         _actors_after_load = set()
+    #         if hasattr(self, 'renderer') and self.renderer:
+    #             _ac = self.renderer.GetActors()
+    #             _ac.InitTraversal()
+    #             for _i in range(_ac.GetNumberOfItems()):
+    #                 _actors_after_load.add(_ac.GetNextActor())
+
+    #         # ── Track new actors for this layer ────────────────────────────────
+    #         _new_actors = _actors_after_load - _actors_before_load
+    #         if _new_actors:
+    #             if not hasattr(self, '_per_layer_actors'):
+    #                 self._per_layer_actors = {}
+    #             if full_layer_path not in self._per_layer_actors:
+    #                 self._per_layer_actors[full_layer_path] = []
+    #             self._per_layer_actors[full_layer_path].extend(list(_new_actors))
+    #             self.message_text.append(
+    #                 f"Auto-tracked {len(_new_actors)} actor(s) for layer: {layer_name}"
+    #             )
+
+    #         # ── Set eye state to OPEN for this layer ──────────────────────────
+    #         if not hasattr(self, '_eye_open_states'):
+    #             self._eye_open_states = {}
+    #         self._eye_open_states[full_layer_path] = True
+
+    #         # ── Refresh the 2D panel so eye buttons reflect the new state ─────
+    #         if hasattr(self, '_refresh_2d_layers_for_worksheets'):
+    #             self._refresh_2d_layers_for_worksheets()
+
+    # ======================================================================================================================================
+# Define the function for the open or relaod the data from the worksheet
+
     def _open_worksheet_from_data(self, data):
         config = data["worksheet_data"]
         worksheet_name = config.get("worksheet_name")
@@ -5571,7 +6444,8 @@ class PointCloudViewer(ApplicationUI):
         lane_data = DesignConstructionManager.get_lane_marking(full_layer_path)
         if lane_data:
             try:
-                self.visualize_lane_markings(lane_data)
+                should_clear = not getattr(self, '_skip_layer_clear', False)
+                self.visualize_lane_markings(lane_data, clear_existing=should_clear)
                 self.message_text.append("✔ Lane markings restored from design_construction_config.json")
             except Exception as e:
                 self.message_text.append(f"✘ Error loading lane markings: {str(e)}")
@@ -6206,7 +7080,7 @@ class PointCloudViewer(ApplicationUI):
                             chevron.setText("▼")
                             chevron.setProperty("expanded", is_expanded)
                             self.right_section.setMinimumHeight(1400)
-                            self.bottom_section.setVisible(False)
+                            self.bottom_section.setVisible(True)
                             # Load zero line from this design layer using unified config
                             zero_loaded = self.load_zero_line_from_merger_layer(merger_layer_path)
                             if zero_loaded:
@@ -9554,7 +10428,19 @@ class PointCloudViewer(ApplicationUI):
 
         # Save the master path samples so other actors (like Tunnel) can use the exact curve X/Y
         self.master_curved_path_samples = path_samples
- 
+     ##### Mayur 17-7-2026 tunnel layers   
+        # Save specific to this layer so we can retrieve it even if another layer overwrites the master
+        l_path = getattr(self, 'current_design_layer_path', 'unknown')
+        for b_data in loaded_baselines.values():
+            if "layer_path" in b_data:
+                l_path = b_data["layer_path"]
+                break
+        
+        if not hasattr(self, 'layer_path_samples'):
+            self.layer_path_samples = {}
+        if l_path:
+            self.layer_path_samples[l_path] = path_samples
+ #######################################################################################
         # ==================================================================
         # 4.  GENERATE PLANE STRIPS for each baseline type
         # ==================================================================
@@ -21849,6 +22735,69 @@ class PointCloudViewer(ApplicationUI):
                 ### Mayur Wakhare 3-7-2026 Tunnel light json
                 self._sync_tunnel_lights_to_json()
             ###################################################
+##### Mayur Wakhare 6-7-2026 tunnel fan 
+    def open_tunnel_exhaust_fan_dialog(self):
+        """Open the Tunnel Exhaust Fan dialog."""
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        import os
+        from PyQt5.QtWidgets import QMessageBox, QDialog
+        if not layer_folder or not os.path.exists(layer_folder):
+            QMessageBox.warning(self, "No Active Tunnel", "No active tunnel found. Please create or select a tunnel design first.")
+            return
+
+        tunnel_found = False
+        try:
+            from json_manager import DesignConstructionManager
+            m_data = DesignConstructionManager.load_master(layer_folder)
+            t_conf = m_data.get("design", {}).get("tunnel", {})
+            if t_conf and "start_km" in t_conf:
+                tunnel_found = True
+        except Exception:
+            pass
+
+        if not tunnel_found:
+            QMessageBox.warning(self, "No Active Tunnel", "No active tunnel configuration found in the current layer.")
+            return
+
+        from dialogs import TunnelExhaustFanDialog
+        dialog = TunnelExhaustFanDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data:
+                self._place_tunnel_exhaust_fans(data)
+###### Mayur Wakhare 7-7-2026 pipe dailog box tunnel 
+    def open_water_pipe_dialog(self):
+        """Open the Water Pipe dialog."""
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        import os
+        from PyQt5.QtWidgets import QMessageBox, QDialog
+        if not layer_folder or not os.path.exists(layer_folder):
+            QMessageBox.warning(self, "No Active Tunnel", "No active tunnel found. Please create or select a tunnel design first.")
+            return
+
+        tunnel_found = False
+        try:
+            from json_manager import DesignConstructionManager
+            m_data = DesignConstructionManager.load_master(layer_folder)
+            t_conf = m_data.get("design", {}).get("tunnel", {})
+            if t_conf and "start_km" in t_conf:
+                tunnel_found = True
+        except Exception:
+            pass
+
+        if not tunnel_found:
+            QMessageBox.warning(self, "No Tunnel Data", "No tunnel configuration found in the active design layer.")
+            return
+
+        from dialogs import WaterPipeDialog
+        dialog = WaterPipeDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data:
+                print("Water Pipe OK clicked with data:", data)
+                self._place_water_pipe(data)
+
+#################################################################################################################
 ###### Mayur Wakhare 3-7-2026 Tunnel Fire
     def open_fire_extinguisher_dialog(self):
         """Open the Fire Extinguisher dialog."""
@@ -21877,7 +22826,459 @@ class PointCloudViewer(ApplicationUI):
             data = dialog.get_data()
             if data:
                 self._place_fire_extinguishers(data)
+##### Mayur Wakhare 4-7-2026 cctv camera tunnel
+    def open_cctv_camera_dialog(self):
+        """Open the CCTV Camera dialog."""
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        import os
+        if not layer_folder or not os.path.exists(layer_folder):
+            QMessageBox.warning(self, "No Active Tunnel", "No active tunnel found. Please create or select a tunnel design first.")
+            return
 
+        tunnel_found = False
+        try:
+            from json_manager import DesignConstructionManager
+            m_data = DesignConstructionManager.load_master(layer_folder)
+            t_conf = m_data.get("design", {}).get("tunnel", {})
+            if t_conf and "start_km" in t_conf:
+                tunnel_found = True
+        except Exception:
+            pass
+
+        if not tunnel_found:
+            QMessageBox.warning(self, "No Active Tunnel", "No active tunnel configuration found in the current layer.")
+            return
+
+        dialog = CCTVCameraDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data:
+                self._place_cctv_cameras(data)
+                self._sync_cctv_cameras_to_json()
+##########################################################################################################
+    #### Mayur Wakhare 4-7-2026 Tunnel Signage Board
+    def open_tunnel_info_board_dialog(self):
+        """Open the Tunnel Information Board dialog."""
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        import os
+        from PyQt5.QtWidgets import QMessageBox
+        if not layer_folder or not os.path.exists(layer_folder):
+            QMessageBox.warning(self, "No Active Tunnel", "No active tunnel found. Please create or select a tunnel design first.")
+            return
+
+        from dialogs import TunnelInfoBoardDialog
+        from PyQt5.QtWidgets import QDialog
+        dialog = TunnelInfoBoardDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data:
+                self._place_tunnel_info_board(data)
+                self._sync_tunnel_info_boards_to_json()
+
+    def open_speed_limit_board_dialog(self):
+        """Open the Speed Limit Board dialog."""
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        import os
+        from PyQt5.QtWidgets import QMessageBox
+        if not layer_folder or not os.path.exists(layer_folder):
+            QMessageBox.warning(self, "No Active Tunnel", "No active tunnel found. Please create or select a tunnel design first.")
+            return
+
+        from dialogs import SpeedLimitBoardDialog
+        from PyQt5.QtWidgets import QDialog
+        dialog = SpeedLimitBoardDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data:
+                # Placeholder for placement logic
+                if hasattr(self, 'output_list'):
+                    self.output_list.addItem(f"✅ Speed Limit Board logic pending (KM: {data.get('km', 0)}, CH: {data.get('chainage', 0)}, Speed: {data.get('speed_limit', 80)} km/h).")
+
+    def open_emergency_exit_board_dialog(self):
+        self._open_generic_board_dialog("EmergencyExitBoardDialog", "Emergency Exit Board")
+
+    def open_fire_extinguisher_dir_board_dialog(self):
+        self._open_generic_board_dialog("FireExtinguisherDirBoardDialog", "Fire Extinguisher Direction Board")
+
+    def open_emergency_telephone_board_dialog(self):
+        self._open_generic_board_dialog("EmergencyTelephoneBoardDialog", "Emergency Telephone Board")
+
+    def open_cctv_surveillance_board_dialog(self):
+        self._open_generic_board_dialog("CCTVSurveillanceBoardDialog", "CCTV Surveillance Board")
+
+    def open_headlights_on_board_dialog(self):
+        self._open_generic_board_dialog("HeadlightsONBoardDialog", "Headlights ON Board")
+
+    def open_no_overtaking_board_dialog(self):
+        self._open_generic_board_dialog("NoOvertakingBoardDialog", "No Overtaking Board")
+
+
+    def open_exit_distance_board_dialog(self):
+        self._open_generic_board_dialog("ExitDistanceBoardDialog", "Exit Distance Board")
+
+    def _open_generic_board_dialog(self, dialog_class_name, board_name):
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        import os
+        from PyQt5.QtWidgets import QMessageBox, QDialog
+        if not layer_folder or not os.path.exists(layer_folder):
+            QMessageBox.warning(self, "No Active Tunnel", "No active tunnel found. Please create or select a tunnel design first.")
+            return
+
+        import dialogs
+        DialogClass = getattr(dialogs, dialog_class_name, None)
+        if not DialogClass:
+            return
+
+        dialog = DialogClass(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data:
+                if dialog_class_name == "EmergencyTelephoneBoardDialog":
+                    self._place_emergency_telephone_board(data)
+               
+
+                else:
+                    if hasattr(self, 'output_list'):
+                        km_val = data.get('km', data.get('start_km', 0))
+                        ch_val = data.get('chainage', data.get('start_chainage', 0))
+                        self.output_list.addItem(f"✅ {board_name} logic pending (KM: {km_val}, CH: {ch_val}).")
+##########################################################################################################
+######### Mayur Wakhare 5-7-2026 Tunnel information board
+    def _place_tunnel_info_board(self, data):
+        """Place the Tunnel Information Board at the requested KM and Chainage."""
+        import numpy as np
+        import math
+        import uuid as _uuid
+        abs_ch = data["km"] * 1000 + data["chainage"]
+        
+        path_samples = self.get_curve_aware_path(abs_ch, abs_ch, step=1.0)
+        if not path_samples:
+            path_samples = self.get_curve_aware_path(abs_ch - 0.5, abs_ch + 0.5, step=0.5)
+            if not path_samples:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Placement Error", f"Could not locate chainage {abs_ch} on the road geometry.")
+                return
+                
+        _, P_base, perp_vec, dir_vec = path_samples[0]
+        up_vec = np.array([0.0, 0.0, 1.0])
+        
+        # --- Compute tunnel ceiling Z from arc_points (same method as exhaust fans) ---
+        ceiling_z = None
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        if layer_folder:
+            import os
+            if os.path.exists(layer_folder):
+                try:
+                    from json_manager import DesignConstructionManager
+                    master_data_tmp = DesignConstructionManager.load_master(layer_folder)
+                    tunnel_config = master_data_tmp.get("design", {}).get("tunnel")
+                    if tunnel_config:
+                        arc_points_raw = tunnel_config.get("arc_points", [])
+                        if len(arc_points_raw) >= 3:
+                            pts_local = []
+                            for pt_raw in arc_points_raw[:3]:
+                                delta = np.array(pt_raw, dtype=float) - P_base
+                                pts_local.append((float(np.dot(delta, perp_vec)), float(np.dot(delta, up_vec))))
+                            u1, v1 = pts_local[0]; u2, v2 = pts_local[1]; u3, v3 = pts_local[2]
+                            A_mat = np.array([[2*u1, 2*v1, 1], [2*u2, 2*v2, 1], [2*u3, 2*v3, 1]], dtype=float)
+                            B_vec_m = np.array([u1**2+v1**2, u2**2+v2**2, u3**2+v3**2], dtype=float)
+                            if abs(np.linalg.det(A_mat)) < 1e-12:
+                                R = max(abs(u3 - u1) / 2.0, 3.0)
+                                vc = 0.0
+                            else:
+                                sol = np.linalg.solve(A_mat, B_vec_m)
+                                vc = sol[1]
+                                disc = sol[2] + sol[0]**2 + vc**2
+                                R = math.sqrt(disc) if disc > 0 else 5.0
+                            if R < 0.1: R = 3.0
+                            elif R > 500: R = 10.0
+                            # Ceiling Z = base Z + arc center vertical offset + radius
+                            ceiling_z = float(P_base[2] + vc + R)
+                except Exception:
+                    pass
+        
+        # Fallback if ceiling could not be computed
+        if ceiling_z is None:
+            ceiling_z = float(P_base[2] + 7.0)
+        
+        # Position board center ~1.0 m below the ceiling
+        world_pos = P_base.copy()
+        world_pos[2] = ceiling_z - 1.0
+        
+        actor = self._create_tunnel_info_board_actor(data, world_pos, perp_vec, dir_vec, ceiling_z=ceiling_z)
+        
+        if not hasattr(self, 'tunnel_signage_actors'):
+            self.tunnel_signage_actors = []
+        ## Mayur Wakhare 6-7-2026 Tunnel info board json
+        if not hasattr(self, 'tunnel_info_board_batches'):
+            self.tunnel_info_board_batches = []
+          ###########################################################################################  
+        self.tunnel_signage_actors.append(actor)
+        self.renderer.AddActor(actor)
+        self.vtk_widget.GetRenderWindow().Render()
+        ###  Mayur Wakhare 6-7-2026 Tunnel info board json
+        board_entry = {
+            "id": str(_uuid.uuid4()),
+            "config": {
+                "km": data.get("km", 0),
+                "chainage": data.get("chainage", 0),
+                "display_text": data.get("display_text", "WELCOME\nDRIVE SAFELY"),
+                "speed_limit": data.get("speed_limit", "80 km/h"),
+                "asset_name": "TunnelInformationBoard"
+            },
+            "world_position": world_pos.tolist(),
+            "normal": perp_vec.tolist(),
+            "dir_vec": dir_vec.tolist(),
+            "scale": [1.0, 1.0, 1.0],
+            "ceiling_z": ceiling_z,
+            "actor": actor
+        }
+        self.tunnel_info_board_batches.append([board_entry])
+        self._sync_tunnel_info_boards_to_json()
+        ####################################################################################################
+        
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem(f"✅ Placed LED Tunnel Information Board at KM {data['km']} + {data['chainage']}.")
+
+### Mayur Wakhare 6-7-2026 tunnel info board actor
+    def _create_generic_sign_board_actor(self, data, pos, normal, dir_vec, display_text, board_color, border_color, text_color, metadata_type, orientation_mode="perpendicular", include_hangers=True, text_ry=0, hanger_ceiling_z=None):
+        import vtk
+        import numpy as np
+        
+        append_filter = vtk.vtkAppendPolyData()
+        
+        def add_part(source, color, tx, ty, tz, rx=0, ry=0, rz=0):
+            source.Update()
+            polydata = vtk.vtkPolyData()
+            polydata.DeepCopy(source.GetOutput())
+            
+            colors = vtk.vtkUnsignedCharArray()
+            colors.SetNumberOfComponents(3)
+            colors.SetName("Colors")
+            num_points = polydata.GetNumberOfPoints()
+            r, g, b = color
+            for _ in range(num_points):
+                colors.InsertNextTuple3(int(r*255), int(g*255), int(b*255))
+            polydata.GetPointData().SetScalars(colors)
+            
+            transform = vtk.vtkTransform()
+            transform.Translate(tx, ty, tz)
+            if rx: transform.RotateX(rx)
+            if ry: transform.RotateY(ry)
+            if rz: transform.RotateZ(rz)
+            
+            tf = vtk.vtkTransformPolyDataFilter()
+            tf.SetInputData(polydata)
+            tf.SetTransform(transform)
+            tf.Update()
+            append_filter.AddInputData(tf.GetOutput())
+
+        lines = display_text.split("\n")
+        num_lines = len(lines)
+        
+        # --- Measure each line individually ---
+        line_metrics = []  # (line_text, raw_width, raw_height)
+        for line in lines:
+            ls = vtk.vtkVectorText()
+            ls.SetText(line if line.strip() else " ")
+            ls.Update()
+            b = ls.GetOutput().GetBounds()
+            lw = b[1] - b[0]
+            lh = b[3] - b[2]
+            line_metrics.append((line, lw, lh))
+        
+        max_raw_w = max(m[1] for m in line_metrics) if line_metrics else 1.0
+        single_line_h = max(m[2] for m in line_metrics) if line_metrics else 1.0
+        if max_raw_w < 1e-6:
+            max_raw_w = 1.0
+        if single_line_h < 1e-6:
+            single_line_h = 1.0
+        
+        line_gap_ratio = 0.45  # gap between lines as fraction of line height
+        total_raw_h = num_lines * single_line_h + max(0, num_lines - 1) * single_line_h * line_gap_ratio
+        
+        # --- Padding (8% on each side) ---
+        pad_frac = 0.08
+        
+        # --- Smart sizing: prefer enlarging board over shrinking text ---
+        MIN_W = 5.0
+        MIN_H = 1.5
+        
+        # Start with a generous target scale so short text fills the board
+        target_text_w = MIN_W * (1 - 2 * pad_frac)
+        target_text_h = MIN_H * (1 - 2 * pad_frac)
+        
+        scale_w = target_text_w / max_raw_w
+        scale_h = target_text_h / total_raw_h
+        
+        # Use the smaller scale so text fits both directions
+        text_scale = min(scale_w, scale_h)
+        
+        # Clamp: don't make text unreasonably large or tiny
+        MAX_SCALE = 3.0
+        MIN_SCALE = 0.3
+        text_scale = max(MIN_SCALE, min(MAX_SCALE, text_scale))
+        
+        # Compute actual text dimensions at chosen scale
+        scaled_text_w = max_raw_w * text_scale
+        scaled_text_h = total_raw_h * text_scale
+        
+        # Board must be large enough for the scaled text + padding, but not smaller than minimums
+        board_width = max(MIN_W, scaled_text_w / (1 - 2 * pad_frac))
+        board_height = max(MIN_H, scaled_text_h / (1 - 2 * pad_frac))
+        
+        board_thickness = 0.15
+        
+        frame = vtk.vtkCubeSource()
+        frame.SetXLength(board_width + 0.1)
+        frame.SetYLength(board_thickness)
+        frame.SetZLength(board_height + 0.1)
+        add_part(frame, border_color, 0, 0, 0)
+        
+        panel = vtk.vtkCubeSource()
+        panel.SetXLength(board_width)
+        panel.SetYLength(board_thickness + 0.02)
+        panel.SetZLength(board_height)
+        add_part(panel, board_color, 0, 0, 0)
+        
+        if include_hangers:
+            # --- Compute hanger length dynamically from ceiling, or fallback ---
+            frame_top_z_local = (board_height + 0.1) / 2.0  # top of frame in local coords
+            if hanger_ceiling_z is not None:
+                # ceiling_z is in world coords, pos[2] is board center in world coords
+                hanger_length = hanger_ceiling_z - pos[2] - frame_top_z_local
+                hanger_length = max(hanger_length, 0.1)  # clamp to avoid negative/zero
+            else:
+                hanger_length = 1.5  # original hardcoded fallback
+            hanger_center_z = frame_top_z_local + hanger_length / 2.0
+            hanger = vtk.vtkCylinderSource()
+            hanger.SetRadius(0.06)
+            hanger.SetHeight(hanger_length)
+            hanger.SetResolution(16)
+            add_part(hanger, border_color, -board_width/3, 0, hanger_center_z, rx=90)
+            add_part(hanger, border_color, board_width/3, 0, hanger_center_z, rx=90)
+        
+        # --- Render each line centered on the board ---
+        scaled_line_h = single_line_h * text_scale
+        scaled_gap = single_line_h * line_gap_ratio * text_scale
+        total_block_h = num_lines * scaled_line_h + max(0, num_lines - 1) * scaled_gap
+        # top_start: the Z offset (in board-local XZ) of the top of the first line
+        top_start = total_block_h / 2.0
+        
+        for i, (line_text, raw_w, raw_h) in enumerate(line_metrics):
+            if not line_text.strip():
+                continue
+            
+            ts = vtk.vtkVectorText()
+            ts.SetText(line_text)
+            ts.Update()
+            
+            extrusion = vtk.vtkLinearExtrusionFilter()
+            extrusion.SetInputData(ts.GetOutput())
+            extrusion.SetExtrusionTypeToNormalExtrusion()
+            extrusion.SetVector(0, 0, 1)
+            extrusion.SetScaleFactor(0.05)
+            extrusion.Update()
+            
+            text_poly = vtk.vtkPolyData()
+            text_poly.DeepCopy(extrusion.GetOutput())
+            
+            colors = vtk.vtkUnsignedCharArray()
+            colors.SetNumberOfComponents(3)
+            colors.SetName("Colors")
+            num_pts = text_poly.GetNumberOfPoints()
+            for _ in range(num_pts):
+                colors.InsertNextTuple3(int(text_color[0]), int(text_color[1]), int(text_color[2]))
+            text_poly.GetPointData().SetScalars(colors)
+            
+            # Center this line horizontally; position vertically from top
+            line_center_z = top_start - i * (scaled_line_h + scaled_gap) - scaled_line_h / 2.0
+            
+            tb = extrusion.GetOutput().GetBounds()
+            line_raw_w = tb[1] - tb[0]
+            line_raw_h = tb[3] - tb[2]
+            
+            transform = vtk.vtkTransform()
+            transform.Translate(0, board_thickness / 2 + 0.02, line_center_z)
+            transform.RotateX(90)
+            if text_ry:
+                transform.RotateY(text_ry)
+            transform.Scale(text_scale, text_scale, text_scale)
+            transform.Translate(-line_raw_w / 2.0, -line_raw_h / 2.0, 0)
+            
+            tf = vtk.vtkTransformPolyDataFilter()
+            tf.SetInputData(text_poly)
+            tf.SetTransform(transform)
+            tf.Update()
+            append_filter.AddInputData(tf.GetOutput())
+        
+        append_filter.Update()
+        
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputData(append_filter.GetOutput())
+        
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+     ### Mayur Wakhare 6-7-2026 telephone board parallel tunnel   
+        if orientation_mode == "parallel":
+            Y = normal
+            Z = np.array([0.0, 0.0, 1.0])
+            Z = Z - np.dot(Z, Y) * Y
+            if np.linalg.norm(Z) < 1e-6:
+                Z = dir_vec / np.linalg.norm(dir_vec)
+            else:
+                Z = Z / np.linalg.norm(Z)
+            X = np.cross(Y, Z)
+        else:
+            ###########################################
+            Z = np.array([0.0, 0.0, 1.0])
+            Y = -dir_vec
+            Y[2] = 0
+            n_Y = np.linalg.norm(Y)
+            if n_Y > 1e-6:
+                Y = Y / n_Y
+            else:
+                Y = np.array([0.0, -1.0, 0.0])
+            X = np.cross(Z, Y)
+        
+        matrix = vtk.vtkMatrix4x4()
+        for i in range(3):
+            matrix.SetElement(i, 0, X[i])
+            matrix.SetElement(i, 1, Y[i])
+            matrix.SetElement(i, 2, Z[i])
+            matrix.SetElement(i, 3, pos[i])
+            
+        actor.SetUserMatrix(matrix)
+        
+        if not hasattr(actor, "asset_metadata"):
+            actor.asset_metadata = {}
+        import uuid
+        actor.asset_metadata["id"] = str(uuid.uuid4())
+        actor.asset_metadata["type"] = metadata_type
+        actor.asset_metadata["data"] = data
+            
+        return actor
+##### Mayur Wakhare 6-7-2026 tunnel info board perpenducular telephone board apply 
+#### (reference info board for making telephone board)
+    def _create_tunnel_info_board_actor(self, data, pos, normal, dir_vec, ceiling_z=None):
+        text_str = data.get("display_text", "WELCOME\nDRIVE SAFELY")
+        speed_limit = data.get("speed_limit", "").strip()
+        if speed_limit:
+            text_str = text_str + "\nSPEED LIMIT : " + speed_limit
+            
+        return self._create_generic_sign_board_actor(
+            data, pos, normal, dir_vec,
+            display_text=text_str,
+            board_color=(0.05, 0.05, 0.05),
+            border_color=(0.6, 0.6, 0.65),
+            text_color=(255, 200, 50),
+            metadata_type="tunnel_information_board",
+            orientation_mode="perpendicular",
+            include_hangers=True,
+            text_ry=0,
+            hanger_ceiling_z=ceiling_z
+        )
+##########################################################################################################
     def _create_fire_extinguisher_actor(self, pos, normal, dir_vec):
         import vtk
         import numpy as np
@@ -22020,7 +23421,537 @@ class PointCloudViewer(ApplicationUI):
         actor.SetMapper(mapper)
         
         return actor
+###### Mayur Wakhare 4-7-2026 cctv camera tunnel
+    def _create_cctv_camera_actor(self, pos, normal, dir_vec, yaw_offset=0, vertical_drop=0):
+        import vtk
+        import numpy as np
+        
+        append_filter = vtk.vtkAppendPolyData()
+        
+        def add_part(source, color, local_transform):
+            source.Update()
+            polydata = vtk.vtkPolyData()
+            polydata.DeepCopy(source.GetOutput())
+            
+            colors = vtk.vtkUnsignedCharArray()
+            colors.SetNumberOfComponents(3)
+            colors.SetName("Colors")
+            num_points = polydata.GetNumberOfPoints()
+            r, g, b = color
+            for _ in range(num_points):
+                colors.InsertNextTuple3(int(r*255), int(g*255), int(b*255))
+            polydata.GetPointData().SetScalars(colors)
+            
+            transformFilter = vtk.vtkTransformPolyDataFilter()
+            transformFilter.SetInputData(polydata)
+            transformFilter.SetTransform(local_transform)
+            transformFilter.Update()
+            
+            append_filter.AddInputData(transformFilter.GetOutput())
 
+        WHITE = (0.9, 0.9, 0.9)
+        BLACK = (0.1, 0.1, 0.1)
+        DARK_GRAY = (0.2, 0.2, 0.2)
+        SILVER = (0.75, 0.75, 0.75)
+        GLASS = (0.05, 0.05, 0.08)
+        IR_COLOR = (0.15, 0.15, 0.15)
+        LENS_COLOR = (0.1, 0.1, 0.3)
+
+        # 1. Wall Mounting Bracket (Heavy-duty)
+        bracket = vtk.vtkCubeSource()
+        bracket.SetXLength(0.3)
+        bracket.SetYLength(0.04)
+        bracket.SetZLength(0.3 + vertical_drop)
+        t_bracket = vtk.vtkTransform()
+        t_bracket.Translate(0, 0.02, vertical_drop / 2.0)
+        add_part(bracket, BLACK, t_bracket)
+
+        # Mounting Screws on the bracket
+        for dx in [-0.12, 0.12]:
+            for dz in [-0.12, 0.12]:
+                screw = vtk.vtkCylinderSource()
+                screw.SetRadius(0.02)
+                screw.SetHeight(0.06)
+                screw.SetResolution(10)
+                t_screw = vtk.vtkTransform()
+                t_screw.PostMultiply()
+                t_screw.Translate(dx, 0.02, dz)
+                add_part(screw, SILVER, t_screw)
+
+        # 2. Mounting Arm (Black adjustable cylinder)
+        arm = vtk.vtkCylinderSource()
+        arm.SetRadius(0.06)
+        arm.SetHeight(0.5)
+        arm.SetResolution(20)
+        t_arm = vtk.vtkTransform()
+        t_arm.PostMultiply()
+        t_arm.Translate(0, 0.15, 0)
+        add_part(arm, BLACK, t_arm)
+
+        # 3. Swivel Joint (Sphere)
+        joint = vtk.vtkSphereSource()
+        joint.SetRadius(0.08)
+        joint.SetThetaResolution(20)
+        joint.SetPhiResolution(20)
+        t_joint = vtk.vtkTransform()
+        t_joint.Translate(0, 0.5, 0)
+        add_part(joint, SILVER, t_joint)
+
+        # 4. Camera Assembly Transform
+        # Attach the bottom rear of the camera to the swivel joint.
+        t_cam = vtk.vtkTransform()
+        t_cam.PostMultiply()
+        t_cam.RotateY(25)   # Pitch down by 25 degrees
+        t_cam.RotateZ(30 + yaw_offset)   # Yaw towards the roadway
+        t_cam.Translate(0, 0.5, 0)
+        
+        # 4a. Camera Body (Modern rectangular with sun shield)
+        # Main Body: 1.0m long, 0.4m wide, 0.38m high
+        body = vtk.vtkCubeSource()
+        body.SetXLength(1.0)
+        body.SetYLength(0.38)
+        body.SetZLength(0.38)
+        t_body = vtk.vtkTransform()
+        t_body.PostMultiply()
+        t_body.Translate(0.1, 0, 0.2) # Center it slightly forward and up from the joint
+        t_body.Concatenate(t_cam)
+        add_part(body, WHITE, t_body)
+
+        # 4b. Sun Shield / Top Cover
+        shield = vtk.vtkCubeSource()
+        shield.SetXLength(1.1)
+        shield.SetYLength(0.42)
+        shield.SetZLength(0.04)
+        t_shield = vtk.vtkTransform()
+        t_shield.PostMultiply()
+        t_shield.Translate(0.15, 0, 0.41)
+        t_shield.Concatenate(t_cam)
+        add_part(shield, WHITE, t_shield)
+        
+        # 4c. Front Protective Glass
+        glass = vtk.vtkCubeSource()
+        glass.SetXLength(0.02)
+        glass.SetYLength(0.36)
+        glass.SetZLength(0.36)
+        t_glass = vtk.vtkTransform()
+        t_glass.PostMultiply()
+        t_glass.Translate(0.61, 0, 0.2)
+        t_glass.Concatenate(t_cam)
+        add_part(glass, GLASS, t_glass)
+
+        # 4d. IR LED Ring (Flat cylinder behind the lens)
+        ir_ring = vtk.vtkCylinderSource()
+        ir_ring.SetRadius(0.14)
+        ir_ring.SetHeight(0.01)
+        ir_ring.SetResolution(30)
+        t_ir = vtk.vtkTransform()
+        t_ir.PostMultiply()
+        t_ir.RotateZ(90)
+        t_ir.Translate(0.615, 0, 0.2)
+        t_ir.Concatenate(t_cam)
+        add_part(ir_ring, IR_COLOR, t_ir)
+
+        # 4e. Realistic Camera Lens
+        lens = vtk.vtkCylinderSource()
+        lens.SetRadius(0.06)
+        lens.SetHeight(0.03)
+        lens.SetResolution(20)
+        t_lens = vtk.vtkTransform()
+        t_lens.PostMultiply()
+        t_lens.RotateZ(90)
+        t_lens.Translate(0.62, 0, 0.2)
+        t_lens.Concatenate(t_cam)
+        add_part(lens, LENS_COLOR, t_lens)
+
+        # 4f. Side Ventilation Grooves
+        for y_side in [-0.19, 0.19]:
+            for x_pos in [0.0, 0.1, 0.2]:
+                groove = vtk.vtkCubeSource()
+                groove.SetXLength(0.04)
+                groove.SetYLength(0.02)
+                groove.SetZLength(0.15)
+                t_groove = vtk.vtkTransform()
+                t_groove.PostMultiply()
+                t_groove.Translate(x_pos, y_side, 0.2)
+                t_groove.Concatenate(t_cam)
+                add_part(groove, BLACK, t_groove)
+
+        append_filter.Update()
+
+        # Global Transformation
+        Z = np.array([0.0, 0.0, 1.0])
+        Y = normal
+        Y = Y - np.dot(Y, Z) * Z
+        if np.linalg.norm(Y) > 1e-6:
+            Y = Y / np.linalg.norm(Y)
+        else:
+            Y = np.array([0.0, 1.0, 0.0])
+        X = np.cross(Y, Z)
+        
+        # Re-orient so it looks along dir_vec
+        # But wait, local X was assumed to be dir_vec, local Y is normal.
+        # Let's verify X direction
+        dot_product = np.dot(X, dir_vec)
+        if dot_product < 0:
+            X = -X
+            # If X is reversed, we need to ensure Y remains the normal
+            # So Z must be reversed to keep right-hand system? No, Z is always up.
+            # Actually, X = dir_vec. Y = normal. Z = cross(X, Y).
+            # Let's enforce that.
+        
+        # Enforce exact local axes
+        X_local = dir_vec
+        Y_local = normal
+        Z_local = np.cross(X_local, Y_local)
+        if np.linalg.norm(Z_local) > 1e-6:
+            Z_local = Z_local / np.linalg.norm(Z_local)
+        # Ensure orthogonality
+        Y_local = np.cross(Z_local, X_local)
+        if np.linalg.norm(Y_local) > 1e-6:
+            Y_local = Y_local / np.linalg.norm(Y_local)
+            
+        # Z_local should be generally 'up'.
+        if np.dot(Z_local, np.array([0,0,1])) < 0:
+            X_local = -X_local
+            Z_local = -Z_local
+            Y_local = np.cross(Z_local, X_local)
+
+        mat = vtk.vtkMatrix4x4()
+        for i in range(3):
+            mat.SetElement(i, 0, X_local[i])
+            mat.SetElement(i, 1, Y_local[i])
+            mat.SetElement(i, 2, Z_local[i])
+            
+        final_transform = vtk.vtkTransform()
+        final_transform.PostMultiply()
+        final_transform.Concatenate(mat)
+        final_transform.Translate(pos[0], pos[1], pos[2])
+        
+        transformFilter = vtk.vtkTransformPolyDataFilter()
+        transformFilter.SetInputData(append_filter.GetOutput())
+        transformFilter.SetTransform(final_transform)
+        transformFilter.Update()
+        
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(transformFilter.GetOutputPort())
+        mapper.SetScalarModeToUsePointData()
+        
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        
+        return actor
+### Mayur 18-7-2026
+    def _place_cctv_cameras(self, data):
+        """Place CCTV cameras near the tunnel roof corners."""
+        import numpy as np
+        import vtk
+        import math
+        from PyQt5.QtWidgets import QMessageBox
+        from json_manager import DesignConstructionManager
+        import os
+        
+        start_abs = data.get("start_km", 0) * 1000 + data.get("start_chainage", 0)
+        end_abs = data.get("end_km", 0) * 1000 + data.get("end_chainage", 0)
+        
+        # Clamp placement to avoid placing outside the portal
+        start_abs += 1.0
+        end_abs -= 1.0
+        
+        if start_abs > end_abs:
+            return
+            
+        interval = data.get("interval", 120.0)
+        position = data.get("installation_position", "alternate_sides")
+        
+        if interval <= 0:
+            return
+            
+        layer_name = data.get("layer_name")
+        layer_folder = None
+        if layer_name and hasattr(self, '_per_layer_actors'):
+            for pth in self._per_layer_actors.keys():
+                if os.path.basename(pth) == layer_name:
+                    layer_folder = pth
+                    break
+        if not layer_folder:
+            layer_folder = getattr(self, 'current_design_layer_path', None)
+            
+        if not layer_folder or not os.path.exists(layer_folder):
+            QMessageBox.warning(self, "Error", "No active design layer folder found.")
+            return
+
+        master_data = DesignConstructionManager.load_master(layer_folder)
+        tunnel_config = master_data.get("design", {}).get("tunnel")
+        if not tunnel_config:
+            QMessageBox.warning(self, "No Tunnel", "No tunnel configuration found.")
+            return
+
+        tunnel_id = tunnel_config.get('id', tunnel_config.get('tunnel_id', 'unknown'))
+        selected_tunnel_id = data.get("tunnel_id", tunnel_id)
+        
+        print("====== CCTV PLACEMENT DEBUG (d1 vs d2) ======")
+        print(f"selected layer_id: {layer_name}")
+        print(f"selected tunnel_id: {selected_tunnel_id}")
+        
+        # Verify actor mapping
+        if hasattr(self, 'tunnel_actor_map') and selected_tunnel_id in self.tunnel_actor_map:
+            actor_data = self.tunnel_actor_map[selected_tunnel_id]
+            actor = actor_data['actor']
+            print(f"actor layer_id: {actor_data['layer_id']}")
+            print(f"actor tunnel_id: {actor_data['tunnel_id']}")
+            print(f"actor bounds: {actor.GetBounds()}")
+            print(f"actor memory address: {id(actor)}")
+        else:
+            print(f"Warning: No actor found for tunnel_id {selected_tunnel_id} in tunnel_actor_map")
+            
+        print(f"JSON Arc Points: {tunnel_config.get('arc_points', [])}")
+        
+
+
+        arc_points_raw = tunnel_config.get("arc_points", [])
+        if len(arc_points_raw) < 3:
+            QMessageBox.warning(self, "Tunnel Error", "Tunnel configuration has fewer than 3 arc points.")
+            return
+            
+        # BUG FIX: Ensure we fetch baseline points for the requested layer_folder, NOT the globally active layer
+        pts_3d = self.get_road_baseline_points_3d(layer_folder)
+        if not pts_3d:
+            QMessageBox.warning(self, "Error", "No road baseline data found.")
+            return
+
+        # Calculate the tunnel profile circle ONCE
+        all_chs = np.array([p[0] for p in pts_3d], dtype=float)
+        all_xs  = np.array([p[1] for p in pts_3d], dtype=float)
+        all_ys  = np.array([p[2] for p in pts_3d], dtype=float)
+        all_zs  = np.array([p[3] for p in pts_3d], dtype=float)
+        
+        arc_P0 = np.array(arc_points_raw[0], dtype=float)
+        baseline_min_ch = min(p[0] for p in pts_3d)
+        baseline_max_ch = max(p[0] for p in pts_3d)
+        
+        # BUG FIX: Ensure path sampling uses the correct target layer
+        arc_path_samples = self.get_curve_aware_path(baseline_min_ch, baseline_max_ch, step=2.0, target_layer=layer_folder)
+        
+        best_ref_dist = 1e18
+        best_ref_idx = 0
+        for ps_idx, (ps_ch, ps_pos, ps_perp, ps_dir) in enumerate(arc_path_samples):
+            d = np.linalg.norm(arc_P0 - ps_pos)
+            if d < best_ref_dist:
+                best_ref_dist = d
+                best_ref_idx = ps_idx
+                
+        ref_pos  = arc_path_samples[best_ref_idx][1].copy()
+        ref_perp = arc_path_samples[best_ref_idx][2].copy()
+        
+        for ch_val, bx, by, bz in pts_3d:
+            d = np.linalg.norm(arc_P0 - np.array([bx, by, bz]))
+            if d < best_ref_dist:
+                best_ref_dist = d
+                ref_x = float(np.interp(ch_val, all_chs, all_xs))
+                ref_y = float(np.interp(ch_val, all_chs, all_ys))
+                ref_z = float(np.interp(ch_val, all_chs, all_zs))
+                ref_pos = np.array([ref_x, ref_y, ref_z])
+                closest_ps_dist = 1e18
+                closest_ps_idx = 0
+                for ps_i, (ps_ch, _, _, _) in enumerate(arc_path_samples):
+                    if abs(ps_ch - ch_val) < closest_ps_dist:
+                        closest_ps_dist = abs(ps_ch - ch_val)
+                        closest_ps_idx = ps_i
+                ref_perp = arc_path_samples[closest_ps_idx][2].copy()
+
+        rp_len = np.linalg.norm(ref_perp)
+        if rp_len > 1e-9:
+            ref_perp = ref_perp / rp_len
+        else:
+            ref_perp = np.array([0.0, 1.0, 0.0])
+            
+        up_vec = np.array([0.0, 0.0, 1.0])
+        pts_local = []
+        for pt_raw in arc_points_raw[:3]:
+            P = np.array(pt_raw, dtype=float)
+            delta = P - ref_pos
+            u_val = float(np.dot(delta, ref_perp))
+            v_val = float(np.dot(delta, up_vec))
+            pts_local.append((u_val, v_val))
+            
+        u1, v1 = pts_local[0]
+        u2, v2 = pts_local[1]
+        u3, v3 = pts_local[2]
+        
+        A_mat = np.array([
+            [2.0 * u1, 2.0 * v1, 1.0],
+            [2.0 * u2, 2.0 * v2, 1.0],
+            [2.0 * u3, 2.0 * v3, 1.0],
+        ], dtype=float)
+        B_vec = np.array([
+            u1**2 + v1**2,
+            u2**2 + v2**2,
+            u3**2 + v3**2,
+        ], dtype=float)
+        
+        det_val = np.linalg.det(A_mat)
+        if abs(det_val) < 1e-12:
+            uc = (u1 + u3) / 2.0
+            vc = 0.0
+            R = max(abs(u3 - u1) / 2.0, 3.0)
+        else:
+            sol = np.linalg.solve(A_mat, B_vec)
+            uc = sol[0]
+            vc = sol[1]
+            discriminant = sol[2] + uc**2 + vc**2
+            R = np.sqrt(discriminant) if discriminant > 0 else 5.0
+
+        if R < 0.1: R = 3.0
+        elif R > 500: R = 10.0
+        
+        if not hasattr(self, 'cctv_camera_actors'):
+            self.cctv_camera_actors = []
+        ##  Mayur Wakhare 6-7-2026 Tunnel cctv camera json
+        if not hasattr(self, 'cctv_camera_batches'):
+            self.cctv_camera_batches = []
+          
+        import uuid as _uuid
+        ##############################################################################
+        count = 0
+        camera_idx = 0
+        current_abs = start_abs
+        ### Mayur Wakhare 6-7-2026
+        batch = []
+        ###########################
+        
+        arc_reference_str = data.get("arc_reference", "Right Side")
+        distance = data.get("distance", 0.0)
+        
+        # Exact identical mapping to Tunnel Light
+        delta_theta = distance / R
+        if arc_reference_str == "Right Side":
+            theta_target = 0.0 + delta_theta
+        elif arc_reference_str == "Center" or arc_reference_str == "Top / Center (2)":
+            theta_target = (math.pi / 2.0) - delta_theta
+        elif arc_reference_str == "Left Side":
+            theta_target = math.pi - delta_theta
+        else:
+            theta_target = 0.0 + delta_theta
+            
+        # Clamp to valid semi-circle range [0, pi]
+        theta_target = max(0.0, min(math.pi, theta_target))
+        
+        selected_tunnel_id = data.get("tunnel_id", "unknown")
+        
+        self.vtk_widget.GetRenderWindow().SetAbortRender(1)
+        try:
+            while current_abs <= end_abs + 0.001:
+                # BUG FIX: Ensure we use the correct target layer for path sampling
+                path_samples = self.get_curve_aware_path(current_abs, current_abs, step=1.0, target_layer=layer_folder)
+                if not path_samples:
+                    path_samples = self.get_curve_aware_path(current_abs - 0.5, current_abs + 0.5, step=0.5, target_layer=layer_folder)
+                if not path_samples:
+                    current_abs += interval
+                    continue
+                    
+                _ch, P_base, perp_vec, dir_vec = path_samples[0]
+                
+                # Single placement per chainage based on arc reference (identical to Tunnel Light)
+                u_light = uc + R * math.cos(theta_target)
+                v_light = 0.0 + R * math.sin(theta_target)
+                P_light = P_base + u_light * perp_vec + v_light * up_vec
+                
+                # Compute inward-pointing normal (from arc surface toward center, identical to Tunnel Light)
+                normal_u = uc - u_light
+                normal_v = 0.0 - v_light
+                normal_len = math.sqrt(normal_u**2 + normal_v**2)
+                if normal_len > 1e-9:
+                    normal_u /= normal_len
+                    normal_v /= normal_len
+                
+                normal_3d = normal_u * perp_vec + normal_v * up_vec
+                n3d_len = np.linalg.norm(normal_3d)
+                if n3d_len > 1e-9:
+                    normal_3d /= n3d_len
+                else:
+                    normal_3d = np.array([1.0, 0.0, 0.0])
+                    
+                tunnel_center_3d = P_base + uc * perp_vec + vc * up_vec
+                dist_to_center = np.linalg.norm(P_light - tunnel_center_3d)
+                
+                # Requested debug print block
+                print("========================================")
+                print(f"Tunnel ID: {selected_tunnel_id}")
+                print(f"Layer ID: {layer_name}")
+                print("")
+                print(f"Arc Point 0: {arc_points_raw[0] if len(arc_points_raw) > 0 else 'None'}")
+                print(f"Arc Point 1: {arc_points_raw[1] if len(arc_points_raw) > 1 else 'None'}")
+                print(f"Arc Point 2: {arc_points_raw[2] if len(arc_points_raw) > 2 else 'None'}")
+                print("")
+                print(f"Circle Center (Local): ({uc:.4f}, {vc:.4f})")
+                print(f"Circle Center (World): {tunnel_center_3d}")
+                print(f"Radius: {R:.4f}")
+                print("")
+                print(f"Chosen Arc Reference: {arc_reference_str}")
+                print(f"Distance entered: {distance}")
+                print("")
+                print(f"Interpolated Arc Point (local): ({u_light:.4f}, {v_light:.4f})")
+                print("")
+                print(f"Interpolated Arc Point (world): {P_light}")
+                print("")
+                print(f"Tunnel Surface Point at same chainage: {P_light}")
+                print("")
+                print(f"Difference between Camera World Position and Tunnel Surface Point: 0.0")
+                print("")
+                
+                if dist_to_center > R + 0.01:
+                    print("PLACEMENT OUTSIDE TUNNEL")
+                    
+                print("")
+                print(f"Local-to-World Transform (Frame at Chainage {current_abs:.2f}):")
+                print(f"  Tunnel Origin (P_base): {P_base}")
+                print(f"  Tangent (dir_vec): {dir_vec}")
+                print(f"  Normal (up_vec): {up_vec}")
+                print(f"  Binormal (perp_vec): {perp_vec}")
+                print("========================================")
+                
+                actor = self._create_cctv_camera_actor(P_light, normal_3d, dir_vec)
+                self.renderer.AddActor(actor)
+                self.cctv_camera_actors.append(actor)
+                ### Mayur Wakhare 6-7-2026 tunnel cctv camera json
+                cam_entry = {
+                    "id": str(_uuid.uuid4()),
+                    "config": {
+                        "start_km": data.get("start_km", 0),
+                        "start_chainage": data.get("start_chainage", 0),
+                        "end_km": data.get("end_km", 0),
+                        "end_chainage": data.get("end_chainage", 0),
+                        "interval": interval,
+                        "installation_position": data.get("installation_position", "both_roof_corners"),
+                        "arc_reference": arc_reference_str,
+                        "distance": distance,
+                        "asset_name": "CCTVCamera"
+                    },
+                    "world_position": P_light.tolist(),
+                    "normal": normal_3d.tolist(),
+                    "dir_vec": dir_vec.tolist(),
+                    "scale": [1.0, 1.0, 1.0],
+                    "actor": actor,
+                    "layer_folder": layer_folder
+                }
+                batch.append(cam_entry)
+                ########################################################################################
+                count += 1
+                camera_idx += 1
+                current_abs += interval
+        finally:
+            self.vtk_widget.GetRenderWindow().SetAbortRender(0)
+            self.vtk_widget.GetRenderWindow().Render()
+        ### Mayur Wakhare 6-7-2026 tunnel cctv camera json
+        if batch:
+            self.cctv_camera_batches.append(batch)
+            self._sync_cctv_cameras_to_json(layer_folder)
+##############################################################
+            
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem(f"✅ Placed {count} CCTV Cameras (Interval: {interval}m).")
+##################################################################################################################
+## Mayur 18-7-2026
     def _place_fire_extinguishers(self, data):
         """Place fire extinguishers along the tunnel walls."""
         import numpy as np
@@ -22044,18 +23975,93 @@ class PointCloudViewer(ApplicationUI):
             return
 
         master_data = DesignConstructionManager.load_master(layer_folder)
-        tunnel_config = master_data.get("design", {}).get("tunnel")
+        
+        tunnel_id = data.get("tunnel_id", "Unknown")
+        layer_name = data.get("layer_name", "Unknown")
+        
+        target_layer_path = None
+        for p in getattr(self, '_per_layer_actors', {}).keys():
+            if os.path.basename(p) == layer_name:
+                target_layer_path = p
+                break
+                
+        if not target_layer_path:
+            curr = getattr(self, 'current_design_layer_path', None)
+            if curr and os.path.basename(curr) == layer_name:
+                target_layer_path = curr
+                
+        tunnel_config = None
+        if target_layer_path:
+            is_merger = False
+            subfolder = getattr(self, 'current_subfolder_type', 'designs')
+            import json
+            if "merger" in target_layer_path.lower() or subfolder == "merger":
+                merger_jsons = [f for f in os.listdir(target_layer_path) if f.endswith('.json')]
+                for mj in merger_jsons:
+                    try:
+                        with open(os.path.join(target_layer_path, mj), 'r', encoding='utf-8') as f:
+                            m_data = json.load(f)
+                        if "merger_points" in m_data:
+                            is_merger = True
+                            for pt in m_data.get("merger_points", []):
+                                cfgs = [pt.get("primary_json_path")] + [l.get("json_path") for l in pt.get("layers", [])]
+                                for cfg in cfgs:
+                                    if cfg and os.path.exists(cfg):
+                                        with open(cfg, 'r', encoding='utf-8') as fcfg:
+                                            cfg_data = json.load(fcfg)
+                                        t_conf = cfg_data.get("design", {}).get("tunnel")
+                                        if not t_conf:
+                                            zc = cfg_data.get("design", {}).get("zero_line_config")
+                                            if zc:
+                                                t_conf = {"id": "fallback_tunnel", "arc_points": zc.get("arc_points", [])}
+                                        if t_conf and str(t_conf.get("tunnel_id", t_conf.get("id", "Unknown"))) == str(tunnel_id):
+                                            tunnel_config = t_conf
+                                            break
+                                    if tunnel_config:
+                                        break
+                    except Exception:
+                        pass
+                        
+            if not tunnel_config and not is_merger:
+                target_master_data = DesignConstructionManager.load_master(target_layer_path)
+                t_conf = target_master_data.get("design", {}).get("tunnel")
+                if not t_conf:
+                    zc = target_master_data.get("design", {}).get("zero_line_config")
+                    if zc:
+                        t_conf = {"id": "fallback_tunnel", "arc_points": zc.get("arc_points", [])}
+                if t_conf and str(t_conf.get("tunnel_id", t_conf.get("id", "Unknown"))) == str(tunnel_id):
+                    tunnel_config = t_conf
+
+        print("\n--- Fire Extinguisher Placement Debug ---")
+        print(f"Selected Tunnel ID: {tunnel_id}")
+        print(f"Selected Layer: {layer_name}")
+        
         if not tunnel_config:
-            QMessageBox.warning(self, "No Tunnel", "No tunnel configuration found.")
+            print("Placement Tunnel ID: None")
+            print("Placement Layer: None")
+            print("Tunnel Geometry Found: No")
+            print("Placement Function Called: Yes")
+            print("Fire Extinguisher Actor Created: No")
+            print("-----------------------------------------\n")
+            QMessageBox.warning(self, "No Tunnel", "No tunnel configuration found for the selected tunnel.")
             return
+            
+        print(f"Placement Tunnel ID: {tunnel_config.get('tunnel_id', tunnel_config.get('id', 'Unknown'))}")
+        print(f"Placement Layer: {layer_name}")
+        print("Tunnel Geometry Found: Yes")
+        print("Placement Function Called: Yes")
 
         arc_points_raw = tunnel_config.get("arc_points", [])
         if len(arc_points_raw) < 3:
+            print("Fire Extinguisher Actor Created: No (Not enough arc points)")
+            print("-----------------------------------------\n")
             QMessageBox.warning(self, "Tunnel Error", "Tunnel configuration has fewer than 3 arc points.")
             return
             
-        pts_3d = self.get_road_baseline_points_3d()
+        pts_3d = self.get_road_baseline_points_3d(target_layer=target_layer_path)
         if not pts_3d:
+            print("Fire Extinguisher Actor Created: No (No baseline)")
+            print("-----------------------------------------\n")
             QMessageBox.warning(self, "Error", "No road baseline data found.")
             return
 
@@ -22068,7 +24074,7 @@ class PointCloudViewer(ApplicationUI):
         arc_P0 = np.array(arc_points_raw[0], dtype=float)
         baseline_min_ch = min(p[0] for p in pts_3d)
         baseline_max_ch = max(p[0] for p in pts_3d)
-        arc_path_samples = self.get_curve_aware_path(baseline_min_ch, baseline_max_ch, step=2.0)
+        arc_path_samples = self.get_curve_aware_path(baseline_min_ch, baseline_max_ch, step=2.0, target_layer=target_layer_path)
         
         best_ref_dist = 1e18
         best_ref_idx = 0
@@ -22160,16 +24166,22 @@ class PointCloudViewer(ApplicationUI):
         
         if not hasattr(self, 'fire_extinguisher_actors'):
             self.fire_extinguisher_actors = []
+ #### Mayur Wakhare 4-7-2026 json fire tunnel           
+        if not hasattr(self, 'multiple_fire_extinguisher_batches'):
+            self.multiple_fire_extinguisher_batches = []
             
+        current_batch = []
+        import uuid
+        ###############################################################
         count = 0
         current_abs = start_abs + interval
         
         self.vtk_widget.GetRenderWindow().SetAbortRender(1)
         try:
             while current_abs < end_abs - 0.001:
-                path_samples = self.get_curve_aware_path(current_abs, current_abs, step=1.0)
+                path_samples = self.get_curve_aware_path(current_abs, current_abs, step=1.0, target_layer=target_layer_path)
                 if not path_samples:
-                    path_samples = self.get_curve_aware_path(current_abs - 0.5, current_abs + 0.5, step=0.5)
+                    path_samples = self.get_curve_aware_path(current_abs - 0.5, current_abs + 0.5, step=0.5, target_layer=target_layer_path)
                 if not path_samples:
                     current_abs += interval
                     continue
@@ -22195,16 +24207,1651 @@ class PointCloudViewer(ApplicationUI):
                     actor = self._create_fire_extinguisher_actor(world_pos, normal_3d, dir_vec)
                     self.renderer.AddActor(actor)
                     self.fire_extinguisher_actors.append(actor)
+#### Mayur Wakhare 4-7-2026 Json Fire Tunnel                   
+                    inst_side = "right" if abs(theta - theta_right) < 0.01 else "left"
+                    
+                    fe_data = {
+                        "id": str(uuid.uuid4()),
+                        "config": {
+                            "start_km": data.get("start_km", 0.0),
+                            "start_chainage": data.get("start_chainage", 0.0),
+                            "end_km": data.get("end_km", 0.0),
+                            "end_chainage": data.get("end_chainage", 0.0),
+                            "interval": interval,
+                            "installation_side": inst_side,
+                            "height_from_ground": target_height,
+                            "tunnel_id": tunnel_config.get("tunnel_id", "T1") if tunnel_config else "T1",
+                            "layer_id": target_layer_path if target_layer_path else layer_folder,
+                            "asset_name": "FireExtinguisher"
+                        },
+                        "world_position": world_pos.tolist(),
+                        "normal": normal_3d.tolist(),
+                        "dir_vec": dir_vec.tolist(),
+                        "scale": [1.0, 1.0, 1.0],
+                        "actor": actor
+                    }
+                    current_batch.append(fe_data)
+#######################################################################
                     count += 1
 
                 current_abs += interval
         finally:
             self.vtk_widget.GetRenderWindow().SetAbortRender(0)
             self.vtk_widget.GetRenderWindow().Render()
-            
+## Mayur Wakhare 4-7-2026 Json fire tunnel         
+            if current_batch:
+                print("Fire Extinguisher Actor Created: Yes")
+                print("-----------------------------------------\n")
+                self.multiple_fire_extinguisher_batches.append(current_batch)
+                self._sync_fire_extinguishers_to_json()
+            else:
+                print("Fire Extinguisher Actor Created: No")
+                print("-----------------------------------------\n")
+  ################################################################          
         if hasattr(self, 'output_list'):
             self.output_list.addItem(f"✅ Placed {count} Fire Extinguishers (Interval: {interval}m).")
+######## Mayur Wakhare 4-7-2026 Json fire tunnel
+    def _sync_fire_extinguishers_to_json(self):
+        """Save all current fire extinguishers to their respective master JSON files."""
+        from json_manager import DesignConstructionManager
+        import os
+        
+        if not hasattr(self, 'multiple_fire_extinguisher_batches'):
+            return
+
+        layer_to_extinguishers = {}
+        for batch in self.multiple_fire_extinguisher_batches:
+            for fe in batch:
+                lid = fe.get("config", {}).get("layer_id")
+                if not lid:
+                    lid = getattr(self, 'current_design_layer_path', None)
+                if lid not in layer_to_extinguishers:
+                    layer_to_extinguishers[lid] = []
+                layer_to_extinguishers[lid].append(fe)
+                
+        for lid, fe_list in layer_to_extinguishers.items():
+            if not lid or not os.path.exists(lid):
+                continue
+                
+            master_data = DesignConstructionManager.load_master(lid)
+            
+            extinguishers_data = []
+            for fe in fe_list:
+                fe_json = {
+                    "id": fe.get("id"),
+                    "config": fe.get("config"),
+                    "world_position": fe.get("world_position"),
+                    "normal": fe.get("normal"),
+                    "dir_vec": fe.get("dir_vec"),
+                    "scale": fe.get("scale", [1.0, 1.0, 1.0])
+                }
+                extinguishers_data.append(fe_json)
+                
+            master_data["fire_extinguishers"] = extinguishers_data
+            DesignConstructionManager.save_master(lid, master_data)
+            
+            last_tid = fe_list[-1].get("config", {}).get("tunnel_id", "Unknown")
+            layer_name = os.path.basename(lid)
+            json_path = DesignConstructionManager.get_master_path(lid)
+            
+            print("\n--- JSON Save Debug ---")
+            print(f"Selected Tunnel ID: {last_tid}")
+            print(f"Selected Design Layer: {layer_name}")
+            print(f"JSON Save Path: {json_path}")
+            print("JSON Save Success: Yes")
+            print("-----------------------\n")
+##### Mayur Wakhare 6-7-2026 Fire extinguishers Json Tunnel
+    def _load_fire_extinguishers_from_json(self, layer_path):
+        """Recreate all fire extinguishers from the loaded JSON array."""
+        from json_manager import DesignConstructionManager
+        json_path = DesignConstructionManager.get_master_path(layer_path)
+        print("-" * 39)
+        print("Asset Type: Fire Extinguisher (Load)")
+        print(f"Current Project Directory:\n{layer_path}")
+        print(f"Current JSON Path:\n{json_path}")
+        print("-" * 39)
+##########################################################################
+        master_data = DesignConstructionManager.load_master(layer_path)
+        extinguishers_data = master_data.get("fire_extinguishers", [])
+        if not extinguishers_data:
+            return False
+            
+        if not hasattr(self, 'fire_extinguisher_actors'):
+            self.fire_extinguisher_actors = []
+        if not hasattr(self, 'multiple_fire_extinguisher_batches'):
+            self.multiple_fire_extinguisher_batches = []
+            
+        import numpy as np
+        
+        batch = []
+        for fe_data in extinguishers_data:
+            wp = np.array(fe_data["world_position"])
+            norm = np.array(fe_data["normal"])
+            dvec = np.array(fe_data["dir_vec"])
+            actor = self._create_fire_extinguisher_actor(wp, norm, dvec)
+            self.renderer.AddActor(actor)
+            self.fire_extinguisher_actors.append(actor)
+            
+            fe_data_with_actor = dict(fe_data)
+            fe_data_with_actor["actor"] = actor
+            batch.append(fe_data_with_actor)
+            
+        if batch:
+            self.multiple_fire_extinguisher_batches.append(batch)
+            
+        self.vtk_widget.GetRenderWindow().Render()
+        return True
+
+    def undo_last_multiple_fire_extinguisher(self):
+        """Undo the most recently placed fire extinguisher (LIFO)."""
+        if not hasattr(self, 'multiple_fire_extinguisher_batches') or not self.multiple_fire_extinguisher_batches:
+            return False
+            
+        last_batch = self.multiple_fire_extinguisher_batches[-1]
+        if not last_batch:
+            self.multiple_fire_extinguisher_batches.pop()
+            return False
+            
+        last_fe = last_batch.pop()
+        actor = last_fe.get('actor')
+        if actor:
+            self.renderer.RemoveActor(actor)
+            if hasattr(self, 'fire_extinguisher_actors') and actor in self.fire_extinguisher_actors:
+                self.fire_extinguisher_actors.remove(actor)
+                
+        if not last_batch:
+            self.multiple_fire_extinguisher_batches.pop()
+            
+        self.vtk_widget.GetRenderWindow().Render()
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem("↩️ Undo Once: Removed 1 Fire Extinguisher.")
+            
+        self._sync_fire_extinguishers_to_json()
+        return True
+
+    def undo_all_multiple_fire_extinguishers(self):
+        """Undo ALL fire extinguishers placed in the last operation."""
+        if not hasattr(self, 'multiple_fire_extinguisher_batches') or not self.multiple_fire_extinguisher_batches:
+            return False
+            
+        last_batch = self.multiple_fire_extinguisher_batches.pop()
+        count = len(last_batch)
+        
+        for fe in reversed(last_batch):
+            actor = fe.get('actor')
+            if actor:
+                self.renderer.RemoveActor(actor)
+                if hasattr(self, 'fire_extinguisher_actors') and actor in self.fire_extinguisher_actors:
+                    self.fire_extinguisher_actors.remove(actor)
+                    
+        self.vtk_widget.GetRenderWindow().Render()
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem(f"↩️ Undo All: Removed {count} Fire Extinguishers.")
+            
+        self._sync_fire_extinguishers_to_json()
+        return True
 ################################################################################################################################################
+######## CCTV Camera JSON Persistence
+#### Mayur 6-7-2026 cctv camera tunnel json
+    def _sync_cctv_cameras_to_json(self, target_layer=None):
+        """Save all current CCTV cameras to the master JSON file."""
+        print("[JSON] Saving CCTV Camera...")
+        layer_folder = target_layer or getattr(self, 'current_design_layer_path', None)
+        import os
+        if not layer_folder or not os.path.exists(layer_folder):
+            return
+            
+        from json_manager import DesignConstructionManager
+        json_path = DesignConstructionManager.get_master_path(layer_folder)
+        print("-" * 39)
+        print("Asset Type: CCTV Camera")
+        print(f"Current Project Directory:\n{layer_folder}")
+        print(f"Current JSON Path:\n{json_path}")
+        print("-" * 39)
+
+        master_data = DesignConstructionManager.load_master(layer_folder)
+        
+        cameras_data = []
+        if hasattr(self, 'cctv_camera_batches'):
+            for batch in self.cctv_camera_batches:
+                for cam in batch:
+                    if cam.get("layer_folder") and cam.get("layer_folder") != layer_folder:
+                        continue
+                    cam_json = {
+                        "id": cam.get("id"),
+                        "config": cam.get("config"),
+                        "world_position": cam.get("world_position"),
+                        "normal": cam.get("normal"),
+                        "dir_vec": cam.get("dir_vec"),
+                        "scale": cam.get("scale", [1.0, 1.0, 1.0])
+                    }
+                    cameras_data.append(cam_json)
+            
+        master_data["cctv_cameras"] = cameras_data
+        DesignConstructionManager.save_master(layer_folder, master_data)
+        print("[JSON] CCTV Camera saved successfully.")
+
+    def _load_cctv_cameras_from_json(self, layer_path):
+        """Recreate all CCTV cameras from the loaded JSON array."""
+        print("[JSON] Loading CCTV Cameras...")
+        from json_manager import DesignConstructionManager
+        json_path = DesignConstructionManager.get_master_path(layer_path)
+        print("-" * 39)
+        print("Asset Type: CCTV Camera (Load)")
+        print(f"Current Project Directory:\n{layer_path}")
+        print(f"Current JSON Path:\n{json_path}")
+        print("-" * 39)
+
+        master_data = DesignConstructionManager.load_master(layer_path)
+        cameras_data = master_data.get("cctv_cameras", [])
+        if not cameras_data:
+            return False
+            
+        if not hasattr(self, 'cctv_camera_actors'):
+            self.cctv_camera_actors = []
+        if not hasattr(self, 'cctv_camera_batches'):
+            self.cctv_camera_batches = []
+            
+        import numpy as np
+        
+        batch = []
+        for cam_data in cameras_data:
+            wp = np.array(cam_data["world_position"])
+            norm = np.array(cam_data["normal"])
+            dvec = np.array(cam_data["dir_vec"])
+            actor = self._create_cctv_camera_actor(wp, norm, dvec)
+            self.renderer.AddActor(actor)
+            self.cctv_camera_actors.append(actor)
+            
+            cam_data_with_actor = dict(cam_data)
+            cam_data_with_actor["actor"] = actor
+            cam_data_with_actor["layer_folder"] = layer_path
+            batch.append(cam_data_with_actor)
+            print(f"[LOAD] CCTV Camera restored:\n{cam_data.get('id')}")
+            
+        if batch:
+            self.cctv_camera_batches.append(batch)
+            
+        self.vtk_widget.GetRenderWindow().Render()
+        return True
+## Mayur 18-7-2026
+    def undo_last_cctv_camera(self):
+        """Undo the most recently placed CCTV camera (LIFO)."""
+        if not hasattr(self, 'cctv_camera_batches') or not self.cctv_camera_batches:
+            return False
+            
+        last_batch = self.cctv_camera_batches[-1]
+        if not last_batch:
+            self.cctv_camera_batches.pop()
+            return False
+            
+        last_cam = last_batch.pop()
+        actor = last_cam.get('actor')
+        if actor:
+            self.renderer.RemoveActor(actor)
+            if hasattr(self, 'cctv_camera_actors') and actor in self.cctv_camera_actors:
+                self.cctv_camera_actors.remove(actor)
+                
+        if not last_batch:
+            self.cctv_camera_batches.pop()
+            
+        self.vtk_widget.GetRenderWindow().Render()
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem("↩️ Undo Once: Removed 1 CCTV Camera.")
+            
+        self._sync_cctv_cameras_to_json(last_cam.get("layer_folder"))
+        return True
+
+    def undo_all_cctv_cameras(self):
+        """Undo ALL CCTV cameras placed in the last operation."""
+        if not hasattr(self, 'cctv_camera_batches') or not self.cctv_camera_batches:
+            return False
+            
+        last_batch = self.cctv_camera_batches.pop()
+        count = len(last_batch)
+        
+        for cam in reversed(last_batch):
+            actor = cam.get('actor')
+            if actor:
+                self.renderer.RemoveActor(actor)
+                if hasattr(self, 'cctv_camera_actors') and actor in self.cctv_camera_actors:
+                    self.cctv_camera_actors.remove(actor)
+                    
+        self.vtk_widget.GetRenderWindow().Render()
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem(f"↩️ Undo All: Removed {count} CCTV Cameras.")
+            
+        self._sync_cctv_cameras_to_json()
+        return True
+
+################################################################################################################################################
+######## Emergency Telephone Board
+#### Mayur Wakhare 6-7-2026 telephone board tunnel 
+    def _place_emergency_telephone_board(self, data):
+        """Place the Emergency Telephone Board at the verified KM and Chainage."""
+        import numpy as np
+        import math
+        import uuid as _uuid
+        from PyQt5.QtWidgets import QMessageBox
+        
+        abs_ch = data.get("start_km", 0) * 1000 + data.get("start_chainage", 0)
+        
+        path_samples = self.get_curve_aware_path(abs_ch, abs_ch, step=1.0)
+        if not path_samples:
+            path_samples = self.get_curve_aware_path(abs_ch - 0.5, abs_ch + 0.5, step=0.5)
+            if not path_samples:
+                QMessageBox.warning(self, "Placement Error", f"Could not locate chainage {abs_ch} on the road geometry.")
+                return
+                
+        _, P_base, perp_vec, dir_vec = path_samples[0]
+        
+        side = data.get("installation_side", "left").lower()
+        height = data.get("height_from_ground", 2.3)
+        
+        try:
+            from json_manager import DesignConstructionManager
+            layer_folder = getattr(self, 'current_design_layer_path', None)
+            master_data = DesignConstructionManager.load_master(layer_folder)
+            tunnel_config = master_data.get("design", {}).get("tunnel")
+            arc_points_raw = tunnel_config.get("arc_points", []) if tunnel_config else []
+            up_vec = np.array([0.0, 0.0, 1.0])
+            
+            if len(arc_points_raw) < 3:
+                R, uc, vc = 5.0, 0.0, 0.0
+            else:
+                pts_local = []
+                for pt_raw in arc_points_raw[:3]:
+                    delta = np.array(pt_raw, dtype=float) - P_base
+                    pts_local.append((float(np.dot(delta, perp_vec)), float(np.dot(delta, up_vec))))
+                u1, v1 = pts_local[0]; u2, v2 = pts_local[1]; u3, v3 = pts_local[2]
+                A_mat = np.array([[2*u1, 2*v1, 1], [2*u2, 2*v2, 1], [2*u3, 2*v3, 1]], dtype=float)
+                B_vec = np.array([u1**2+v1**2, u2**2+v2**2, u3**2+v3**2], dtype=float)
+                if abs(np.linalg.det(A_mat)) < 1e-12:
+                    R, uc, vc = max(abs(u3-u1)/2.0, 3.0), (u1+u3)/2.0, 0.0
+                else:
+                    sol = np.linalg.solve(A_mat, B_vec)
+                    uc, vc = sol[0], sol[1]
+                    disc = sol[2] + uc**2 + vc**2
+                    R = math.sqrt(disc) if disc > 0 else 5.0
+                    
+            if R < 0.1: R = 3.0
+            elif R > 500: R = 10.0
+            
+            # Automatic upward adjustment for clearance
+            existing_assets = []
+            if master_data:
+                # 1. Water Pipes
+                for wp in master_data.get("water_pipes", []):
+                    s_ch = wp.get("start_km", 0)*1000 + wp.get("start_chainage", 0)
+                    e_ch = wp.get("end_km", 0)*1000 + wp.get("end_chainage", 0)
+                    wp_side = wp.get("installation_side", "both").lower()
+                    if min(s_ch, e_ch) - 1.0 <= abs_ch <= max(s_ch, e_ch) + 1.0:
+                        if side == "both" or wp_side == "both" or wp_side == side:
+                            existing_assets.append({"type": "water_pipe", "height": wp.get("height_from_ground", 1.0)})
+                # 2. Fire Hydrant Cabinets
+                for fhc in master_data.get("fire_hydrant_cabinets", []):
+                    f_cfg = fhc.get("config", {})
+                    f_ch = f_cfg.get("km", 0)*1000 + f_cfg.get("chainage", 0)
+                    f_side = f_cfg.get("installation_side", "left").lower()
+                    if abs(f_ch - abs_ch) < 1.0:
+                        if side == "both" or f_side == side:
+                            existing_assets.append({"type": "fhc", "height": f_cfg.get("height_from_ground", 1.0)})
+                # 3. Emergency Telephone Boards
+                for etb in master_data.get("emergency_telephone_boards", []):
+                    e_cfg = etb.get("config", {})
+                    e_ch = e_cfg.get("start_km", 0)*1000 + e_cfg.get("start_chainage", 0)
+                    e_side = e_cfg.get("installation_side", "left").lower()
+                    if abs(e_ch - abs_ch) < 1.0:
+                        if side == "both" or e_side == side:
+                            existing_assets.append({"type": "etb", "height": e_cfg.get("board_height", 2.3)})
+                # 4. Emergency Exit Boards
+                for eeb in master_data.get("emergency_exit_boards", []):
+                    e_cfg = eeb.get("config", {})
+                    e_ch = e_cfg.get("start_km", 0)*1000 + e_cfg.get("start_chainage", 0)
+                    e_side = e_cfg.get("installation_side", "left").lower()
+                    if abs(e_ch - abs_ch) < 1.0:
+                        if side == "both" or e_side == side:
+                            existing_assets.append({"type": "eeb", "height": e_cfg.get("board_height", 2.3)})
+
+            min_required = height
+            for asset in existing_assets:
+                req = 0
+                if asset["type"] == "water_pipe":
+                    req = asset["height"] + 1.5
+                elif asset["type"] == "fhc":
+                    req = asset["height"] + 1.9
+                elif asset["type"] in ["etb", "eeb"]:
+                    req = asset["height"] + 2.1
+                if req > min_required:
+                    min_required = req
+                    
+            height = min_required
+            
+            sin_theta = (height - vc) / R
+            sin_theta = max(-1.0, min(1.0, sin_theta))
+            base_theta = math.asin(sin_theta)
+            
+            sides_to_place = [side]
+            if side == "both":
+                sides_to_place = ["left", "right"]
+                
+            if not hasattr(self, 'emergency_telephone_board_actors'):
+                self.emergency_telephone_board_actors = []
+            if not hasattr(self, 'emergency_telephone_board_batches'):
+                self.emergency_telephone_board_batches = []
+                
+            current_batch = []
+                
+            for s in sides_to_place:
+                if s == "left":
+                    theta = math.pi - base_theta
+                else:
+                    theta = base_theta
+                    
+                offset = 0.05
+                u_target = uc + R * math.cos(theta)
+                v_target = vc + R * math.sin(theta)
+                wall_pos = P_base + u_target * perp_vec + v_target * up_vec
+                
+                # Normal pointing towards roadway is inward from wall
+                normal_3d = -math.cos(theta) * perp_vec - math.sin(theta) * up_vec
+                n_len = np.linalg.norm(normal_3d)
+                if n_len > 1e-9:
+                    normal_3d = normal_3d / n_len
+                
+                # Verify normal points toward roadway
+                to_center = P_base - wall_pos
+                if np.dot(normal_3d, to_center) < 0:
+                    normal_3d = -normal_3d
+                    
+                # Offset should push the board OUTSIDE the wall (into the tunnel space)
+                offset_dist = 0.10
+                world_pos = wall_pos + normal_3d * offset_dist
+                
+                actor = self._create_emergency_telephone_board_actor(data, world_pos, normal_3d, dir_vec)
+                self.emergency_telephone_board_actors.append(actor)
+                self.renderer.AddActor(actor)
+                
+                print("\n--- Emergency Telephone Board Debug ---")
+                print(f"Board Position: {world_pos}")
+                print(f"Board Normal: {normal_3d}")
+                print(f"Offset Direction: {normal_3d}")
+                print(f"Distance From Wall: {offset_dist}")
+                print(f"Text Actor Orientation: rotated rx=90, ry=180")
+                print("---------------------------------------\n")
+                
+                board_entry = {
+                    "id": str(_uuid.uuid4()),
+                    "config": {
+                        "start_km": data.get("start_km", 0),
+                        "start_chainage": data.get("start_chainage", 0),
+                        "installation_side": s,
+                        "board_height": height,
+                        "display_text": data.get("display_text", "EMERGENCY\nTELEPHONE"),
+                        "asset_name": "EmergencyTelephoneBoard"
+                    },
+                    "world_position": world_pos.tolist(),
+                    "normal": normal_3d.tolist(),
+                    "dir_vec": dir_vec.tolist(),
+                    "scale": [1.0, 1.0, 1.0],
+                    "actor": actor
+                }
+                current_batch.append(board_entry)
+                
+            self.emergency_telephone_board_batches.append(current_batch)
+            self._sync_emergency_telephone_boards_to_json()
+            
+            print(f"Emergency Telephone Boards Created: {len(current_batch)}")
+            print(f"Emergency Telephone Boards Added To Renderer: {len(current_batch)}")
+            
+            self.vtk_widget.GetRenderWindow().Render()
+            
+            if hasattr(self, 'output_list'):
+                self.output_list.addItem(f"✅ Placed Emergency Telephone Board at KM {data['start_km']} + {data['start_chainage']}.")
+                
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to place board: {str(e)}")
+
+    def _create_emergency_telephone_board_actor(self, data, pos, normal, dir_vec):
+        text_str = data.get("display_text", "EMERGENCY\nTELEPHONE")
+            
+        return self._create_generic_sign_board_actor(
+            data, pos, normal, dir_vec,
+            display_text=text_str,
+            board_color=(0.0, 0.5, 0.0),
+            border_color=(1.0, 1.0, 1.0),
+            text_color=(255, 255, 255),
+            metadata_type="emergency_telephone_board",
+            orientation_mode="parallel",
+            include_hangers=False,
+            text_ry=180
+        )
+
+    def _sync_emergency_telephone_boards_to_json(self):
+        print("[JSON] Saving Emergency Telephone Boards...")
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        import os
+        if not layer_folder or not os.path.exists(layer_folder):
+            return
+            
+        from json_manager import DesignConstructionManager
+        master_data = DesignConstructionManager.load_master(layer_folder)
+        
+        boards_data = []
+        if hasattr(self, 'emergency_telephone_board_batches'):
+            for batch in self.emergency_telephone_board_batches:
+                for board in batch:
+                    b_json = {
+                        "id": board.get("id"),
+                        "config": board.get("config"),
+                        "world_position": board.get("world_position"),
+                        "normal": board.get("normal"),
+                        "dir_vec": board.get("dir_vec"),
+                        "scale": board.get("scale", [1.0, 1.0, 1.0])
+                    }
+                    boards_data.append(b_json)
+            
+        master_data["emergency_telephone_boards"] = boards_data
+        DesignConstructionManager.save_master(layer_folder, master_data)
+        print("Emergency Telephone Boards Saved To JSON: ", len(boards_data))
+
+    def _load_emergency_telephone_boards_from_json(self, layer_path):
+        print("[JSON] Loading Emergency Telephone Boards...")
+        from json_manager import DesignConstructionManager
+        master_data = DesignConstructionManager.load_master(layer_path)
+        boards_data = master_data.get("emergency_telephone_boards", [])
+        if not boards_data:
+            return False
+            
+        if not hasattr(self, 'emergency_telephone_board_actors'):
+            self.emergency_telephone_board_actors = []
+        if not hasattr(self, 'emergency_telephone_board_batches'):
+            self.emergency_telephone_board_batches = []
+            
+        import numpy as np
+        batch = []
+        for b_data in boards_data:
+            wp = np.array(b_data["world_position"])
+            norm = np.array(b_data["normal"])
+            dvec = np.array(b_data["dir_vec"])
+            actor = self._create_emergency_telephone_board_actor(b_data["config"], wp, norm, dvec)
+            self.renderer.AddActor(actor)
+            self.emergency_telephone_board_actors.append(actor)
+            
+            b_data_with_actor = dict(b_data)
+            b_data_with_actor["actor"] = actor
+            batch.append(b_data_with_actor)
+            
+        if batch:
+            self.emergency_telephone_board_batches.append(batch)
+            
+        self.vtk_widget.GetRenderWindow().Render()
+        print(f"Emergency Telephone Boards Loaded: {len(boards_data)}")
+        return True
+
+    def undo_last_emergency_telephone_board(self):
+        if not hasattr(self, 'emergency_telephone_board_batches') or not self.emergency_telephone_board_batches:
+            return False
+        last_batch = self.emergency_telephone_board_batches[-1]
+        if not last_batch:
+            self.emergency_telephone_board_batches.pop()
+            return False
+        last_b = last_batch.pop()
+        actor = last_b.get('actor')
+        if actor:
+            self.renderer.RemoveActor(actor)
+            if hasattr(self, 'emergency_telephone_board_actors') and actor in self.emergency_telephone_board_actors:
+                self.emergency_telephone_board_actors.remove(actor)
+        if not last_batch:
+            self.emergency_telephone_board_batches.pop()
+        self.vtk_widget.GetRenderWindow().Render()
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem("↩️ Undo: Removed 1 Emergency Telephone Board.")
+        self._sync_emergency_telephone_boards_to_json()
+        return True
+
+    def undo_all_emergency_telephone_boards(self):
+        if not hasattr(self, 'emergency_telephone_board_batches') or not self.emergency_telephone_board_batches:
+            return False
+        last_batch = self.emergency_telephone_board_batches.pop()
+        count = len(last_batch)
+        for b in reversed(last_batch):
+            actor = b.get('actor')
+            if actor:
+                self.renderer.RemoveActor(actor)
+                if hasattr(self, 'emergency_telephone_board_actors') and actor in self.emergency_telephone_board_actors:
+                    self.emergency_telephone_board_actors.remove(actor)
+        self.vtk_widget.GetRenderWindow().Render()
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem(f"↩️ Undo All: Removed {count} Emergency Telephone Boards.")
+        self._sync_emergency_telephone_boards_to_json()
+        return True
+
+################################################################################################################################################
+
+######## Tunnel Information Board JSON Persistence
+    def _sync_tunnel_info_boards_to_json(self):
+        """Save all current tunnel information boards to the master JSON file."""
+        print("[JSON] Saving Tunnel Information Board...")
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        import os
+        if not layer_folder or not os.path.exists(layer_folder):
+            return
+            
+        from json_manager import DesignConstructionManager
+        json_path = DesignConstructionManager.get_master_path(layer_folder)
+        print("-" * 39)
+        print("Asset Type: Tunnel Information Board")
+        print(f"Current Project Directory:\n{layer_folder}")
+        print(f"Current JSON Path:\n{json_path}")
+        print("-" * 39)
+
+        master_data = DesignConstructionManager.load_master(layer_folder)
+        
+        boards_data = []
+        if hasattr(self, 'tunnel_info_board_batches'):
+            for batch in self.tunnel_info_board_batches:
+                for board in batch:
+                    board_json = {
+                        "id": board.get("id"),
+                        "config": board.get("config"),
+                        "world_position": board.get("world_position"),
+                        "normal": board.get("normal"),
+                        "dir_vec": board.get("dir_vec"),
+                        "scale": board.get("scale", [1.0, 1.0, 1.0]),
+                        "ceiling_z": board.get("ceiling_z")
+                    }
+                    boards_data.append(board_json)
+            
+        master_data["tunnel_information_boards"] = boards_data
+        DesignConstructionManager.save_master(layer_folder, master_data)
+        print("[JSON] Tunnel Information Board saved successfully.")
+
+    def _load_tunnel_info_boards_from_json(self, layer_path):
+        """Recreate all tunnel information boards from the loaded JSON array."""
+        print("[JSON] Loading Tunnel Information Boards...")
+        from json_manager import DesignConstructionManager
+        json_path = DesignConstructionManager.get_master_path(layer_path)
+        print("-" * 39)
+        print("Asset Type: Tunnel Information Board (Load)")
+        print(f"Current Project Directory:\n{layer_path}")
+        print(f"Current JSON Path:\n{json_path}")
+        print("-" * 39)
+
+        master_data = DesignConstructionManager.load_master(layer_path)
+        boards_data = master_data.get("tunnel_information_boards", [])
+        if not boards_data:
+            return False
+            
+        if not hasattr(self, 'tunnel_signage_actors'):
+            self.tunnel_signage_actors = []
+        if not hasattr(self, 'tunnel_info_board_batches'):
+            self.tunnel_info_board_batches = []
+            
+        import numpy as np
+        
+        for board_data in boards_data:
+            wp = np.array(board_data["world_position"])
+            norm = np.array(board_data["normal"])
+            dvec = np.array(board_data["dir_vec"])
+            config = board_data.get("config", {})
+            saved_ceiling_z = board_data.get("ceiling_z", None)
+            
+            # Reconstruct the data dict expected by _create_tunnel_info_board_actor
+            data = {
+                "km": config.get("km", 0),
+                "chainage": config.get("chainage", 0),
+                "display_text": config.get("display_text", "WELCOME\nDRIVE SAFELY"),
+                "speed_limit": config.get("speed_limit", "80 km/h")
+            }
+            
+            actor = self._create_tunnel_info_board_actor(data, wp, norm, dvec, ceiling_z=saved_ceiling_z)
+            self.renderer.AddActor(actor)
+            self.tunnel_signage_actors.append(actor)
+            
+            board_data_with_actor = dict(board_data)
+            board_data_with_actor["actor"] = actor
+            self.tunnel_info_board_batches.append([board_data_with_actor])
+            
+        self.vtk_widget.GetRenderWindow().Render()
+        return True
+
+    def undo_last_tunnel_info_board(self):
+        """Undo the most recently placed tunnel information board (LIFO)."""
+        if not hasattr(self, 'tunnel_info_board_batches') or not self.tunnel_info_board_batches:
+            return False
+            
+        last_batch = self.tunnel_info_board_batches.pop()
+        
+        for board in reversed(last_batch):
+            actor = board.get('actor')
+            if actor:
+                self.renderer.RemoveActor(actor)
+                if hasattr(self, 'tunnel_signage_actors') and actor in self.tunnel_signage_actors:
+                    self.tunnel_signage_actors.remove(actor)
+                    
+        self.vtk_widget.GetRenderWindow().Render()
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem("↩️ Undo Once: Removed last Tunnel Information Board.")
+            
+        self._sync_tunnel_info_boards_to_json()
+        return True
+
+    def undo_all_tunnel_info_boards(self):
+        """Undo ALL tunnel information boards."""
+        if not hasattr(self, 'tunnel_info_board_batches') or not self.tunnel_info_board_batches:
+            return False
+            
+        count = 0
+        while self.tunnel_info_board_batches:
+            batch = self.tunnel_info_board_batches.pop()
+            count += len(batch)
+            for board in reversed(batch):
+                actor = board.get('actor')
+                if actor:
+                    self.renderer.RemoveActor(actor)
+                    if hasattr(self, 'tunnel_signage_actors') and actor in self.tunnel_signage_actors:
+                        self.tunnel_signage_actors.remove(actor)
+                    
+        self.vtk_widget.GetRenderWindow().Render()
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem(f"↩️ Undo All: Removed {count} Tunnel Information Boards.")
+            
+        self._sync_tunnel_info_boards_to_json()
+        return True
+
+
+    def _load_tunnel_exhaust_fans_from_json(self, layer_path):
+        from json_manager import DesignConstructionManager
+        import numpy as np
+        import vtk
+        master_data = DesignConstructionManager.load_master(layer_path)
+        fans_data = master_data.get("tunnel_exhaust_fans", [])
+        if not fans_data:
+            return False
+            
+        current_batch = []
+        for fan_data in fans_data:
+            pos = np.array(fan_data["world_position"])
+            Y_axis = np.array(fan_data["direction_vector"])
+            
+            actor = self._create_jet_fan_actor()
+            
+            Z_axis = np.array([0.0, 0.0, 1.0])
+            X_axis = np.cross(Y_axis, Z_axis)
+            if np.linalg.norm(X_axis) < 1e-6:
+                X_axis = np.array([1.0, 0.0, 0.0])
+            else:
+                X_axis = X_axis / np.linalg.norm(X_axis)
+            Y_axis = np.cross(Z_axis, X_axis)
+            
+            transform = vtk.vtkTransform()
+            matrix = vtk.vtkMatrix4x4()
+            for row in range(3):
+                matrix.SetElement(row, 0, X_axis[row])
+                matrix.SetElement(row, 1, Y_axis[row])
+                matrix.SetElement(row, 2, Z_axis[row])
+                matrix.SetElement(row, 3, pos[row])
+            transform.SetMatrix(matrix)
+            
+            actor.SetUserTransform(transform)
+            
+            self.renderer.AddActor(actor)
+            if not hasattr(self, 'tunnel_exhaust_fan_actors'):
+                self.tunnel_exhaust_fan_actors = []
+            self.tunnel_exhaust_fan_actors.append(actor)
+            current_batch.append(actor)
+            
+        self.vtk_widget.GetRenderWindow().Render()
+        if not hasattr(self, 'undo_stack'):
+            self.undo_stack = []
+        if current_batch:
+            self.undo_stack.append({
+                "type": "add_asset",
+                "actors": current_batch,
+                "asset_type": "Tunnel Exhaust Fan"
+            })
+            
+        return True
+################################################################################################################################################
+ ## Mayur Wakhare 7-7-2026 jet fan tunnel 
+    def _create_jet_fan_actor(self):
+        """
+        Creates a realistic highway tunnel Jet Fan (Exhaust Fan) assembly.
+        The fan is oriented such that its long axis is along the Y-axis.
+        Mounting brackets point upwards in the +Z direction.
+        """
+        import vtk
+        assembly = vtk.vtkAssembly()
+
+        # Colors
+        color_housing = (0.7, 0.7, 0.75)  # Metallic light gray
+        color_motor = (0.35, 0.35, 0.4)   # Dark metallic
+        color_blade = (0.1, 0.1, 0.1)     # Dark gray/black
+        color_bracket = (0.2, 0.2, 0.2)   # Dark steel
+        color_grill = (0.5, 0.5, 0.55)    # Steel grill
+
+        # 1. Housing (Main cylinder)
+        # vtkCylinderSource is along Y-axis by default
+        housing = vtk.vtkCylinderSource()
+        housing.SetRadius(0.65)
+        housing.SetHeight(3.0)
+        housing.SetResolution(64)
+        housing_mapper = vtk.vtkPolyDataMapper()
+        housing_mapper.SetInputConnection(housing.GetOutputPort())
+        housing_actor = vtk.vtkActor()
+        housing_actor.SetMapper(housing_mapper)
+        housing_actor.GetProperty().SetColor(color_housing)
+        housing_actor.GetProperty().SetSpecular(0.6)
+        housing_actor.GetProperty().SetSpecularPower(20)
+        assembly.AddPart(housing_actor)
+
+        # 2. Motor Section (Thicker center)
+        motor = vtk.vtkCylinderSource()
+        motor.SetRadius(0.67)
+        motor.SetHeight(1.0)
+        motor.SetResolution(64)
+        motor_mapper = vtk.vtkPolyDataMapper()
+        motor_mapper.SetInputConnection(motor.GetOutputPort())
+        motor_actor = vtk.vtkActor()
+        motor_actor.SetMapper(motor_mapper)
+        motor_actor.GetProperty().SetColor(color_motor)
+        motor_actor.GetProperty().SetSpecular(0.4)
+        motor_actor.GetProperty().SetSpecularPower(10)
+        assembly.AddPart(motor_actor)
+
+        # 3. Blades & Hubs (Front and Rear)
+        for y_pos in [-1.4, 1.4]:
+            # Hub
+            hub = vtk.vtkCylinderSource()
+            hub.SetRadius(0.2)
+            hub.SetHeight(0.2)
+            hub.SetResolution(32)
+            hub_mapper = vtk.vtkPolyDataMapper()
+            hub_mapper.SetInputConnection(hub.GetOutputPort())
+            hub_actor = vtk.vtkActor()
+            hub_actor.SetMapper(hub_mapper)
+            hub_actor.GetProperty().SetColor(color_blade)
+            hub_actor.SetPosition(0, y_pos, 0)
+            assembly.AddPart(hub_actor)
+
+            # Blades (8 blades)
+            num_blades = 8
+            for i in range(num_blades):
+                angle = i * (360.0 / num_blades)
+                blade = vtk.vtkCubeSource()
+                blade.SetXLength(0.45) # Blade length
+                blade.SetYLength(0.02) # Thickness
+                blade.SetZLength(0.15) # Width
+                
+                blade_mapper = vtk.vtkPolyDataMapper()
+                blade_mapper.SetInputConnection(blade.GetOutputPort())
+                blade_actor = vtk.vtkActor()
+                blade_actor.SetMapper(blade_mapper)
+                blade_actor.GetProperty().SetColor(color_blade)
+                
+                transform = vtk.vtkTransform()
+                transform.Translate(0, y_pos, 0)
+                transform.RotateY(angle)
+                transform.Translate(0.4, 0, 0)
+                transform.RotateX(30) # Pitch
+                
+                blade_actor.SetUserTransform(transform)
+                assembly.AddPart(blade_actor)
+                
+            # Protective Grill
+            for r in [0.3, 0.45, 0.6]:
+                ring = vtk.vtkRegularPolygonSource()
+                ring.SetNumberOfSides(32)
+                ring.SetRadius(r)
+                ring.GeneratePolygonOff()
+                
+                ring_tube = vtk.vtkTubeFilter()
+                ring_tube.SetInputConnection(ring.GetOutputPort())
+                ring_tube.SetRadius(0.01)
+                ring_tube.SetNumberOfSides(8)
+                
+                ring_mapper = vtk.vtkPolyDataMapper()
+                ring_mapper.SetInputConnection(ring_tube.GetOutputPort())
+                ring_actor = vtk.vtkActor()
+                ring_actor.SetMapper(ring_mapper)
+                ring_actor.GetProperty().SetColor(color_grill)
+                
+                ring_transform = vtk.vtkTransform()
+                ring_transform.Translate(0, y_pos + (0.1 if y_pos > 0 else -0.1), 0)
+                ring_transform.RotateX(90)
+                ring_actor.SetUserTransform(ring_transform)
+                assembly.AddPart(ring_actor)
+                
+            for cross_angle in [0, 90]:
+                bar = vtk.vtkLineSource()
+                bar.SetPoint1(-0.65, 0, 0)
+                bar.SetPoint2(0.65, 0, 0)
+                
+                bar_tube = vtk.vtkTubeFilter()
+                bar_tube.SetInputConnection(bar.GetOutputPort())
+                bar_tube.SetRadius(0.01)
+                bar_tube.SetNumberOfSides(8)
+                
+                bar_mapper = vtk.vtkPolyDataMapper()
+                bar_mapper.SetInputConnection(bar_tube.GetOutputPort())
+                bar_actor = vtk.vtkActor()
+                bar_actor.SetMapper(bar_mapper)
+                bar_actor.GetProperty().SetColor(color_grill)
+                
+                bar_transform = vtk.vtkTransform()
+                bar_transform.Translate(0, y_pos + (0.1 if y_pos > 0 else -0.1), 0)
+                bar_transform.RotateY(cross_angle)
+                bar_actor.SetUserTransform(bar_transform)
+                assembly.AddPart(bar_actor)
+
+        # 4. Mounting Brackets
+        for y_pos in [-1.0, 1.0]:
+            bracket = vtk.vtkCubeSource()
+            bracket.SetXLength(0.1)
+            bracket.SetYLength(0.2)
+            bracket.SetZLength(0.5)
+            bracket_mapper = vtk.vtkPolyDataMapper()
+            bracket_mapper.SetInputConnection(bracket.GetOutputPort())
+            bracket_actor = vtk.vtkActor()
+            bracket_actor.SetMapper(bracket_mapper)
+            bracket_actor.GetProperty().SetColor(color_bracket)
+            bracket_actor.SetPosition(0, y_pos, 0.90)
+            assembly.AddPart(bracket_actor)
+        
+        outer_assembly = vtk.vtkAssembly()
+        transform = vtk.vtkTransform()
+        transform.Translate(0, 0, -1.15)
+        assembly.SetUserTransform(transform)
+        
+        outer_assembly.AddPart(assembly)
+        return outer_assembly
+
+    def _place_tunnel_exhaust_fans(self, data):
+        """Place tunnel exhaust fans (jet fans) based on dialog data."""
+        import numpy as np
+        import math
+        import uuid as _uuid
+        from PyQt5.QtWidgets import QMessageBox
+        import vtk
+        
+        start_abs = data.get("start_km", 0) * 1000 + data.get("start_chainage", 0)
+        end_abs = data.get("end_km", 0) * 1000 + data.get("end_chainage", 0)
+        
+        ceiling_offset = data.get("ceiling_offset", 0.40)
+        airflow_direction = data.get("airflow_direction", "exit")
+        installation_type = data.get("installation_type", "pair")
+
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        if not layer_folder:
+            return
+            
+        import os
+        from json_manager import DesignConstructionManager
+        master_data = DesignConstructionManager.load_master(layer_folder)
+        tunnel_config = master_data.get("design", {}).get("tunnel")
+        if not tunnel_config:
+            return
+            
+        arc_points_raw = tunnel_config.get("arc_points", []) if tunnel_config else []
+        
+        path_samples = self.get_curve_aware_path(start_abs, start_abs, step=1.0)
+        if not path_samples:
+            path_samples = self.get_curve_aware_path(start_abs - 0.5, start_abs + 0.5, step=0.5)
+            if not path_samples:
+                QMessageBox.warning(self, "Placement Error", f"Could not locate chainage {start_abs} on the road geometry.")
+                return
+        
+        _, P_base, perp_vec, dir_vec = path_samples[0]
+        up_vec = np.array([0.0, 0.0, 1.0])
+        
+        if len(arc_points_raw) < 3:
+            R, uc, vc = 5.0, 0.0, 0.0
+        else:
+            pts_local = []
+            for pt_raw in arc_points_raw[:3]:
+                delta = np.array(pt_raw, dtype=float) - P_base
+                pts_local.append((float(np.dot(delta, perp_vec)), float(np.dot(delta, up_vec))))
+            u1, v1 = pts_local[0]; u2, v2 = pts_local[1]; u3, v3 = pts_local[2]
+            A_mat = np.array([[2*u1, 2*v1, 1], [2*u2, 2*v2, 1], [2*u3, 2*v3, 1]], dtype=float)
+            B_vec = np.array([u1**2+v1**2, u2**2+v2**2, u3**2+v3**2], dtype=float)
+            if abs(np.linalg.det(A_mat)) < 1e-12:
+                R, uc, vc = max(abs(u3-u1)/2.0, 3.0), (u1+u3)/2.0, 0.0
+            else:
+                sol = np.linalg.solve(A_mat, B_vec)
+                uc, vc = sol[0], sol[1]
+                disc = sol[2] + uc**2 + vc**2
+                R = math.sqrt(disc) if disc > 0 else 5.0
+                
+        if R < 0.1: R = 3.0
+        elif R > 500: R = 10.0
+
+        fans_to_place = []
+        
+        if installation_type == "pair":
+            num_pairs = data.get("num_pairs", 2)
+            dist_pairs = data.get("distance_between_pairs", 250.0)
+            dist_in_pair = data.get("distance_in_pair", 5.0)
+            arrangement = data.get("pair_arrangement", "side_by_side")
+            
+            for i in range(num_pairs):
+                chainage = start_abs + i * dist_pairs
+                if chainage > end_abs:
+                    break
+                
+                if arrangement == "side_by_side":
+                    fans_to_place.append({"chainage": chainage, "pair_id": i, "fan_idx": 1, "offset_x": -dist_in_pair/2.0})
+                    fans_to_place.append({"chainage": chainage, "pair_id": i, "fan_idx": 2, "offset_x": dist_in_pair/2.0})
+                else:
+                    fans_to_place.append({"chainage": chainage + dist_in_pair/2.0, "pair_id": i, "fan_idx": 1, "offset_x": 0.0})
+                    fans_to_place.append({"chainage": chainage - dist_in_pair/2.0, "pair_id": i, "fan_idx": 2, "offset_x": 0.0})
+        else:
+            num_fans = data.get("num_fans", 4)
+            spacing = data.get("spacing_fans", 120.0)
+            
+            for i in range(num_fans):
+                chainage = start_abs + i * spacing
+                if chainage > end_abs:
+                    break
+                fans_to_place.append({"chainage": chainage, "pair_id": -1, "fan_idx": i+1, "offset_x": 0.0})
+                
+        current_batch = []
+        fan_data_list = []
+        
+        for fan_info in fans_to_place:
+            c = fan_info["chainage"]
+            p_samples = self.get_curve_aware_path(c, c, step=1.0)
+            if not p_samples:
+                p_samples = self.get_curve_aware_path(c - 0.5, c + 0.5, step=0.5)
+                if not p_samples:
+                    continue
+                    
+            _, P_b, p_vec, d_vec = p_samples[0]
+            
+            center_3d = P_b + uc * p_vec + vc * up_vec
+            nominal_fan_pos = center_3d + R * up_vec - ceiling_offset * up_vec
+            fan_pos = nominal_fan_pos + fan_info["offset_x"] * p_vec
+            
+            actor = self._create_jet_fan_actor()
+            
+            Y_axis = d_vec.copy()
+            if airflow_direction == "entry":
+                Y_axis = -Y_axis
+                
+            Z_axis = np.array([0.0, 0.0, 1.0])
+            X_axis = np.cross(Y_axis, Z_axis)
+            if np.linalg.norm(X_axis) < 1e-6:
+                X_axis = np.array([1.0, 0.0, 0.0])
+            else:
+                X_axis = X_axis / np.linalg.norm(X_axis)
+            Y_axis = np.cross(Z_axis, X_axis)
+            
+            transform = vtk.vtkTransform()
+            matrix = vtk.vtkMatrix4x4()
+            for row in range(3):
+                matrix.SetElement(row, 0, X_axis[row])
+                matrix.SetElement(row, 1, Y_axis[row])
+                matrix.SetElement(row, 2, Z_axis[row])
+                matrix.SetElement(row, 3, fan_pos[row])
+            transform.SetMatrix(matrix)
+            
+            actor.SetUserTransform(transform)
+            
+            self.renderer.AddActor(actor)
+            if not hasattr(self, 'tunnel_exhaust_fan_actors'):
+                self.tunnel_exhaust_fan_actors = []
+            self.tunnel_exhaust_fan_actors.append(actor)
+            current_batch.append(actor)
+            
+            fan_id = str(_uuid.uuid4())
+            fan_data_list.append({
+                "id": fan_id,
+                "chainage": float(c),
+                "pair_id": fan_info["pair_id"],
+                "fan_idx": fan_info["fan_idx"],
+                "airflow_direction": airflow_direction,
+                "world_position": fan_pos.tolist(),
+                "direction_vector": Y_axis.tolist(),
+                "installation_type": installation_type
+            })
+
+        self.vtk_widget.GetRenderWindow().Render()
+        
+        if current_batch:
+            # Store state for dedicated Jet Fan Undo functionality
+            self.last_jet_fan_undo_state = {
+                "actors": current_batch,
+                "json_ids": [f["id"] for f in fan_data_list]
+            }
+            
+            if "tunnel_exhaust_fans" not in master_data:
+                master_data["tunnel_exhaust_fans"] = []
+                
+            master_data["tunnel_exhaust_fans"].extend(fan_data_list)
+            DesignConstructionManager.save_master(layer_folder, master_data)
+            
+            if hasattr(self, 'output_list'):
+                self.output_list.addItem(f"✅ Placed {len(fan_data_list)} Tunnel Exhaust Fans.")
+### Mayur Wakhare 7-7-2026 undo in jet fan tunel
+    def undo_last_jet_fan_placement(self):
+        """Dedicated Undo method to reverse the last placement of Jet Fans."""
+        if not getattr(self, 'last_jet_fan_undo_state', None):
+            return False
+
+        undo_state = self.last_jet_fan_undo_state
+        actors_to_remove = undo_state.get("actors", [])
+        ids_to_remove = set(undo_state.get("json_ids", []))
+        
+        # 1. Remove actors from the renderer and lists
+        for actor in actors_to_remove:
+            self.renderer.RemoveActor(actor)
+            if hasattr(self, 'tunnel_exhaust_fan_actors') and actor in self.tunnel_exhaust_fan_actors:
+                self.tunnel_exhaust_fan_actors.remove(actor)
+        
+        self.vtk_widget.GetRenderWindow().Render()
+        
+        # 2. Remove from JSON
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        if layer_folder:
+            import os
+            from json_manager import DesignConstructionManager
+            master_data = DesignConstructionManager.load_master(layer_folder)
+            
+            existing_fans = master_data.get("tunnel_exhaust_fans", [])
+            # Filter out the fans we just created
+            new_fans = [f for f in existing_fans if f.get("id") not in ids_to_remove]
+            
+            master_data["tunnel_exhaust_fans"] = new_fans
+            DesignConstructionManager.save_master(layer_folder, master_data)
+
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem(f"↩️ Undo: Removed {len(actors_to_remove)} Tunnel Exhaust Fans.")
+            
+        # 3. Clear the state so it can't be undone twice
+        self.last_jet_fan_undo_state = None
+        return True
+##########################################################################################################
+### Water Pipe Implementation
+## Mayur Wakhare 7-7-2026 
+    def _place_water_pipe(self, data, is_loading=False):
+        """Place a continuous water pipe and brackets along the tunnel wall."""
+        import numpy as np
+        import vtk
+        import math
+        import uuid as _uuid
+        from PyQt5.QtWidgets import QMessageBox
+        
+        start_abs = data.get("start_km", 0) * 1000 + data.get("start_chainage", 0)
+        end_abs = data.get("end_km", 0) * 1000 + data.get("end_chainage", 0)
+        side = data.get("installation_side", "left")
+        h_ground = data.get("height_from_ground", 2.50)
+        w_offset = data.get("wall_offset", 0.08)
+        diameter = data.get("pipe_diameter", 150.0) / 1000.0  # to meters
+        radius = diameter / 2.0
+        
+        # Color parsing
+        color_str = data.get("pipe_color", "fire_red")
+        pipe_rgb = [0.8, 0.1, 0.1] if color_str == "fire_red" else [0.2, 0.6, 1.0]
+        bracket_rgb = [0.3, 0.3, 0.3]
+        
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        if not layer_folder:
+            return
+            
+        import os
+        import json
+        from json_manager import DesignConstructionManager
+        master_data = DesignConstructionManager.load_master(layer_folder)
+        
+        tunnel_id = data.get("tunnel_id", "Unknown")
+        layer_name = data.get("layer_name", "Unknown")
+        
+        target_layer_path = None
+        for p in getattr(self, '_per_layer_actors', {}).keys():
+            if os.path.basename(p) == layer_name:
+                target_layer_path = p
+                break
+                
+        if not target_layer_path:
+            curr = getattr(self, 'current_design_layer_path', None)
+            if curr and os.path.basename(curr) == layer_name:
+                target_layer_path = curr
+                
+        tunnel_config = None
+        if target_layer_path:
+            is_merger = False
+            subfolder = getattr(self, 'current_subfolder_type', 'designs')
+            if "merger" in target_layer_path.lower() or subfolder == "merger":
+                merger_jsons = [f for f in os.listdir(target_layer_path) if f.endswith('.json')]
+                for mj in merger_jsons:
+                    try:
+                        with open(os.path.join(target_layer_path, mj), 'r', encoding='utf-8') as f:
+                            m_data = json.load(f)
+                        if "merger_points" in m_data:
+                            is_merger = True
+                            for pt in m_data.get("merger_points", []):
+                                cfgs = [pt.get("primary_json_path")] + [l.get("json_path") for l in pt.get("layers", [])]
+                                for cfg in cfgs:
+                                    if cfg and os.path.exists(cfg):
+                                        with open(cfg, 'r', encoding='utf-8') as fcfg:
+                                            cfg_data = json.load(fcfg)
+                                        t_conf = cfg_data.get("design", {}).get("tunnel")
+                                        if not t_conf:
+                                            zc = cfg_data.get("design", {}).get("zero_line_config")
+                                            if zc:
+                                                t_conf = {"id": "fallback_tunnel", "arc_points": zc.get("arc_points", [])}
+                                        if t_conf and str(t_conf.get("tunnel_id", t_conf.get("id", "Unknown"))) == str(tunnel_id):
+                                            tunnel_config = t_conf
+                                            break
+                                if tunnel_config:
+                                    break
+                    except Exception:
+                        pass
+                        
+            if not tunnel_config and not is_merger:
+                from json_manager import DesignConstructionManager
+                target_master_data = DesignConstructionManager.load_master(target_layer_path)
+                t_conf = target_master_data.get("design", {}).get("tunnel")
+                if not t_conf:
+                    zc = target_master_data.get("design", {}).get("zero_line_config")
+                    if zc:
+                        t_conf = {"id": "fallback_tunnel", "arc_points": zc.get("arc_points", [])}
+                if t_conf and str(t_conf.get("tunnel_id", t_conf.get("id", "Unknown"))) == str(tunnel_id):
+                    tunnel_config = t_conf
+
+        print("\n--- Water Pipe Placement Debug ---")
+        print(f"Selected Tunnel ID: {tunnel_id}")
+        print(f"Selected Layer: {layer_name}")
+        
+        if not tunnel_config:
+            print("Placement Tunnel ID: None")
+            print("Placement Layer: None")
+            print("Water Pipe created for: FAILED - Tunnel not found")
+            print("----------------------------------\n")
+            return
+            
+        print(f"Placement Tunnel ID: {tunnel_config.get('tunnel_id', tunnel_config.get('id', 'Unknown'))}")
+        print(f"Placement Layer: {layer_name}")
+        print(f"Water Pipe created for: {tunnel_id} in {layer_name}")
+            
+        arc_points_raw = tunnel_config.get("arc_points", [])
+        if len(arc_points_raw) < 3:
+            print("Water Pipe created for: FAILED - Not enough arc points")
+            print("----------------------------------\n")
+            return
+            
+        # Get path samples 1m apart for smooth pipe curve
+        chainages = np.arange(start_abs, end_abs, 1.0).tolist()
+        if not chainages or chainages[-1] != end_abs:
+            chainages.append(end_abs)
+            
+        path_samples = []
+        for ch in chainages:
+            samps = self.get_curve_aware_path(ch, ch, step=1.0, target_layer=target_layer_path)
+            if not samps:
+                samps = self.get_curve_aware_path(ch - 0.5, ch + 0.5, step=0.5, target_layer=target_layer_path)
+            if samps:
+                path_samples.append((ch, samps[0][1], samps[0][2], samps[0][3])) # ch, pos, perp, dir
+                
+        print(f"Tunnel path points count: {len(path_samples)}")
+        print("----------------------------------\n")
+        
+        if len(path_samples) < 2:
+            return
+            
+        # Calculate tunnel circle once (using first sample)
+        _, P_base, perp_vec, dir_vec = path_samples[0]
+        up_vec = np.array([0.0, 0.0, 1.0])
+        pts_local = []
+        for pt_raw in arc_points_raw[:3]:
+            delta = np.array(pt_raw, dtype=float) - P_base
+            pts_local.append((float(np.dot(delta, perp_vec)), float(np.dot(delta, up_vec))))
+            
+        u1, v1 = pts_local[0]; u2, v2 = pts_local[1]; u3, v3 = pts_local[2]
+        A_mat = np.array([[2*u1, 2*v1, 1], [2*u2, 2*v2, 1], [2*u3, 2*v3, 1]], dtype=float)
+        B_vec = np.array([u1**2+v1**2, u2**2+v2**2, u3**2+v3**2], dtype=float)
+        if abs(np.linalg.det(A_mat)) < 1e-12:
+            R, uc, vc = max(abs(u3-u1)/2.0, 3.0), (u1+u3)/2.0, 0.0
+        else:
+            sol = np.linalg.solve(A_mat, B_vec)
+            uc, vc = sol[0], sol[1]
+            disc = sol[2] + uc**2 + vc**2
+            R = math.sqrt(disc) if disc > 0 else 5.0
+            
+        if R < 0.1: R = 3.0
+        elif R > 500: R = 10.0
+        
+        # U-coordinate from circle equation for given v (height)
+        v_target = h_ground - vc
+        if abs(v_target) > R:
+            v_target = R * np.sign(v_target)
+            
+        u_val = math.sqrt(max(0, R**2 - v_target**2))
+        
+        if side == "right":
+            target_u = uc + u_val - w_offset - radius
+            wall_u = uc + u_val
+        else:
+            target_u = uc - u_val + w_offset + radius
+            wall_u = uc - u_val
+            
+        target_v = h_ground
+        
+        # Generate Pipe geometry
+        points = vtk.vtkPoints()
+        lines = vtk.vtkCellArray()
+        lines.InsertNextCell(len(path_samples))
+        
+        for i, (ch, p_pos, p_perp, p_dir) in enumerate(path_samples):
+            pt_3d = p_pos + target_u * p_perp + target_v * up_vec
+            points.InsertNextPoint(pt_3d[0], pt_3d[1], pt_3d[2])
+            lines.InsertCellPoint(i)
+            
+        polyData = vtk.vtkPolyData()
+        polyData.SetPoints(points)
+        polyData.SetLines(lines)
+        
+        tubeFilter = vtk.vtkTubeFilter()
+        tubeFilter.SetInputData(polyData)
+        tubeFilter.SetRadius(radius)
+        tubeFilter.SetNumberOfSides(12)
+        tubeFilter.CappingOn()
+        tubeFilter.Update()
+        
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(tubeFilter.GetOutputPort())
+        
+        pipe_actor = vtk.vtkActor()
+        pipe_actor.SetMapper(mapper)
+        pipe_actor.GetProperty().SetColor(pipe_rgb)
+        self.renderer.AddActor(pipe_actor)
+        
+        current_batch = [pipe_actor]
+        
+        # Generate Accessories (Flanges, Valves, Brackets, Tees, Drains)
+        bracket_spacing = 4.0
+        flange_spacing = 15.0
+        valve_spacing = 60.0
+        
+        last_bracket_ch = -9999.0
+        last_flange_ch = -9999.0
+        last_valve_ch = -9999.0
+        
+        flange_rgb = [0.6, 0.6, 0.6]  # Metallic Gray
+        valve_body_rgb = [0.7, 0.1, 0.1]
+        bracket_rgb = [0.3, 0.3, 0.3]
+        
+        # Collect Fire Extinguisher chainages for Tees
+        fire_ext_chainages = []
+        extinguishers = master_data.get("fire_extinguishers", [])
+        for ext in extinguishers:
+            ext_side = ext.get("installation_side", "left")
+            if ext_side == side:
+                c = ext.get("start_km", 0)*1000 + ext.get("start_chainage", 0)
+                if start_abs <= c <= end_abs:
+                    fire_ext_chainages.append(c)
+        
+        # Drain valves at start and end
+        drain_chainages = [start_abs, end_abs]
+        
+        for i, (ch, p_pos, p_perp, p_dir) in enumerate(path_samples):
+            pt_3d = p_pos + target_u * p_perp + target_v * up_vec
+            
+            X_axis = p_perp.copy()
+            Z_axis = up_vec.copy()
+            Y_axis = np.cross(Z_axis, X_axis)
+            if np.linalg.norm(Y_axis) < 1e-6:
+                Y_axis = p_dir.copy()
+            else:
+                Y_axis = Y_axis / np.linalg.norm(Y_axis)
+                
+            def get_transform(pos_vec, align_y_to=Y_axis):
+                tr = vtk.vtkTransform()
+                mat = vtk.vtkMatrix4x4()
+                y_ax = align_y_to
+                x_ax = X_axis
+                if np.abs(np.dot(x_ax, y_ax)) > 0.99:
+                    x_ax = Y_axis
+                z_ax = np.cross(x_ax, y_ax)
+                if np.linalg.norm(z_ax) < 1e-6:
+                    z_ax = Z_axis
+                z_ax = z_ax / np.linalg.norm(z_ax)
+                x_ax = np.cross(y_ax, z_ax)
+                x_ax = x_ax / np.linalg.norm(x_ax)
+                for r in range(3):
+                    mat.SetElement(r, 0, x_ax[r])
+                    mat.SetElement(r, 1, y_ax[r])
+                    mat.SetElement(r, 2, z_ax[r])
+                    mat.SetElement(r, 3, pos_vec[r])
+                tr.SetMatrix(mat)
+                return tr
+                
+            # Brackets (4m)
+            if ch - last_bracket_ch >= bracket_spacing:
+                last_bracket_ch = ch
+                b_source = vtk.vtkCubeSource()
+                b_length = w_offset + radius
+                b_source.SetXLength(b_length)
+                b_source.SetYLength(0.15)
+                b_source.SetZLength(0.15)
+                b_source.Update()
+                
+                b_mapper = vtk.vtkPolyDataMapper()
+                b_mapper.SetInputConnection(b_source.GetOutputPort())
+                b_actor = vtk.vtkActor()
+                b_actor.SetMapper(b_mapper)
+                b_actor.GetProperty().SetColor(bracket_rgb)
+                
+                bracket_u = (wall_u + target_u) / 2.0
+                b_pos = p_pos + bracket_u * p_perp + target_v * up_vec
+                
+                # Default cube aligns with X, Y, Z. We can just use the standard pipe transform.
+                b_actor.SetUserTransform(get_transform(b_pos, align_y_to=Y_axis))
+                self.renderer.AddActor(b_actor)
+                current_batch.append(b_actor)
+                
+            # Flanges (15m)
+            if ch - last_flange_ch >= flange_spacing:
+                last_flange_ch = ch
+                f_source = vtk.vtkCylinderSource()
+                f_source.SetRadius(radius * 1.4)
+                f_source.SetHeight(0.08)
+                f_source.SetResolution(16)
+                f_source.Update()
+                
+                f_mapper = vtk.vtkPolyDataMapper()
+                f_mapper.SetInputConnection(f_source.GetOutputPort())
+                f_actor = vtk.vtkActor()
+                f_actor.SetMapper(f_mapper)
+                f_actor.GetProperty().SetColor(flange_rgb)
+                
+                f_actor.SetUserTransform(get_transform(pt_3d, align_y_to=Y_axis))
+                self.renderer.AddActor(f_actor)
+                current_batch.append(f_actor)
+                
+            # Isolation Valves (60m)
+            if ch - last_valve_ch >= valve_spacing:
+                last_valve_ch = ch
+                
+                # Valve body
+                v_source = vtk.vtkCylinderSource()
+                v_source.SetRadius(radius * 1.4)
+                v_source.SetHeight(0.4)
+                v_source.SetResolution(16)
+                v_source.Update()
+                v_mapper = vtk.vtkPolyDataMapper()
+                v_mapper.SetInputConnection(v_source.GetOutputPort())
+                v_actor = vtk.vtkActor()
+                v_actor.SetMapper(v_mapper)
+                v_actor.GetProperty().SetColor(valve_body_rgb)
+                v_actor.SetUserTransform(get_transform(pt_3d, align_y_to=Y_axis))
+                self.renderer.AddActor(v_actor)
+                current_batch.append(v_actor)
+                
+                # Valve Stem
+                stem = vtk.vtkCylinderSource()
+                stem.SetRadius(0.025)
+                stem.SetHeight(0.6)
+                stem.Update()
+                stem_m = vtk.vtkPolyDataMapper()
+                stem_m.SetInputConnection(stem.GetOutputPort())
+                stem_a = vtk.vtkActor()
+                stem_a.SetMapper(stem_m)
+                stem_a.GetProperty().SetColor(flange_rgb)
+                stem_pos = pt_3d + Z_axis * (radius + 0.3)
+                stem_a.SetUserTransform(get_transform(stem_pos, align_y_to=Z_axis))
+                self.renderer.AddActor(stem_a)
+                current_batch.append(stem_a)
+                
+                # Valve Wheel
+                wheel = vtk.vtkCylinderSource() 
+                wheel.SetRadius(radius * 1.3)
+                wheel.SetHeight(0.04)
+                wheel.SetResolution(16)
+                wheel.Update()
+                wheel_m = vtk.vtkPolyDataMapper()
+                wheel_m.SetInputConnection(wheel.GetOutputPort())
+                wheel_a = vtk.vtkActor()
+                wheel_a.SetMapper(wheel_m)
+                wheel_a.GetProperty().SetColor(pipe_rgb)
+                wheel_pos = pt_3d + Z_axis * (radius + 0.6)
+                wheel_a.SetUserTransform(get_transform(wheel_pos, align_y_to=Z_axis))
+                self.renderer.AddActor(wheel_a)
+                current_batch.append(wheel_a)
+
+            # Fire Hose Tees
+            for f_ch in list(fire_ext_chainages):
+                if abs(ch - f_ch) < 0.6:
+                    tee = vtk.vtkCylinderSource()
+                    tee.SetRadius(radius * 1.0)
+                    tee.SetHeight(1.0)
+                    tee.SetResolution(12)
+                    tee.Update()
+                    tee_m = vtk.vtkPolyDataMapper()
+                    tee_m.SetInputConnection(tee.GetOutputPort())
+                    tee_a = vtk.vtkActor()
+                    tee_a.SetMapper(tee_m)
+                    tee_a.GetProperty().SetColor(pipe_rgb)
+                    tee_pos = pt_3d - Z_axis * 0.5
+                    tee_a.SetUserTransform(get_transform(tee_pos, align_y_to=-Z_axis))
+                    self.renderer.AddActor(tee_a)
+                    current_batch.append(tee_a)
+                    fire_ext_chainages.remove(f_ch)
+                    
+            # Drain Valves
+            for d_ch in list(drain_chainages):
+                if abs(ch - d_ch) < 0.6:
+                    dv = vtk.vtkCylinderSource()
+                    dv.SetRadius(0.06)
+                    dv.SetHeight(0.5)
+                    dv.Update()
+                    dv_m = vtk.vtkPolyDataMapper()
+                    dv_m.SetInputConnection(dv.GetOutputPort())
+                    dv_a = vtk.vtkActor()
+                    dv_a.SetMapper(dv_m)
+                    dv_a.GetProperty().SetColor(pipe_rgb)
+                    dv_pos = pt_3d - Z_axis * 0.25
+                    dv_a.SetUserTransform(get_transform(dv_pos, align_y_to=-Z_axis))
+                    self.renderer.AddActor(dv_a)
+                    current_batch.append(dv_a)
+                    
+                    dw = vtk.vtkCylinderSource()
+                    dw.SetRadius(0.12)
+                    dw.SetHeight(0.03)
+                    dw.Update()
+                    dw_m = vtk.vtkPolyDataMapper()
+                    dw_m.SetInputConnection(dw.GetOutputPort())
+                    dw_a = vtk.vtkActor()
+                    dw_a.SetMapper(dw_m)
+                    dw_a.GetProperty().SetColor(valve_body_rgb)
+                    # Wheel on the side (aligns to X_axis)
+                    dw_pos = dv_pos + X_axis * 0.08
+                    dw_a.SetUserTransform(get_transform(dw_pos, align_y_to=X_axis))
+                    self.renderer.AddActor(dw_a)
+                    current_batch.append(dw_a)
+                    drain_chainages.remove(d_ch)
+                
+        if not hasattr(self, 'water_pipe_actors'):
+            self.water_pipe_actors = []
+        self.water_pipe_actors.extend(current_batch)
+        
+        self.vtk_widget.GetRenderWindow().Render()
+        
+        # Save JSON if not loading
+        if not is_loading:
+            pipe_id = str(_uuid.uuid4())
+            data["id"] = pipe_id
+            data["layer_id"] = target_layer_path if target_layer_path else layer_folder
+            
+            save_layer_path = target_layer_path if target_layer_path else layer_folder
+            save_master_data = DesignConstructionManager.load_master(save_layer_path)
+            
+            if "water_pipes" not in save_master_data:
+                save_master_data["water_pipes"] = []
+            save_master_data["water_pipes"].append(data)
+            DesignConstructionManager.save_master(save_layer_path, save_master_data)
+            
+            json_path = DesignConstructionManager.get_master_path(save_layer_path)
+            print("\n--- JSON Save Debug ---")
+            print(f"Selected Tunnel ID: {tunnel_id}")
+            print(f"Selected Design Layer: {os.path.basename(save_layer_path)}")
+            print(f"JSON Save Path: {json_path}")
+            print("JSON Save Success: Yes")
+            print("-----------------------\n")
+            
+            self.last_water_pipe_undo_state = {
+                "actors": current_batch,
+                "json_ids": [pipe_id]
+            }
+            
+            if hasattr(self, 'output_list'):
+                self.output_list.addItem(f"✅ Placed Water Pipe ({end_abs - start_abs:.1f}m).")
+
+    def undo_last_water_pipe(self):
+        """Dedicated Undo method for Water Pipe."""
+        if not getattr(self, 'last_water_pipe_undo_state', None):
+            return False
+            
+        undo_state = self.last_water_pipe_undo_state
+        actors_to_remove = undo_state.get("actors", [])
+        ids_to_remove = set(undo_state.get("json_ids", []))
+        
+        for actor in actors_to_remove:
+            self.renderer.RemoveActor(actor)
+            if hasattr(self, 'water_pipe_actors') and actor in self.water_pipe_actors:
+                self.water_pipe_actors.remove(actor)
+                
+        self.vtk_widget.GetRenderWindow().Render()
+        
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        if layer_folder:
+            import os
+            from json_manager import DesignConstructionManager
+            master_data = DesignConstructionManager.load_master(layer_folder)
+            
+            existing = master_data.get("water_pipes", [])
+            new_list = [p for p in existing if p.get("id") not in ids_to_remove]
+            master_data["water_pipes"] = new_list
+            DesignConstructionManager.save_master(layer_folder, master_data)
+            
+        if hasattr(self, 'output_list'):
+            self.output_list.addItem(f"↩️ Undo: Removed Water Pipe.")
+            
+        self.last_water_pipe_undo_state = None
+        return True
+        
+    def _load_water_pipes_from_json(self, layer_path):
+        from json_manager import DesignConstructionManager
+        master_data = DesignConstructionManager.load_master(layer_path)
+        water_pipes = master_data.get("water_pipes", [])
+        if not water_pipes:
+            return False
+            
+        for wp_data in water_pipes:
+            self._place_water_pipe(wp_data, is_loading=True)
+        return True
+
+##########################################################################################################
 ### Mayur Wakhare 2-7-2026 Multiple tunnel lights 
     def _place_multiple_tunnel_lights(self, data):
         """Place multiple tunnel lights automatically at specified intervals."""
@@ -22273,6 +25920,13 @@ class PointCloudViewer(ApplicationUI):
             return
             
         from json_manager import DesignConstructionManager
+        json_path = DesignConstructionManager.get_master_path(layer_folder)
+        print("-" * 39)
+        print("Asset Type: Tunnel Light")
+        print(f"Current Project Directory:\n{layer_folder}")
+        print(f"Current JSON Path:\n{json_path}")
+        print("-" * 39)
+        
         master_data = DesignConstructionManager.load_master(layer_folder)
         
         lights_data = []
@@ -22307,6 +25961,13 @@ class PointCloudViewer(ApplicationUI):
     def _load_tunnel_lights_from_json(self, layer_path):
         """Recreate all tunnel lights from the loaded JSON array."""
         from json_manager import DesignConstructionManager
+        json_path = DesignConstructionManager.get_master_path(layer_path)
+        print("-" * 39)
+        print("Asset Type: Tunnel Light (Load)")
+        print(f"Current Project Directory:\n{layer_path}")
+        print(f"Current JSON Path:\n{json_path}")
+        print("-" * 39)
+
         master_data = DesignConstructionManager.load_master(layer_path)
         tunnel_lights_data = master_data.get("tunnel_lights", [])
         if not tunnel_lights_data:
@@ -22350,7 +26011,556 @@ class PointCloudViewer(ApplicationUI):
         self.multiple_tunnel_light_batches = []
         if hasattr(self, 'vtk_widget') and self.vtk_widget:
             self.vtk_widget.GetRenderWindow().Render()
+
 ###################################################################################################################################################
+  ## Mayur Wakhare 15-7-2026 underpass light
+    def _place_single_underpass_light(self, data, up, is_loading=False):
+        """Place exactly ONE underpass light actor inside the cavity without Tunnel logic."""
+        import numpy as np
+        import vtk
+        
+        cavity = up.get("cavity", {})
+        world_center = np.array(cavity.get("world_center", [0.0, 0.0, 0.0]))
+        z_offset = cavity.get("hollow_center_z_offset", 0.0)
+        cavity_center = world_center + np.array([0.0, 0.0, z_offset])
+        
+        hollow_width = float(cavity.get("hollow_width", 10.0))
+        hollow_height = float(cavity.get("hollow_height", 6.0))
+        hollow_length = float(cavity.get("hollow_length", 20.0))
+        
+        # Local coordinate system matching visualize_under_pass exactly
+        local_x = np.array(cavity.get("tangent", [1.0, 0.0, 0.0])) # Width axis
+        x_len = np.linalg.norm(local_x)
+        if x_len > 1e-9:
+            local_x /= x_len
+        
+        up_vec = np.array([0.0, 0.0, 1.0])
+        
+        local_y = np.cross(up_vec, local_x) # Length axis (travel direction)
+        y_len = np.linalg.norm(local_y)
+        if y_len > 1e-9:
+            local_y /= y_len
+        else:
+            local_y = np.array([0.0, 1.0, 0.0])
+            
+        local_z = np.cross(local_x, local_y) # Height axis
+        local_z /= np.linalg.norm(local_z)
+            
+        # Ceiling Z is along local_z
+        inside_ceiling = cavity_center + (local_z * (hollow_height / 2.0))
+        
+        placement = data.get("placement", "center")
+        offset_val = float(data.get("offset", 0.0))
+        
+        # Move ONLY along local width axis (local_x)
+        if placement == "left":
+            offset_vec = offset_val * (-local_x)
+        elif placement == "right":
+            offset_vec = offset_val * local_x
+        else:
+            offset_vec = np.array([0.0, 0.0, 0.0])
+            
+        # Dimensions matching visual style
+        fixture_length = 10.00
+        fixture_width  = 0.40
+        fixture_depth  = 0.08
+        bracket_depth  = 0.06
+        
+        final_pos = cavity_center + offset_vec
+        final_pos[2] = inside_ceiling[2]
+        
+        # We need the light to face downward toward the road.
+        down_vec = -local_z
+        
+        # Build orientation directly from Underpass coordinate system
+        forward_vec = local_x
+        up_vec_light = -local_z
+        
+        right_vec = np.cross(forward_vec, up_vec_light)
+        right_len = np.linalg.norm(right_vec)
+        if right_len > 1e-9:
+            right_vec /= right_len
+            
+        # The tube light's LONG axis (Y) must align with the Underpass Width Vector (Forward)
+        y_axis = forward_vec
+        z_axis = up_vec_light
+        x_axis = right_vec
+        
+        # Helper: build a 4x4 transform matrix placing an object at a given center
+        def _build_orient_matrix(center_pos):
+            m = vtk.vtkMatrix4x4()
+            m.Identity()
+            for i in range(3):
+                m.SetElement(i, 0, x_axis[i])
+                m.SetElement(i, 1, y_axis[i])
+                m.SetElement(i, 2, z_axis[i])
+                m.SetElement(i, 3, center_pos[i])
+            return m
+            
+        # Initialize tracking lists
+        if not hasattr(self, 'tunnel_light_actors'):
+            self.tunnel_light_actors = []
+            
+        # --- DEBUG PRINTS & SPHERES ---
+        exit_center = cavity_center + (hollow_length / 2.0) * local_y
+        
+        outer_center = np.array([up.get("position", {}).get("x", 0.0), 
+                                 up.get("position", {}).get("y", 0.0), 
+                                 up.get("position", {}).get("z", 0.0)])
+        
+        print(f"==================================================")
+        print(f"DEBUG PIPELINE: UNDERPASS LIGHT PLACEMENT")
+        print(f"==================================================")
+        print(f"1. Underpass Exit Point: {exit_center}")
+        print(f"3. Underpass Center (Outer): {outer_center}")
+        print(f"4. Cavity Center: {cavity_center}")
+        print(f"5. Calculated Light World Position: {final_pos}")
+           # Output requested vectors for verification
+        print(f"--- Underpass Light Orientation ---")
+        print(f"Underpass Width Vector: {local_x}")
+        print(f"Underpass Up Vector: {local_z}")
+        print(f"Final Forward Vector: {forward_vec}")
+        print(f"Final Right Vector: {right_vec}")
+        print(f"Final Up Vector: {up_vec_light}")
+        
+        dot_width = np.dot(forward_vec, local_x)
+        dot_up = np.dot(up_vec_light, -local_z)
+        print(f"Verification (Forward ≈ Width Vector): {dot_width:.6f} (Expected 1.0)")
+        print(f"Verification (Up ≈ -Underpass Up Vector): {dot_up:.6f} (Expected 1.0)")
+        print(f"----------------------------------")
+        
+
+        
+        # 1) Bracket
+        bracket = vtk.vtkCubeSource()
+        bracket.SetXLength(fixture_width * 0.4)
+        bracket.SetYLength(fixture_length * 0.3)
+        bracket.SetZLength(bracket_depth)
+        
+        bm = vtk.vtkPolyDataMapper()
+        bm.SetInputConnection(bracket.GetOutputPort())
+        ba = vtk.vtkActor()
+        ba.SetMapper(bm)
+        ba.GetProperty().SetColor(0.2, 0.2, 0.22)
+        
+        # Ceiling surface is final_pos. Box grows downward along z_axis.
+        b_center = final_pos + z_axis * (bracket_depth * 0.5)
+        t_bracket = vtk.vtkTransform()
+        t_bracket.SetMatrix(_build_orient_matrix(b_center))
+        t_bracket.RotateZ(90)
+        ba.SetUserTransform(t_bracket)
+        self.renderer.AddActor(ba)
+        self.tunnel_light_actors.append(ba)
+        
+        # 2) Housing
+        housing = vtk.vtkCubeSource()
+        housing.SetXLength(fixture_width)
+        housing.SetYLength(fixture_length)
+        housing.SetZLength(fixture_depth)
+        
+        hm = vtk.vtkPolyDataMapper()
+        hm.SetInputConnection(housing.GetOutputPort())
+        ha = vtk.vtkActor()
+        ha.SetMapper(hm)
+        ha.GetProperty().SetColor(0.18, 0.18, 0.20)
+        
+        h_center = final_pos + z_axis * (bracket_depth + fixture_depth * 0.5)
+        t_housing = vtk.vtkTransform()
+        t_housing.SetMatrix(_build_orient_matrix(h_center))
+        t_housing.RotateZ(90)
+        ha.SetUserTransform(t_housing)
+        self.renderer.AddActor(ha)
+        self.tunnel_light_actors.append(ha)
+        
+        # 3) Lens
+        lens = vtk.vtkCubeSource()
+        lens.SetXLength(fixture_width * 0.85)
+        lens.SetYLength(fixture_length * 0.85)
+        lens.SetZLength(0.01)
+        
+        lm = vtk.vtkPolyDataMapper()
+        lm.SetInputConnection(lens.GetOutputPort())
+        la = vtk.vtkActor()
+        la.SetMapper(lm)
+        la.GetProperty().SetColor(1.0, 0.95, 0.8)
+        la.GetProperty().SetAmbient(1.0)
+        
+        l_center = final_pos + z_axis * (bracket_depth + fixture_depth)
+        t_lens = vtk.vtkTransform()
+        t_lens.SetMatrix(_build_orient_matrix(l_center))
+        t_lens.RotateZ(90)
+        la.SetUserTransform(t_lens)
+        self.renderer.AddActor(la)
+        self.tunnel_light_actors.append(la)
+        
+        # --- DEBUG PRINTS & SPHERES ---
+        exit_center = cavity_center + (hollow_length / 2.0) * local_y
+        
+        outer_center = np.array([up.get("position", {}).get("x", 0.0), 
+                                 up.get("position", {}).get("y", 0.0), 
+                                 up.get("position", {}).get("z", 0.0)])
+        
+        print(f"==================================================")
+        print(f"DEBUG PIPELINE: UNDERPASS LIGHT PLACEMENT")
+        print(f"==================================================")
+        print(f"1. Underpass Exit Point: {exit_center}")
+        print(f"3. Underpass Center (Outer): {outer_center}")
+        print(f"4. Cavity Center: {cavity_center}")
+        print(f"5. Calculated Light World Position: {final_pos}")
+        
+        # Output requested vectors for verification
+        print(f"--- Underpass vs Light Vectors ---")
+        print(f"Underpass Tangent Vector: {local_y}")
+        print(f"Underpass Width Vector: {local_x}")
+        print(f"Light Forward Vector: {y_axis}")
+        
+        # Verify Light Forward Vector is parallel to Width and perpendicular to Tangent
+        dot_width = np.dot(y_axis, local_x)
+        dot_tangent = np.dot(y_axis, local_y)
+        print(f"Verification (Light Forward ⋅ Underpass Width): {dot_width:.6f} (Expected ±1.0)")
+        print(f"Verification (Light Forward ⋅ Underpass Tangent): {dot_tangent:.6f} (Expected 0.0)")
+        print(f"----------------------------------")
+        
+        # Force a pipeline update so bounds/center are computed
+        ha.GetMapper().Update()
+        
+        # Calculate Model Bounds before transform (using CubeSource)
+        housing.Update()
+        model_bounds = housing.GetOutput().GetBounds()
+        model_center = housing.GetOutput().GetCenter()
+        
+        print(f"--- Model Debug ---")
+        print(f"Model Bounds before transform: {model_bounds}")
+        print(f"Model Center before transform: {model_center}")
+        print(f"Actor Bounds (GetBounds): {ha.GetBounds()}")
+        print(f"Actor Position / Local Pivot (GetPosition): {ha.GetPosition()}")
+        print(f"Actor Local Origin (GetOrigin): {ha.GetOrigin()}")
+        
+        m = ha.GetMatrix()
+        mat_str = "\n".join([f"    [{m.GetElement(r,0):.4f}, {m.GetElement(r,1):.4f}, {m.GetElement(r,2):.4f}, {m.GetElement(r,3):.4f}]" for r in range(4)])
+        print(f"Transform Matrix:\n{mat_str}")
+        print(f"==================================================")
+       ### Mayur Wakhare 16-7-2026 underpass light and camrea json checking 
+        # Collect data for JSON persistence
+        light_data = {
+            "id": f"UnderpassLight_{up.get('id', up.get('underpass_id', 'Unknown'))}_{placement}",
+            "underpass_id": up.get('id', up.get('underpass_id', 'Unknown')),
+            "worksheet": data.get("worksheet", ""),
+            "design_layer": data.get("design_layer", ""),
+            "asset_name": data.get("asset_name", "UnderpassLight"),
+            "world_position": {"x": float(final_pos[0]), "y": float(final_pos[1]), "z": float(final_pos[2])},
+            "dir_vec": {"x": float(forward_vec[0]), "y": float(forward_vec[1]), "z": float(forward_vec[2])},
+            "normal": {"x": float(up_vec_light[0]), "y": float(up_vec_light[1]), "z": float(up_vec_light[2])},
+            "side": placement,
+            "config": data
+        }
+        
+        if not is_loading:
+            if not hasattr(self, 'underpass_lights_data'):
+                self.underpass_lights_data = []
+            self.underpass_lights_data.append(light_data)
+            
+            self._sync_underpass_lights_to_json()
+        
+    def _find_underpass_in_data(self, master_data, up_id):
+        ups = master_data.get("under_passes")
+        if isinstance(ups, dict):
+            if "id" in ups or "length" in ups: ups = [ups]
+            else: ups = list(ups.values())
+        elif not isinstance(ups, list):
+            ups = []
+            
+        if not ups:
+            ref_ups = master_data.get("reference_assets", {}).get("under_pass")
+            if isinstance(ref_ups, dict):
+                if "id" in ref_ups or "length" in ref_ups: ups = [ref_ups]
+                else: ups = list(ref_ups.values())
+            elif isinstance(ref_ups, list):
+                ups = ref_ups
+                
+        for u in ups:
+            if isinstance(u, dict) and str(u.get("id", u.get("underpass_id", ""))) == str(up_id):
+                return u
+        return None
+
+    def _load_underpass_lights_from_json(self, layer_path):
+        print("[JSON] Loading Underpass Lights...")
+        from json_manager import DesignConstructionManager
+        master_data = DesignConstructionManager.load_master(layer_path)
+        lights_data = master_data.get("underpass_lights", [])
+        
+        print(f"[JSON] Found {len(lights_data)} underpass_lights in {DesignConstructionManager.get_master_path(layer_path)}")
+        
+        if not lights_data:
+            return False
+            
+        if not hasattr(self, 'tunnel_light_actors'):
+            self.tunnel_light_actors = []
+            
+        loaded_any = False
+        for l_data in lights_data:
+            up_id = l_data.get("underpass_id")
+            up = self._find_underpass_in_data(master_data, up_id)
+            if up:
+                self._place_single_underpass_light(l_data.get("config", {}), up, is_loading=True)
+                print(f"[LOAD] Underpass Light restored for {up_id}")
+                loaded_any = True
+                
+        if loaded_any:
+            self.vtk_widget.GetRenderWindow().Render()
+        return loaded_any
+        
+    def _sync_underpass_lights_to_json(self):
+        print("[JSON] Saving Underpass Lights...")
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        worksheet = getattr(self, 'current_worksheet_name', 'Unknown')
+        
+        import os
+        if not layer_folder or not os.path.exists(layer_folder):
+            print(f"[JSON Error] layer_folder is invalid or missing: {layer_folder}")
+            return
+            
+        from json_manager import DesignConstructionManager
+        json_path = DesignConstructionManager.get_master_path(layer_folder)
+        
+        print("-" * 39)
+        print("Asset Type: Underpass Light")
+        print(f"Current Worksheet: {worksheet}")
+        print(f"Current Design Layer: {layer_folder}")
+        print(f"Final JSON Save Path: {json_path}")
+        print("-" * 39)
+        
+        master_data = DesignConstructionManager.load_master(layer_folder)
+        
+        if hasattr(self, 'underpass_lights_data'):
+            master_data["underpass_lights"] = self.underpass_lights_data
+            
+        DesignConstructionManager.save_master(layer_folder, master_data)
+        print("[JSON] Underpass Lights saved successfully.")
+####################################################################################################
+
+###### Mayur Wakhare 15-7-2026 Underpass CCTV #######################################
+    def _place_underpass_cctv(self, data, up, is_loading=False):
+        """Place Underpass CCTV cameras based on geometric placement."""
+        import numpy as np
+        import vtk
+        
+        cavity = up.get("cavity", {})
+        world_center = np.array(cavity.get("world_center", [0.0, 0.0, 0.0]))
+        z_offset = cavity.get("hollow_center_z_offset", 0.0)
+        cavity_center = world_center + np.array([0.0, 0.0, z_offset])
+        
+        hollow_width = float(cavity.get("hollow_width", 10.0))
+        hollow_height = float(cavity.get("hollow_height", 6.0))
+        hollow_length = float(cavity.get("hollow_length", 20.0))
+        
+        local_x = np.array(cavity.get("tangent", [1.0, 0.0, 0.0])) # Width axis
+        x_len = np.linalg.norm(local_x)
+        if x_len > 1e-9: local_x /= x_len
+        
+        up_vec = np.array([0.0, 0.0, 1.0])
+        local_y = np.cross(up_vec, local_x) # Length axis
+        y_len = np.linalg.norm(local_y)
+        if y_len > 1e-9: local_y /= y_len
+        else: local_y = np.array([0.0, 1.0, 0.0])
+            
+        local_z = np.cross(local_x, local_y) # Height axis
+        local_z /= np.linalg.norm(local_z)
+        
+        placement = data.get("placement", "left")
+        
+        if not hasattr(self, 'cctv_camera_actors'):
+            self.cctv_camera_actors = []
+        if not hasattr(self, 'cctv_camera_batches'):
+            self.cctv_camera_batches = []
+            
+        current_batch = []
+        
+        end_offset = 0.5
+        
+        def place_camera(side, position_type):
+            if side == "left":
+                x_dir = -local_x
+                normal_vec = local_x
+            else:
+                x_dir = local_x
+                normal_vec = -local_x
+                
+            up_width = float(up.get("dimensions", {}).get("width", hollow_width))
+            offset_dist = up_width / 2.0
+            wall_pos = cavity_center + offset_dist * x_dir
+            
+            print(f"--- CCTV Wall Placement Debug ---")
+            print(f"Width used for offset: {up_width} (Underpass width) vs {hollow_width} (Cavity width)")
+            print(f"Computed left/right offset distance: {offset_dist}")
+            print(f"Expected wall position (base center before height adjustment): {wall_pos}")
+            print(f"---------------------------------")
+            
+            # To make the camera hang completely below the slab with a ~10cm clearance,
+            # we must lower the base Z position. The highest point of the camera geometry 
+            # (the sun shield) is at Z = +0.43m relative to its base.
+            # So we set the base at ceiling - 0.53m.
+            # This creates a 0.38m gap between the top of the standard bracket (Z=+0.15m) and the ceiling.
+            # We will pass vertical_drop=0.38 to extend the bracket upward to fill this gap.
+            vertical_drop = 0.38
+            z_pos = wall_pos + (hollow_height / 2.0 - 0.53) * local_z
+            
+            # Entry should face local_y (center), Exit should face -local_y (center)
+            target_dir = local_y if position_type == "entry" else -local_y
+            dir_vec = target_dir
+            
+            if position_type == "entry":
+                final_pos = z_pos + (-hollow_length / 2.0 + end_offset) * local_y
+            else:
+                final_pos = z_pos + (hollow_length / 2.0 - end_offset) * local_y
+                
+            # Add a small outward offset from the wall surface so the entire CCTV stays outside the wall.
+            # Applied along the wall normal (outward into the underpass).
+            wall_clearance_offset = 0.4
+            final_pos = final_pos + wall_clearance_offset * normal_vec
+
+            # --- Compute exact orientation towards the road interior ---
+            # Simulate the internal bracket axes from _create_cctv_camera_actor
+            X_local = np.copy(dir_vec)
+            Y_local = np.copy(normal_vec)
+            Z_local = np.cross(X_local, Y_local)
+            
+            if np.linalg.norm(Z_local) > 1e-6:
+                Z_local /= np.linalg.norm(Z_local)
+            
+            # _create_cctv_camera_actor forces Z_local to point up
+            if np.dot(Z_local, np.array([0,0,1])) < 0:
+                X_local = -X_local
+                Z_local = -Z_local
+            
+            # Ensure orthogonality
+            Y_local = np.cross(Z_local, X_local)
+            if np.linalg.norm(Y_local) > 1e-6:
+                Y_local /= np.linalg.norm(Y_local)
+
+            # We want the camera to look at a point on the road centerline (cavity_center)
+            # or slightly ahead on the centerline.
+            look_vec = cavity_center - final_pos
+            look_x = np.dot(look_vec, X_local)
+            look_y = np.dot(look_vec, Y_local)
+            
+            import math
+            desired_angle_deg = math.degrees(math.atan2(look_y, look_x))
+            
+            # _create_cctv_camera_actor has a hardcoded RotateZ(30).
+            # We cancel it out and apply our computed desired angle.
+            yaw = desired_angle_deg - 30.0
+            
+            up_id = str(up.get("id", up.get("underpass_id", "Unknown")))
+            print(f"--- CCTV Orientation Debug for {up_id} {side} {position_type} ---")
+            print(f"X_local (Forward base): {X_local}")
+            print(f"Y_local (Left base): {Y_local}")
+            print(f"Look Vec (To road center): {look_vec}")
+            print(f"Desired Angle (deg): {desired_angle_deg:.2f}")
+            print(f"Final Yaw Offset Applied: {yaw:.2f}")
+            print(f"----------------------------------------------------------")
+
+            actor = self._create_cctv_camera_actor(final_pos, normal_vec, dir_vec, yaw_offset=yaw, vertical_drop=vertical_drop)
+            
+            self.renderer.AddActor(actor)
+            self.cctv_camera_actors.append(actor)
+            
+            up_id = str(up.get("id", up.get("underpass_id", "Unknown")))
+            
+            cam_data = {
+                "id": f"UnderpassCCTV_{up_id}_{side}_{position_type}",
+                "underpass_id": up_id,
+                "worksheet": data.get("worksheet", ""),
+                "design_layer": data.get("design_layer", ""),
+                "asset_name": data.get("asset_name", "UnderpassCCTV"),
+                "world_position": {"x": float(final_pos[0]), "y": float(final_pos[1]), "z": float(final_pos[2])},
+                "normal": {"x": float(normal_vec[0]), "y": float(normal_vec[1]), "z": float(normal_vec[2])},
+                "dir_vec": {"x": float(target_dir[0]), "y": float(target_dir[1]), "z": float(target_dir[2])},
+                "side": side,
+                "position": position_type,
+                "config": data
+            }
+            if not is_loading:
+                if not hasattr(self, 'underpass_cctvs_data'):
+                    self.underpass_cctvs_data = []
+                self.underpass_cctvs_data.append(cam_data)
+            
+        if is_loading:
+            target_side = data.get("target_side")
+            target_pos = data.get("target_position")
+            if target_side and target_pos:
+                place_camera(target_side, target_pos)
+        else:
+            if placement in ["left", "both"]:
+                place_camera("left", "entry")
+                place_camera("left", "exit")
+                
+            if placement in ["right", "both"]:
+                place_camera("right", "entry")
+                place_camera("right", "exit")
+            
+            self._sync_underpass_cctvs_to_json()
+######################################################################################################
+   # Mayur Wakhare 16-7-2026 underpass load json cctv camera and lights
+    def _load_underpass_cctvs_from_json(self, layer_path):
+        print("[JSON] Loading Underpass CCTVs...")
+        from json_manager import DesignConstructionManager
+        master_data = DesignConstructionManager.load_master(layer_path)
+        cameras_data = master_data.get("underpass_cctvs", [])
+        
+        print(f"[JSON] Found {len(cameras_data)} underpass_cctvs in {DesignConstructionManager.get_master_path(layer_path)}")
+        
+        if not cameras_data:
+            return False
+            
+        if not hasattr(self, 'cctv_camera_actors'):
+            self.cctv_camera_actors = []
+            
+        loaded_any = False
+        for cam_data in cameras_data:
+            up_id = cam_data.get("underpass_id")
+            up = self._find_underpass_in_data(master_data, up_id)
+            if up:
+                cfg = dict(cam_data.get("config", {}))
+                cfg["target_side"] = cam_data.get("side")
+                cfg["target_position"] = cam_data.get("position")
+                self._place_underpass_cctv(cfg, up, is_loading=True)
+                print(f"[LOAD] Underpass CCTV restored for {up_id}")
+                loaded_any = True
+                
+        if loaded_any:
+            self.vtk_widget.GetRenderWindow().Render()
+        return loaded_any
+
+    def _sync_underpass_cctvs_to_json(self):
+        print("[JSON] Saving Underpass CCTVs...")
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        worksheet = getattr(self, 'current_worksheet_name', 'Unknown')
+        
+        import os
+        if not layer_folder or not os.path.exists(layer_folder):
+            print(f"[JSON Error] layer_folder is invalid or missing: {layer_folder}")
+            return
+            
+        from json_manager import DesignConstructionManager
+        json_path = DesignConstructionManager.get_master_path(layer_folder)
+        
+        print("-" * 39)
+        print("Asset Type: Underpass CCTV")
+        print(f"Current Worksheet: {worksheet}")
+        print(f"Current Design Layer: {layer_folder}")
+        print(f"Final JSON Save Path: {json_path}")
+        print("-" * 39)
+        
+        master_data = DesignConstructionManager.load_master(layer_folder)
+        
+        if hasattr(self, 'underpass_cctvs_data'):
+            master_data["underpass_cctvs"] = self.underpass_cctvs_data
+            
+        DesignConstructionManager.save_master(layer_folder, master_data)
+        print("[JSON] Underpass CCTVs saved successfully.")
+
+#########################################################################################################
     def _place_single_tunnel_light(self, data):
         """Place exactly ONE tunnel light actor on the semi-circular arc at the specified chainage.
 
@@ -22902,6 +27112,7 @@ class PointCloudViewer(ApplicationUI):
             QMessageBox.critical(self, "Tunnel Light Error",
                 f"Failed to place tunnel light:\n{str(e)}")
 #######################################################################################################################################def _place_multiple_tunnel_lights
+ ## Mayur 17-7-2026 Tunnel Camera view button
     def open_tunnel_config_dialog(self):
         """Open the tunnel configuration dialog."""
         layer_folder = getattr(self, 'current_design_layer_path', None)
@@ -22923,6 +27134,12 @@ class PointCloudViewer(ApplicationUI):
             dialog.end_ch.setText(str(tunnel_saved.get("end_chainage", "")))
             dialog.thickness.setText(str(tunnel_saved.get("wall_thickness", "0.5")))
             dialog.set_arc_points([np.array(pt) for pt in tunnel_saved.get("arc_points", [])])
+            
+            # Preserve existing ID if it exists
+            existing_id = tunnel_saved.get("tunnel_id") or tunnel_saved.get("id")
+            if existing_id:
+                dialog.tunnel_id = existing_id
+
         else:
             # Default to the entire road surface baseline length
             pts_3d = self.get_road_baseline_points_3d()
@@ -22980,9 +27197,9 @@ class PointCloudViewer(ApplicationUI):
             self.output_list.addItem("ARC Marking Mode: Click 3 points on the point cloud.")
         self.vtk_widget.GetRenderWindow().Render()
 
-    def get_road_baseline_points_3d(self):
+    def get_road_baseline_points_3d(self, target_layer=None):
         """Loads and returns sorted list of (chainage, X, Y, Z) points from road_surface_baseline in design layer."""
-        layer_folder = getattr(self, 'current_design_layer_path', None)
+        layer_folder = target_layer or getattr(self, 'current_design_layer_path', None)
         if not layer_folder or not os.path.exists(layer_folder):
             return []
         try:
@@ -23008,10 +27225,10 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             print(f"Error loading 3D baseline points: {e}")
             return []
-
-    def get_road_elevation_at(self, ch_abs):
+### Mayur 17-7-2026 
+    def get_road_elevation_at(self, ch_abs, target_layer=None):
         """Helper to interpolate relative elevation from road_surface_baseline at any absolute chainage ch_abs."""
-        layer_folder = getattr(self, 'current_design_layer_path', None)
+        layer_folder = target_layer or getattr(self, 'current_design_layer_path', None)
         if not layer_folder or not os.path.exists(layer_folder):
             return 0.0
         try:
@@ -23021,21 +27238,161 @@ class PointCloudViewer(ApplicationUI):
             if j:
                 for poly in j.get("polylines", []):
                     for pt in poly.get("points", []):
-                        pts.append((pt['chainage_m'], pt['relative_elevation_m']))
-            if not pts:
-                return 0.0
+                        ch = pt.get("chainage_m")
+                        elev = pt.get("relative_elevation_m", pt.get("elevation_m", 0.0))
+                        if ch is not None:
+                            pts.append((float(ch), float(elev)))
             pts.sort(key=lambda x: x[0])
+            if not pts: return 0.0
+            
             global_start_offset = self._get_global_start_offset(layer_folder)
-            all_chs = [p[0] + global_start_offset for p in pts]
-            all_zs = [p[1] for p in pts]
-            return float(np.interp(ch_abs, all_chs, all_zs))
-        except Exception as e:
-            print(f"Error getting road elevation: {e}")
+            chs = [p[0] + global_start_offset for p in pts]
+            els = [p[1] for p in pts]
+            return float(np.interp(ch_abs, chs, els))
+        except:
             return 0.0
+##### Mayur 17-7-2026 
+    def get_curve_aware_path(self, start_ch, end_ch, step=0.5, target_layer=None):
+        """Calculates a list of (ch, pos_xyz, perp, dir_vec) samples from start_ch to end_ch
+        by directly sub-sampling from curved_path_samples which already contain
+        the accurate curve-rotated positions and perpendicular vectors from the road
+        surface baseline.
+        """
+        import numpy as np
 
+        # ------------------------------------------------------------------
+        # PRIMARY PATH: use curved_path_samples (curve-accurate)
+        # ------------------------------------------------------------------
+        try:
+            samples_to_use = None
+            if target_layer and hasattr(self, 'layer_path_samples') and target_layer in self.layer_path_samples:
+                samples_to_use = self.layer_path_samples[target_layer]
+            elif hasattr(self, 'master_curved_path_samples') and self.master_curved_path_samples:
+                samples_to_use = self.master_curved_path_samples
+                
+            if not samples_to_use:
+                raise Exception("curved_path_samples is missing.")
+
+            master_samples = samples_to_use
+            
+            # Simple bounding box / range check
+            # if start_ch < master_samples[0]['ch'] or end_ch > master_samples[-1]['ch']:
+            #    print("Warning: requested chainage out of bounds for master samples")
+
+            master_chs = [s['ch'] for s in master_samples]
+            master_xs  = [s['center'][0] for s in master_samples]
+            master_ys  = [s['center'][1] for s in master_samples]
+            master_zs  = [s['center'][2] for s in master_samples]
+            
+            master_px = [s['perp'][0] for s in master_samples]
+            master_py = [s['perp'][1] for s in master_samples]
+            master_pz = [s['perp'][2] for s in master_samples]
+
+            path_samples = []
+            cur_ch = float(start_ch)
+            target_ch = float(end_ch)
+
+            while cur_ch <= target_ch + 0.01:
+                # Interpolate center point XYZ
+                x = float(np.interp(cur_ch, master_chs, master_xs))
+                y = float(np.interp(cur_ch, master_chs, master_ys))
+                z = float(np.interp(cur_ch, master_chs, master_zs))
+                pos_xyz = np.array([x, y, z])
+
+                # Interpolate perpendicular vector
+                px = float(np.interp(cur_ch, master_chs, master_px))
+                py = float(np.interp(cur_ch, master_chs, master_py))
+                pz = float(np.interp(cur_ch, master_chs, master_pz))
+                perp = np.array([px, py, pz])
+                p_len = np.linalg.norm(perp)
+                if p_len > 1e-9:
+                    perp /= p_len
+
+                # Approximate forward direction as cross product of UP [0,0,1] and PERP
+                # This ensures the camera aligns exactly with the curve sweep
+                d_vec = np.cross(perp, np.array([0.0, 0.0, 1.0]))
+                d_len = np.linalg.norm(d_vec)
+                if d_len > 1e-9:
+                    d_vec /= d_len
+
+                path_samples.append((cur_ch, pos_xyz, perp, d_vec))
+                cur_ch += step
+
+            print(f"[Tunnel] get_curve_aware_path: generated {len(path_samples)} samples "
+                  f"from curved_path_samples (curve-accurate)")
+            return path_samples
+
+        except Exception as e:
+            print(f"[Tunnel] get_curve_aware_path: accurate path unavailable ({e}), "
+                  f"using fallback baseline interpolation")
+
+        # ------------------------------------------------------------------
+        # FALLBACK PATH: use raw baseline points (straight-line interpolation)
+        # ------------------------------------------------------------------
+        pts_3d = self.get_road_baseline_points_3d(target_layer)
+        if not pts_3d:
+            if hasattr(self, 'zero_start_point') and self.zero_start_point is not None:
+                p0 = np.array(self.zero_start_point, dtype=float)
+                p1 = np.array(self.zero_end_point, dtype=float)
+                dist = np.linalg.norm(p1 - p0)
+                pts_3d = [
+                    (0.0, p0[0], p0[1], p0[2]),
+                    (dist, p1[0], p1[1], p1[2])
+                ]
+        if not pts_3d:
+            return []
+
+        all_chs = [p[0] for p in pts_3d]
+        all_xs  = [p[1] for p in pts_3d]
+        all_ys  = [p[2] for p in pts_3d]
+        all_zs  = [p[3] for p in pts_3d]
+
+        path_samples = []
+        cur_ch = float(start_ch)
+        target_ch = float(end_ch)
+
+        while cur_ch <= target_ch + 0.01:
+            x = float(np.interp(cur_ch, all_chs, all_xs))
+            y = float(np.interp(cur_ch, all_chs, all_ys))
+            z = float(np.interp(cur_ch, all_chs, all_zs))
+            pos_xyz = np.array([x, y, z])
+
+            # Direction from sparse pts_3d
+            idx = 0
+            for i in range(len(pts_3d) - 1):
+                if pts_3d[i][0] <= cur_ch <= pts_3d[i + 1][0]:
+                    idx = i
+                    break
+            else:
+                if cur_ch < pts_3d[0][0]:
+                    idx = 0
+                else:
+                    idx = len(pts_3d) - 2
+
+            seg_p0 = np.array(pts_3d[idx][1:4])
+            seg_p1 = np.array(pts_3d[idx + 1][1:4])
+            d_vec = seg_p1 - seg_p0
+            d_len = np.linalg.norm(d_vec)
+            if d_len > 0:
+                d_vec /= d_len
+            else:
+                d_vec = np.array([1.0, 0.0, 0.0])
+
+            perp = np.array([-d_vec[1], d_vec[0], 0.0])
+            p_len = np.linalg.norm(perp)
+            if p_len > 1e-9:
+                perp /= p_len
+            else:
+                perp = np.array([0.0, 1.0, 0.0])
+
+            path_samples.append((cur_ch, pos_xyz, perp, d_vec))
+            cur_ch += step
+
+        return path_samples
+        ###############################################################################################
 
     # Define the function for the curve the tunnel 
-    def get_curve_aware_path(self, start_ch, end_ch, step=0.5):
+    def get_curve_aware_path_old(self, start_ch, end_ch, step=0.5):
         """Calculates a list of (ch, pos_xyz, perp, dir_vec) samples from start_ch to end_ch
         by directly sub-sampling from master_curved_path_samples which already contain
         the accurate curve-rotated positions and perpendicular vectors from the road
@@ -23065,12 +27422,17 @@ class PointCloudViewer(ApplicationUI):
                 global_start_offset = (float(self.zero_start_km) * 1000.0
                                        + float(getattr(self, 'zero_start_chainage', 0.0)))
 
-            # Build arrays of absolute chainage and XY from master samples
-            m_chs  = np.array([s['ch'] + global_start_offset for s in master_samples], dtype=float)
-            m_xs   = np.array([s['center'][0] for s in master_samples], dtype=float)
-            m_ys   = np.array([s['center'][1] for s in master_samples], dtype=float)
-            m_perp_xs = np.array([s['perp'][0] for s in master_samples], dtype=float)
-            m_perp_ys = np.array([s['perp'][1] for s in master_samples], dtype=float)
+            # ── SORT MASTER SAMPLES BY CHAINAGE ──
+            # In Merged Layer mode, samples might be appended in reverse order.
+            # np.interp strictly requires the x-coordinates (chainage) to be increasing.
+            sorted_samples = sorted(master_samples, key=lambda s: s['ch'])
+
+            # Build arrays of absolute chainage and XY from sorted samples
+            m_chs  = np.array([s['ch'] + global_start_offset for s in sorted_samples], dtype=float)
+            m_xs   = np.array([s['center'][0] for s in sorted_samples], dtype=float)
+            m_ys   = np.array([s['center'][1] for s in sorted_samples], dtype=float)
+            m_perp_xs = np.array([s['perp'][0] for s in sorted_samples], dtype=float)
+            m_perp_ys = np.array([s['perp'][1] for s in sorted_samples], dtype=float)
 
             # Load Z elevation profile directly from the baseline points
             # (bypassing _load_baseline_from_design_layer which fails in design layers)
@@ -23211,8 +27573,42 @@ class PointCloudViewer(ApplicationUI):
             cur_ch += step
 
         return path_samples
-
-    def draw_tunnel_actor(self, tunnel_data):
+### Mayur 17-7-2026 Tunnel Camera view button 
+    def _generate_tunnel_id(self, skm, sch):
+        """Generates a unique tunnel ID format TN_<KM>_<Chainage>_<Sequence>"""
+        import os
+        from json_manager import DesignConstructionManager
+        
+        prefix = f"TN_{int(skm):03d}_{int(sch):03d}"
+        max_seq = 0
+        
+        base_dir = getattr(self, 'WORKSHEETS_BASE_DIR', '')
+        ws_name = getattr(self, 'current_worksheet_name', '')
+        if base_dir and ws_name:
+            designs_dir = os.path.join(base_dir, ws_name, "designs")
+            if os.path.exists(designs_dir):
+                for layer_name in os.listdir(designs_dir):
+                    layer_path = os.path.join(designs_dir, layer_name)
+                    if os.path.isdir(layer_path):
+                        try:
+                            master_data = DesignConstructionManager.load_master(layer_path)
+                            t_data = master_data.get("design", {}).get("tunnel")
+                            if t_data:
+                                tid = t_data.get("tunnel_id", t_data.get("id", ""))
+                                if tid.startswith(prefix + "_"):
+                                    try:
+                                        seq = int(tid.split("_")[-1])
+                                        if seq > max_seq:
+                                            max_seq = seq
+                                    except:
+                                        pass
+                        except:
+                            pass
+        return f"{prefix}_{(max_seq + 1):03d}"
+###################################################################################################
+    ## Mayur 17-7-2026 tunnel not loding in 3d layer 
+    def draw_tunnel_actor(self, tunnel_data, clear_existing=True):
+        #####################################################################
         """Draws a 3D hollow tunnel arch along the road surface baseline.
 
         Algorithm:
@@ -23234,14 +27630,17 @@ class PointCloudViewer(ApplicationUI):
         # ── Clear previous tunnel & temp arc actors ─────────────────────
         if not hasattr(self, 'tunnel_actors'):
             self.tunnel_actors = []
-        for a in self.tunnel_actors:
-            self.renderer.RemoveActor(a)
-        self.tunnel_actors.clear()
-
-        if hasattr(self, 'temp_tunnel_arc_actors'):
-            for a in self.temp_tunnel_arc_actors:
+            
+        if clear_existing:
+            print(f"DEBUG MERGE: Clearing {len(self.tunnel_actors)} tunnel actors")
+            for a in self.tunnel_actors:
                 self.renderer.RemoveActor(a)
-            self.temp_tunnel_arc_actors.clear()
+            self.tunnel_actors.clear()
+
+            if hasattr(self, 'temp_tunnel_arc_actors'):
+                for a in self.temp_tunnel_arc_actors:
+                    self.renderer.RemoveActor(a)
+                self.temp_tunnel_arc_actors.clear()
 
         try:
             # ════════════════════════════════════════════════════════════
@@ -23364,9 +27763,17 @@ class PointCloudViewer(ApplicationUI):
                 step = 1.0
             else:
                 step = 0.5
+##### Mayur 17-7-2026 tunnel touch road surface 
+            path_samples_raw = self.get_curve_aware_path(start_ch_abs, end_ch_abs, step=step)
 
-            path_samples = self.get_curve_aware_path(start_ch_abs, end_ch_abs, step=step)
-
+            # === REQUIRED FIX: Derive Tunnel Z from Road Surface ===
+            # get_curve_aware_path uses a flat Z. We must overwrite it with the true road baseline Z.
+            path_samples = []
+            for (ch, pos_xyz, perp, d_vec) in path_samples_raw:
+                true_z = float(np.interp(ch, all_chs, all_zs))
+                pos_xyz[2] = true_z
+                path_samples.append((ch, pos_xyz, perp, d_vec))
+##############################################################################################
             if len(path_samples) < 2:
                 QMessageBox.warning(self, "Tunnel Error",
                     f"Only {len(path_samples)} path sample(s) generated.\n"
@@ -23514,12 +27921,15 @@ class PointCloudViewer(ApplicationUI):
                     sin_t = np.sin(theta)
 
                     # Inner wall point in local coords
+                    # The circle center Y (vc) was used to compute R.
+                    # To ensure the base sits exactly on the road surface, 
+                    # we do not add vc to the vertical offset.
                     u_i = uc + R * cos_t
-                    v_i = vc + R * sin_t
+                    v_i = 0.0 + R * sin_t
 
                     # Outer wall point (expanded outward by wall_thickness)
                     u_o = uc + (R + wall_thickness) * cos_t
-                    v_o = vc + (R + wall_thickness) * sin_t
+                    v_o = 0.0 + (R + wall_thickness) * sin_t
 
                     # Convert to 3D world coordinates
                     #   p_vec  = perpendicular to road (horizontal, in XY plane)
@@ -23527,7 +27937,15 @@ class PointCloudViewer(ApplicationUI):
                     #   P_base = road surface position at this chainage
                     P_inner = P_base + u_i * p_vec + v_i * up_vec
                     P_outer = P_base + u_o * p_vec + v_o * up_vec
-
+           ###  Mayur 17-7-2026       
+                    if s_idx == 0 and j == 0:
+                        print(f"\n--- VERTEX WORLD COMPUTATION DEBUG ---")
+                        print(f"local_y before transform (v_i): {v_i:.4f}")
+                        print(f"circle center Y (vc): {vc:.4f}")
+                        print(f"final world Z (P_inner[2]): {P_inner[2]:.4f}")
+                        print(f"Road Surface Z (P_base[2]): {P_base[2]:.4f}")
+                        print("--------------------------------------\n")
+###################################################################################################
                     inner_ring.append(P_inner.copy())
                     outer_ring.append(P_outer.copy())
 
@@ -23659,6 +28077,18 @@ class PointCloudViewer(ApplicationUI):
             actor.GetProperty().SetSpecular(0.1)
             actor.GetProperty().SetEdgeVisibility(False)
             actor.GetProperty().SetBackfaceCulling(False)       # Show both sides
+### Mayur 18-7-2026
+            # Track actor mapping for debugging
+            tunnel_id = tunnel_data.get('id', tunnel_data.get('tunnel_id', 'unknown'))
+            layer_id = tunnel_data.get('layer_id', 'unknown')
+            
+            if not hasattr(self, 'tunnel_actor_map'):
+                self.tunnel_actor_map = {}
+            self.tunnel_actor_map[tunnel_id] = {
+                'actor': actor,
+                'layer_id': layer_id,
+                'tunnel_id': tunnel_id
+            }
 
             self.renderer.AddActor(actor)
             self.tunnel_actors.append(actor)
@@ -23673,7 +28103,36 @@ class PointCloudViewer(ApplicationUI):
 
             self.vtk_widget.GetRenderWindow().Render()
             print("[Tunnel] === RENDER COMPLETE ===")
-
+       ######### Mayur 17-7-2026     
+            # =================================================================================
+            # DEBUG GAP OUTPUT (as requested by user)
+            # =================================================================================
+            try:
+                # First and last road surface Z
+                rs_entry_z = path_samples[0][1][2]
+                rs_exit_z = path_samples[-1][1][2]
+                
+                # First and last tunnel feet Z (lowest points)
+                # I_pts[slice][point]. The feet are at index 0 (theta=0) and index -1 (theta=pi)
+                t_entry_z = min(I_pts[0][0][2], I_pts[0][-1][2])
+                t_exit_z = min(I_pts[-1][0][2], I_pts[-1][-1][2])
+                
+                entry_gap = t_entry_z - rs_entry_z
+                exit_gap = t_exit_z - rs_exit_z
+                
+                print("\n" + "="*60)
+                print("--- TUNNEL VERTICAL PLACEMENT DEBUG ---")
+                print(f"Entry Road Surface Z: {rs_entry_z:.4f}")
+                print(f"Exit Road Surface Z:  {rs_exit_z:.4f}")
+                print(f"Tunnel Entry Z:       {t_entry_z:.4f}")
+                print(f"Tunnel Exit Z:        {t_exit_z:.4f}")
+                print(f"Entry Gap = TunnelEntryZ - RoadSurfaceEntryZ = {entry_gap:.4f}")
+                print(f"Exit Gap = TunnelExitZ - RoadSurfaceExitZ    = {exit_gap:.4f}")
+                print("="*60 + "\n")
+            except Exception as e:
+                print(f"[Tunnel] Error printing vertical debug: {e}")
+            # =================================================================================
+########################################################################################################
             # ════════════════════════════════════════════════════════════
             # STEP 8 — Automatically clear points inside the tunnel volume
             # ════════════════════════════════════════════════════════════
@@ -31568,7 +36027,8 @@ class PointCloudViewer(ApplicationUI):
         try:
             with open(lane_file, 'r', encoding="utf-8") as f:
                 data = json.load(f)
-            self.visualize_lane_markings(data, layer_path=layer_path)
+            should_clear = not getattr(self, '_skip_layer_clear', False)
+            self.visualize_lane_markings(data, clear_existing=should_clear, layer_path=layer_path)
         except Exception as e:
             self.message_text.append(f"Error loading lane markings: {str(e)}")
 
@@ -31581,7 +36041,8 @@ class PointCloudViewer(ApplicationUI):
         try:
             lane_data = DesignConstructionManager.get_lane_marking(layer_path)
             if lane_data:
-                self.visualize_lane_markings(lane_data, layer_path=layer_path)
+                should_clear = not getattr(self, '_skip_layer_clear', False)
+                self.visualize_lane_markings(lane_data, clear_existing=should_clear, layer_path=layer_path)
                 self.message_text.append("Lane markings restored from design_construction_config.json")
                 loaded_any = True
         except Exception as e:
@@ -31633,7 +36094,35 @@ class PointCloudViewer(ApplicationUI):
             master_data = DesignConstructionManager.load_master(layer_path)
             tunnel_data = master_data.get("design", {}).get("tunnel")
             if tunnel_data:
-                self.draw_tunnel_actor(tunnel_data)
+###### Mayur 17-07-2026 Tunnel camera view button tunnel id                
+                # Retroactive ID generation for old tunnels
+                if "tunnel_id" not in tunnel_data and "id" not in tunnel_data:
+                    skm = int(float(tunnel_data.get("start_km", 0)))
+                    sch = int(float(tunnel_data.get("start_chainage", 0)))
+                    new_id = self._generate_tunnel_id(skm, sch)
+                    tunnel_data["tunnel_id"] = new_id
+                    tunnel_data["id"] = new_id
+                    master_data["design"]["tunnel"] = tunnel_data
+                    DesignConstructionManager.save_master(layer_path, master_data)
+                elif "tunnel_id" not in tunnel_data and "id" in tunnel_data:
+                    tunnel_data["tunnel_id"] = tunnel_data["id"]
+                    master_data["design"]["tunnel"] = tunnel_data
+                    DesignConstructionManager.save_master(layer_path, master_data)
+                elif "id" not in tunnel_data and "tunnel_id" in tunnel_data:
+                    tunnel_data["id"] = tunnel_data["tunnel_id"]
+                    master_data["design"]["tunnel"] = tunnel_data
+                    DesignConstructionManager.save_master(layer_path, master_data)
+######################################################################################################
+              ## Mayur 17-7-2026 lode tunnel in 3d 
+                should_clear = not getattr(self, '_skip_layer_clear', False)
+                print(f"DEBUG MERGE: load_design_layer_assets_from_json - Active layer: {layer_path}")
+                print(f"DEBUG MERGE: skip_clear = {getattr(self, '_skip_layer_clear', False)}, should_clear = {should_clear}")
+                print(f"DEBUG MERGE: Tunnel actors before loading layer: {len(getattr(self, 'tunnel_actors', []))}")
+                
+                self.draw_tunnel_actor(tunnel_data, clear_existing=should_clear)
+                
+                print(f"DEBUG MERGE: Tunnel actors after loading layer: {len(getattr(self, 'tunnel_actors', []))}")
+              #####################################################################################################  
                 self.message_text.append(" Tunnel structure restored and visualized from design_construction_config.json")
                 loaded_any = True
         except Exception as e:
@@ -31644,7 +36133,71 @@ class PointCloudViewer(ApplicationUI):
                 loaded_any = True
         except Exception as e:
             self.message_text.append(f"Error loading tunnel lights: {str(e)}")
-            
+   ####### Mayur Wakhare 4-7-2026 Json fire tunnel          
+        try:
+            if self._load_fire_extinguishers_from_json(layer_path):
+                loaded_any = True
+        except Exception as e:
+            self.message_text.append(f"Error loading fire extinguishers: {str(e)}")
+    ##### Mayur Wakhare 7-7-2026 Json file pipe tunnel        
+        try:
+            if self._load_water_pipes_from_json(layer_path):
+                loaded_any = True
+        except Exception as e:
+            self.message_text.append(f"Error loading water pipes: {str(e)}")
+  #######################################################################  
+  # ##  Mayur Wakhare 6-7-2026 Tunnel cctv camera json        
+        try:
+            if self._load_cctv_cameras_from_json(layer_path):
+                loaded_any = True
+        except Exception as e:
+            self.message_text.append(f"Error loading CCTV cameras: {str(e)}")
+
+        try:
+            if self._load_emergency_telephone_boards_from_json(layer_path):
+                loaded_any = True
+        except Exception as e:
+            self.message_text.append(f"Error loading emergency telephone boards: {str(e)}")
+
+        try:
+            if self._load_tunnel_info_boards_from_json(layer_path):
+                loaded_any = True
+        except Exception as e:
+            self.message_text.append(f"Error loading tunnel information boards: {str(e)}")
+### Mayur Wakhare 7-7-2026 json fan jet tunnel
+        try:
+            if self._load_tunnel_exhaust_fans_from_json(layer_path):
+                loaded_any = True
+        except Exception as e:
+            self.message_text.append(f"Error loading tunnel exhaust fans: {str(e)}")
+
+
+        try:
+            if self._load_underpass_lights_from_json(layer_path):
+                loaded_any = True
+        except Exception as e:
+            self.message_text.append(f"Error loading underpass lights: {str(e)}")
+
+        try:
+            if self._load_underpass_cctvs_from_json(layer_path):
+                loaded_any = True
+        except Exception as e:
+            self.message_text.append(f"Error loading underpass CCTVs: {str(e)}")
+
+#####################################################################################################
+        print("-" * 32)
+        print("Project JSON Loaded\n")
+        print(f"Tunnel Lights : {len(master_data.get('tunnel_lights', []))}")
+        print(f"Underpass Lights : {len(master_data.get('underpass_lights', []))}")
+        print(f"Fire Extinguishers : {len(master_data.get('fire_extinguishers', []))}")
+        print(f"CCTV Cameras : {len(master_data.get('cctv_cameras', []))}")
+        print(f"Underpass CCTVs : {len(master_data.get('underpass_cctvs', []))}")
+        print(f"Tunnel Exhaust Fans : {len(master_data.get('tunnel_exhaust_fans', []))}")
+
+        print(f"Emergency Telephone Boards : {len(master_data.get('emergency_telephone_boards', []))}")
+        print(f"Tunnel Information Boards : {len(master_data.get('tunnel_information_boards', []))}")
+        print("-" * 32)
+##########################################################################################
         return loaded_any
 
     def visualize_lane_markings(self, data_input, clear_existing=True, layer_path=None):
@@ -33759,7 +38312,9 @@ class PointCloudViewer(ApplicationUI):
                 for actor in actors_to_remove:
                     self.renderer.RemoveActor(actor)
                 
-                self.render_window.Render()
+        ## Mayur Wakhare 7-7-2026 
+                self.vtk_widget.GetRenderWindow().Render()
+                ############################################
                 self.message_text.append(f" Visualization updated: {asset_name} visualization removed")
         except Exception as e:
             print(f"Warning: Could not remove visualization: {e}")
@@ -34080,7 +38635,9 @@ class PointCloudViewer(ApplicationUI):
             except Exception as e:
                 print(f"Error refreshing poles: {e}")
         
-        self.render_window.Render()
+     ## Mayur Wakhare 7-7-2026 
+        self.vtk_widget.GetRenderWindow().Render()
+        ##########################################
 
     def _get_global_start_offset(self, layer_folder):
         """Get global start chainage offset from road_surface_baseline in unified config."""
@@ -36171,64 +40728,6 @@ class PointCloudViewer(ApplicationUI):
                 # Changed by Adinath Patil
                 print(f"Plane → {ltype} → polyline {poly_index} → points:", len(points_list))
 
-                vtk_points  = vtk.vtkPoints()
-                quads_cells = vtk.vtkCellArray()
-                left_ids    = []
-                right_ids   = []
-                z_offset    = poly_index * 0.001
-
-                for i, pt in enumerate(points_list):
-                    coords = pt.get("world_coordinates")
-                    if not coords:
-                        continue
-
-                    x, y, z = coords
-                    z = z + z_offset
-
-                    if i == 0 and poly_index > 0:
-                        x = x + 1.0
-
-                    half_w   = width / 2.0
-                    left     = (x - half_w, y, z)
-                    right    = (x + half_w, y, z)
-
-                    left_id  = vtk_points.InsertNextPoint(left)
-                    right_id = vtk_points.InsertNextPoint(right)
-
-                    left_ids.append(left_id)
-                    right_ids.append(right_id)
-
-                for i in range(len(left_ids) - 1):
-                    ch1 = points_list[i].get("chainage_m", 0)
-                    ch2 = points_list[i + 1].get("chainage_m", 0)
-
-                    if abs(ch2 - ch1) > 25:
-                        print(f"DEBUG → Skipping gap quad: {ch1} → {ch2}")
-                        continue
-
-                    quad = vtk.vtkQuad()
-                    quad.GetPointIds().SetId(0, left_ids[i])
-                    quad.GetPointIds().SetId(1, right_ids[i])
-                    quad.GetPointIds().SetId(2, right_ids[i + 1])
-                    quad.GetPointIds().SetId(3, left_ids[i + 1])
-                    quads_cells.InsertNextCell(quad)
-
-                polydata_direct = vtk.vtkPolyData()
-                polydata_direct.SetPoints(vtk_points)
-                polydata_direct.SetPolys(quads_cells)
-                polydata_direct.Modified()
-
-                actor_direct = self._convert_to_point_cloud(polydata_direct, rgba[:3], opacity=rgba[3], distance=0.05)
-
-                renderer.AddActor(actor_direct)
-                self.baseline_plane_actors.append(actor_direct)
-
-                print(f"DEBUG → Actor added | Total actors: {len(self.baseline_plane_actors)} | ID: {id(actor_direct)}")
-
-                total_planes += 1
-                print(f"Plane created for polyline {poly_index}")
-                # Changed by Adinath Patil
-
                 # ── Original curve/math logic ke liye points collect karo ──
                 all_left_pts  = []
                 all_right_pts = []
@@ -36292,7 +40791,39 @@ class PointCloudViewer(ApplicationUI):
                         all_left_pts.append(left)
                         all_right_pts.append(right)
 
-            # Changed by Adinath Patil
+             # Mayur Wakhare 12-07-2026
+                # --- Create plane ---
+                if len(all_left_pts) >= 2:
+                    vtk_points = vtk.vtkPoints()
+                    quads_cells = vtk.vtkCellArray()
+                    
+                    z_offset = poly_index * 0.001
+                    for i in range(len(all_left_pts)):
+                        l_pt = all_left_pts[i]
+                        r_pt = all_right_pts[i]
+                        vtk_points.InsertNextPoint(l_pt[0], l_pt[1], l_pt[2] + z_offset)
+                        vtk_points.InsertNextPoint(r_pt[0], r_pt[1], r_pt[2] + z_offset)
+                    
+                    for i in range(len(all_left_pts) - 1):
+                        quad = vtk.vtkQuad()
+                        quad.GetPointIds().SetId(0, 2 * i)
+                        quad.GetPointIds().SetId(1, 2 * i + 1)
+                        quad.GetPointIds().SetId(2, 2 * (i + 1) + 1)
+                        quad.GetPointIds().SetId(3, 2 * (i + 1))
+                        quads_cells.InsertNextCell(quad)
+                        
+                    polydata_direct = vtk.vtkPolyData()
+                    polydata_direct.SetPoints(vtk_points)
+                    polydata_direct.SetPolys(quads_cells)
+                    polydata_direct.Modified()
+
+                    actor_direct = self._convert_to_point_cloud(polydata_direct, color_rgb, opacity=opacity, distance=0.05)
+                    renderer.AddActor(actor_direct)
+                    self.baseline_plane_actors.append(actor_direct)
+                    
+                    total_planes += 1
+                    print(f"DEBUG → Actor added | Total actors: {len(self.baseline_plane_actors)} | ID: {id(actor_direct)}")
+##########################################################################
             print("Total planes created:", total_planes)
             return total_planes
             # Changed by Adinath Patil
@@ -36733,11 +41264,9 @@ class PointCloudViewer(ApplicationUI):
 
             added_total = 0
 
-            # Changed by Adinath Patil
             print("ENTERED ROAD SURFACE PLANE GENERATION")
             renderer = self.vtk_widget.GetRenderWindow().GetRenderers().GetFirstRenderer()
             total_planes = 0
-            # Changed by Adinath Patil
 
             for poly_index, poly in enumerate(road_data.get("polylines", [])):
                 points_list = poly.get("points", [])
@@ -36746,59 +41275,6 @@ class PointCloudViewer(ApplicationUI):
 
                 # Changed by Adinath Patil
                 print(f"Road Surface → polyline {poly_index} → points:", len(points_list))
-
-                vtk_points = vtk.vtkPoints()
-                quads_cells = vtk.vtkCellArray()
-                left_ids = []
-                right_ids = []
-                z_offset = poly_index * 0.05
-
-                for i, pt in enumerate(points_list):
-                    coords = pt.get("world_coordinates")
-                    if not coords:
-                        continue
-
-                    x, y, z = coords
-                    z = z + z_offset
-
-                    if i == 0 and poly_index > 0:
-                        x = x + 0.2
-
-                    half_w = width_m / 2.0
-                    left  = (x - half_w, y, z)
-                    right = (x + half_w, y, z)
-
-                    left_id  = vtk_points.InsertNextPoint(left)
-                    right_id = vtk_points.InsertNextPoint(right)
-
-                    left_ids.append(left_id)
-                    right_ids.append(right_id)
-
-                for i in range(len(left_ids) - 1):
-                    quad = vtk.vtkQuad()
-                    quad.GetPointIds().SetId(0, left_ids[i])
-                    quad.GetPointIds().SetId(1, right_ids[i])
-                    quad.GetPointIds().SetId(2, right_ids[i + 1])
-                    quad.GetPointIds().SetId(3, left_ids[i + 1])
-                    quads_cells.InsertNextCell(quad)
-
-                polydata_direct = vtk.vtkPolyData()
-                polydata_direct.SetPoints(vtk_points)
-                polydata_direct.SetPolys(quads_cells)
-                polydata_direct.Modified()
-
-                # Convert to point cloud (not solid plane) for consistency with all other baselines
-                actor_direct = self._convert_to_point_cloud(polydata_direct, rgba[:3], opacity=rgba[3], distance=0.05)
-
-                renderer.AddActor(actor_direct)
-
-                if not hasattr(self, "road_surface_plane_actors"):
-                    self.road_surface_plane_actors = []
-                self.road_surface_plane_actors.append(actor_direct)
-
-                total_planes += 1
-                print(f"Road Surface plane created for polyline {poly_index}")
-                # Changed by Adinath Patil
 
                 # ── Original curve/wall logic ke liye points collect karo ──
                 for i in range(len(points_list) - 1):
@@ -36866,7 +41342,42 @@ class PointCloudViewer(ApplicationUI):
                         all_chainages.append(ch)
                         all_has_angle.append(segment_has_angle)
 
-            # Changed by Adinath Patil
+             # Mayur Wakhare 12-07-2026
+                # --- Create road surface plane ---
+                if len(all_left_pts) >= 2:
+                    vtk_points = vtk.vtkPoints()
+                    quads_cells = vtk.vtkCellArray()
+                    
+                    z_offset = poly_index * 0.05
+                    for i in range(len(all_left_pts)):
+                        l_pt = all_left_pts[i]
+                        r_pt = all_right_pts[i]
+                        vtk_points.InsertNextPoint(l_pt[0], l_pt[1], l_pt[2] + z_offset)
+                        vtk_points.InsertNextPoint(r_pt[0], r_pt[1], r_pt[2] + z_offset)
+                        
+                    for i in range(len(all_left_pts) - 1):
+                        quad = vtk.vtkQuad()
+                        quad.GetPointIds().SetId(0, 2 * i)
+                        quad.GetPointIds().SetId(1, 2 * i + 1)
+                        quad.GetPointIds().SetId(2, 2 * (i + 1) + 1)
+                        quad.GetPointIds().SetId(3, 2 * (i + 1))
+                        quads_cells.InsertNextCell(quad)
+
+                    polydata_direct = vtk.vtkPolyData()
+                    polydata_direct.SetPoints(vtk_points)
+                    polydata_direct.SetPolys(quads_cells)
+                    polydata_direct.Modified()
+
+                    actor_direct = self._convert_to_point_cloud(polydata_direct, color_rgb, opacity=opacity, distance=0.05)
+
+                    renderer.AddActor(actor_direct)
+                    if not hasattr(self, "road_surface_plane_actors"):
+                        self.road_surface_plane_actors = []
+                    self.road_surface_plane_actors.append(actor_direct)
+
+                    total_planes += 1
+                    print(f"Road Surface plane created for polyline {poly_index}")
+###########################################################################
             print("Total road surface planes:", total_planes)
             # Changed by Adinath Patil
 

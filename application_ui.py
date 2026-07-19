@@ -29,7 +29,7 @@ from vtkmodules.vtkCommonColor import vtkNamedColors
 from digging_point import DiggingPointInput
 from API import WorksheetAPI
 # Mayur Wakhare 06-06-2026 : Go to the dialogs module and bring the ShareWithBuddiesDialog, ExpandingRoadDialog, and UnderPassDialog objects into my current file so I can use them directly. ############
-from dialogs import ShareWithBuddiesDialog, ExpandingRoadDialog, UnderPassDialog,UnderPassPreviewDialog
+from dialogs import ShareWithBuddiesDialog, ExpandingRoadDialog, UnderPassDialog,UnderPassPreviewDialog,UnderpassLightDialog, UnderpassCCTVDialog
 
 import vtk
 import math as _math
@@ -58,27 +58,21 @@ class TunnelFPSInteractorStyle(vtkInteractorStyleUser):
         self._viewer = viewer
         # Configurable scroll wheel movement speed (meters per wheel notch)
         self.SCROLL_STEP_DISTANCE = 7.0  # was 3.5; doubled for faster scroll
-        #################################################################
-######## Mayur Wakhare 30-06-2026
+        ### Mayur Wakhare 13-07-2026 Underpass Camera movement 
+        self.UNDERPASS_SCROLL_STEP_MULTIPLIER = 10.0  # Configurable movem######## Mayur Wakhare 30-06-2026
         self._locked_position = None  # (x, y, z) — used only in legacy mode
         self._lmb_dragging = False
-        self._rmb_dragging = False
-        self._mmb_dragging = False
         ##############################################################
         self._last_x = 0
         self._last_y = 0
- ########### Mayur Wakhare 30-06-2026
+  ########### Mayur Wakhare 30-06-2026
         self._sensitivity_look = 0.15  # degrees per pixel
         self._sensitivity_move = 0.05  # meters per pixel
 ##########################################################
         self.AddObserver("LeftButtonPressEvent", self._on_left_press)
         self.AddObserver("LeftButtonReleaseEvent", self._on_left_release)
-######## Mayur Wakhare 30-06-2026
-        self.AddObserver("RightButtonPressEvent", self._on_right_press)
-        self.AddObserver("RightButtonReleaseEvent", self._on_right_release)
-        self.AddObserver("MiddleButtonPressEvent", self._on_middle_press)
-        self.AddObserver("MiddleButtonReleaseEvent", self._on_middle_release)
         ###################################################################
+        self.AddObserver("MouseMoveEvent", self._on_mouse_move)#######################################################
         self.AddObserver("MouseMoveEvent", self._on_mouse_move)
 ####### Mayur Wakhare 30-06-2026        
         self.AddObserver("MouseWheelForwardEvent", self._on_mouse_wheel_forward)
@@ -118,27 +112,14 @@ class TunnelFPSInteractorStyle(vtkInteractorStyleUser):
     def _on_left_press(self, obj, event):
         self._update_last_pos()
         self._lmb_dragging = True
+        print("DEBUG: Mouse Drag Started")
 ########################################################
     def _on_left_release(self, obj, event):
  ####### Mayur Wakhare 30-06-2026
         self._lmb_dragging = False
+        print("DEBUG: Mouse Drag Ended")
  ################################################
         self._enforce_position()
-##### Mayur Wakhare 30-06-2026
-    def _on_right_press(self, obj, event):
-
-        self._update_last_pos()
-        self._rmb_dragging = True
-
-    def _on_right_release(self, obj, event):
-        self._rmb_dragging = False
-
-    def _on_middle_press(self, obj, event):
-        self._update_last_pos()
-        self._mmb_dragging = True
-
-    def _on_middle_release(self, obj, event):
-        self._mmb_dragging = False
 
     def _on_key_press(self, obj, event):
         if not self._is_robot_mode(): return
@@ -165,7 +146,59 @@ class TunnelFPSInteractorStyle(vtkInteractorStyleUser):
                 self._viewer._robot_keys_pressed.discard(key_lower)
 
     def _on_mouse_wheel_forward(self, obj, event):
-        if not self._is_robot_mode(): return
+        ### Mayur Wakhare 13-07-2026 Underpass Camera movement 
+        if not self._is_robot_mode():
+            if self._viewer and getattr(self._viewer, '_underpass_camera_active', False):
+                if not hasattr(self._viewer, '_fly_path') or not self._viewer._fly_path:
+                    return
+                cam = None
+                if hasattr(self._viewer, 'renderer') and self._viewer.renderer:
+                    cam = self._viewer.renderer.GetActiveCamera()
+                    
+                old_idx = getattr(self._viewer, '_fly_idx', 0)
+                old_pos = cam.GetPosition() if cam else (0,0,0)
+                old_chainage = 0.0
+                if old_idx < len(self._viewer._fly_path):
+                    old_chainage = self._viewer._fly_path[old_idx][0]
+
+                # Mouse Scroll Up -> Advance path
+                scroll_step = getattr(self, 'UNDERPASS_SCROLL_STEP_MULTIPLIER', 10.0)
+                self._viewer._fly_t += getattr(self._viewer, '_fly_speed', 0.015) * scroll_step
+                while self._viewer._fly_t >= 1.0:
+                    self._viewer._fly_idx += 1
+                    self._viewer._fly_t -= 1.0
+                    
+                if self._viewer._fly_idx >= len(self._viewer._fly_path) - 2:
+                    self._viewer._fly_idx = len(self._viewer._fly_path) - 3
+                    self._viewer._fly_t = 0.99
+                
+                # Forcefully invoke the camera pipeline
+                self._viewer._set_camera_to_path_index(self._viewer._fly_idx, self._viewer._fly_t)
+                
+                # Sync slider UI visually
+                if hasattr(self._viewer, 'tc_slider'):
+                    self._viewer.tc_slider.blockSignals(True)
+                    max_idx = len(self._viewer._fly_path) - 2
+                    curr_val = self._viewer._fly_idx + self._viewer._fly_t
+                    percent = curr_val / max_idx if max_idx > 0 else 0
+                    self._viewer.tc_slider.setValue(int(percent * 1000))
+                    self._viewer.tc_slider.blockSignals(False)
+                
+                new_idx = self._viewer._fly_idx
+                new_pos = cam.GetPosition() if cam else (0,0,0)
+                new_chainage = 0.0
+                if new_idx < len(self._viewer._fly_path):
+                    new_chainage = self._viewer._fly_path[new_idx][0]
+
+                print(f"  -> Current path index: {old_idx}")
+                print(f"  -> New path index: {new_idx}")
+                print(f"  -> Current chainage: {old_chainage:.2f}")
+                print(f"  -> New chainage: {new_chainage:.2f}")
+                print(f"  -> Camera position before movement: ({old_pos[0]:.2f}, {old_pos[1]:.2f}, {old_pos[2]:.2f})")
+                print(f"  -> Camera position after movement: ({new_pos[0]:.2f}, {new_pos[1]:.2f}, {new_pos[2]:.2f})")
+                print("  -> Render called: Yes")
+            return
+            ####################################################################
         import math as _math
         if self._viewer and hasattr(self._viewer, '_robot_position'):
             step = self.SCROLL_STEP_DISTANCE
@@ -191,7 +224,59 @@ class TunnelFPSInteractorStyle(vtkInteractorStyleUser):
                 self._viewer._update_robot_camera()
 
     def _on_mouse_wheel_backward(self, obj, event):
-        if not self._is_robot_mode(): return
+        ### Mayur Wakhare 13-07-2026 Underpass Camera movement 
+        if not self._is_robot_mode():
+            if self._viewer and getattr(self._viewer, '_underpass_camera_active', False):
+                if not hasattr(self._viewer, '_fly_path') or not self._viewer._fly_path:
+                    return
+                cam = None
+                if hasattr(self._viewer, 'renderer') and self._viewer.renderer:
+                    cam = self._viewer.renderer.GetActiveCamera()
+                    
+                old_idx = getattr(self._viewer, '_fly_idx', 0)
+                old_pos = cam.GetPosition() if cam else (0,0,0)
+                old_chainage = 0.0
+                if old_idx < len(self._viewer._fly_path):
+                    old_chainage = self._viewer._fly_path[old_idx][0]
+
+                # Mouse Scroll Down -> Move backward along the road centerline
+                scroll_step = getattr(self, 'UNDERPASS_SCROLL_STEP_MULTIPLIER', 10.0)
+                self._viewer._fly_t -= getattr(self._viewer, '_fly_speed', 0.015) * scroll_step
+                while self._viewer._fly_t < 0.0:
+                    self._viewer._fly_idx -= 1
+                    self._viewer._fly_t += 1.0
+                    
+                if self._viewer._fly_idx < 0:
+                    self._viewer._fly_idx = 0
+                    self._viewer._fly_t = 0.0
+                
+                # Forcefully invoke the camera pipeline
+                self._viewer._set_camera_to_path_index(self._viewer._fly_idx, self._viewer._fly_t)
+                
+                # Sync slider UI visually
+                if hasattr(self._viewer, 'tc_slider'):
+                    self._viewer.tc_slider.blockSignals(True)
+                    max_idx = len(self._viewer._fly_path) - 2
+                    curr_val = self._viewer._fly_idx + self._viewer._fly_t
+                    percent = curr_val / max_idx if max_idx > 0 else 0
+                    self._viewer.tc_slider.setValue(int(percent * 1000))
+                    self._viewer.tc_slider.blockSignals(False)
+                
+                new_idx = self._viewer._fly_idx
+                new_pos = cam.GetPosition() if cam else (0,0,0)
+                new_chainage = 0.0
+                if new_idx < len(self._viewer._fly_path):
+                    new_chainage = self._viewer._fly_path[new_idx][0]
+
+                print(f"  -> Current path index: {old_idx}")
+                print(f"  -> New path index: {new_idx}")
+                print(f"  -> Current chainage: {old_chainage:.2f}")
+                print(f"  -> New chainage: {new_chainage:.2f}")
+                print(f"  -> Camera position before movement: ({old_pos[0]:.2f}, {old_pos[1]:.2f}, {old_pos[2]:.2f})")
+                print(f"  -> Camera position after movement: ({new_pos[0]:.2f}, {new_pos[1]:.2f}, {new_pos[2]:.2f})")
+                print("  -> Render called: Yes")
+            return
+            ###############################################################################################
         import math as _math
         if self._viewer and hasattr(self._viewer, '_robot_position'):
             step = self.SCROLL_STEP_DISTANCE
@@ -217,7 +302,7 @@ class TunnelFPSInteractorStyle(vtkInteractorStyleUser):
 #####################################################################
 ###### Mayur Wakhare 30-06-2026 Robot camera contol mouse movement
     def _on_mouse_move(self, obj, event):
-        if not (self._lmb_dragging or self._rmb_dragging or self._mmb_dragging):
+        if not self._lmb_dragging:
             return
             
         interactor = self.GetInteractor()
@@ -236,64 +321,25 @@ class TunnelFPSInteractorStyle(vtkInteractorStyleUser):
         if dx == 0 and dy == 0:
             return
 
+        import math as _math
+
         if self._is_robot_mode():
-            # ── RMB: Look Around (Yaw/Pitch) ──
-            if self._rmb_dragging:
-                import math as _math
-                yaw_delta = -dx * self._sensitivity_look * _math.pi / 180.0
-                self._viewer._robot_yaw += yaw_delta
+            # ── LMB: Look Around (Yaw/Pitch) ──
+            yaw_delta = -dx * self._sensitivity_look * _math.pi / 180.0
+            self._viewer._robot_yaw += yaw_delta
 
-                pitch_delta = dy * self._sensitivity_look * _math.pi / 180.0
-                self._viewer._robot_pitch += pitch_delta
-                max_pitch = 80.0 * _math.pi / 180.0
-                self._viewer._robot_pitch = max(-max_pitch, min(max_pitch, self._viewer._robot_pitch))
-                
-                if hasattr(self._viewer, '_update_robot_camera'):
-                    self._viewer._update_robot_camera()
+            pitch_delta = dy * self._sensitivity_look * _math.pi / 180.0
+            self._viewer._robot_pitch += pitch_delta
+            max_pitch = 80.0 * _math.pi / 180.0
+            self._viewer._robot_pitch = max(-max_pitch, min(max_pitch, self._viewer._robot_pitch))
+            
+            print(f"DEBUG: Current Yaw: {self._viewer._robot_yaw:.4f}")
+            print(f"DEBUG: Current Pitch: {self._viewer._robot_pitch:.4f}")
 
-            # ── MMB: Cursor-based Translation ──
-            if self._mmb_dragging:
-                import math as _math
-                # Translate in camera's local XY plane based on mouse dx/dy
-                # up/down (dy) = forward/backward, left/right (dx) = strafe
-                fwd_amount = dy * self._sensitivity_move
-                strafe_amount = -dx * self._sensitivity_move  # Negative so mouse left moves robot left
-                
-                yaw = self._viewer._robot_yaw
-                fwd_x = _math.cos(yaw)
-                fwd_y = _math.sin(yaw)
-                right_x = _math.cos(yaw - _math.pi / 2.0)
-                right_y = _math.sin(yaw - _math.pi / 2.0)
-                
-                new_x = self._viewer._robot_position[0] + (fwd_x * fwd_amount + right_x * strafe_amount)
-                new_y = self._viewer._robot_position[1] + (fwd_y * fwd_amount + right_y * strafe_amount)
-                
-                # Check bounds and set pos
-                # Mayur Wakhare 30-06-2026 Robot camera contol mouse movement
-                if hasattr(self._viewer, '_check_wall_collision'):
-                    new_x, new_y = self._viewer._check_wall_collision(new_x, new_y)
-                ####################################################
-                ### Mayur Wakhare 30-06-2026 Robot camera control zoom
-                if hasattr(self._viewer, '_snap_robot_to_road_z'):
-                    new_z = self._viewer._snap_robot_to_road_z(new_x, new_y)
-                else:
-                    new_z = self._viewer._robot_position[2]
-                
-                self._viewer._robot_position = [new_x, new_y, new_z]
-                ###################################################
-                # Update assembly
-                if self._viewer._robot_assembly:
-                    self._viewer._robot_assembly.SetPosition(new_x, new_y, new_z)
-                    self._viewer._robot_assembly.SetOrientation(0, 0, _math.degrees(self._viewer._robot_yaw))
-                
-                if hasattr(self._viewer, '_update_robot_camera'):
-                    self._viewer._update_robot_camera()
-                    
-            return
-
-        # ── Legacy Mode: Rotate Focal Point on LMB Drag ──
-        if self._lmb_dragging:
-            import math as _math
+            if hasattr(self._viewer, '_update_robot_camera'):
+                self._viewer._update_robot_camera()
+        else:
+            # ── Legacy Mode: Rotate Focal Point on LMB Drag ──
             cam = ren.GetActiveCamera()
             pos = cam.GetPosition()
             fp = cam.GetFocalPoint()
@@ -311,11 +357,11 @@ class TunnelFPSInteractorStyle(vtkInteractorStyleUser):
             nvy = vx * sin_y + vy * cos_y
             nvz = vz
 
-            pitch_angle = dy * self._sensitivity_look * _math.pi / 180.0
+            pitch_angle = -dy * self._sensitivity_look * _math.pi / 180.0
             horiz = _math.sqrt(nvx*nvx + nvy*nvy)
             cur_elev = _math.atan2(nvz, horiz) if horiz > 1e-9 else 0.0
             new_elev = cur_elev + pitch_angle
-            max_elev = 85.0 * _math.pi / 180.0
+            max_elev = 80.0 * _math.pi / 180.0
             new_elev = max(-max_elev, min(max_elev, new_elev))
 
             if horiz > 1e-9:
@@ -338,6 +384,20 @@ class TunnelFPSInteractorStyle(vtkInteractorStyleUser):
 
             rw = interactor.GetRenderWindow()
             if rw: rw.Render()
+
+        # Log Camera Position and Forward Vector
+        cam = ren.GetActiveCamera()
+        if cam:
+            pos = cam.GetPosition()
+            fp = cam.GetFocalPoint()
+            fx = fp[0] - pos[0]
+            fy = fp[1] - pos[1]
+            fz = fp[2] - pos[2]
+            dist = _math.sqrt(fx*fx + fy*fy + fz*fz)
+            if dist > 0:
+                fx /= dist; fy /= dist; fz /= dist
+            print(f"DEBUG: Camera Position: ({pos[0]:.4f}, {pos[1]:.4f}, {pos[2]:.4f})")
+            print(f"DEBUG: Camera Forward Vector: ({fx:.4f}, {fy:.4f}, {fz:.4f})")
 #####################################################################################################################################################
 # =====================================================================================================================================
 #                                               ***  CLASS - Start Page ***
@@ -727,7 +787,9 @@ class ApplicationUI(QMainWindow):
             if hasattr(self, 'threeD_button'):
                 QTimer.singleShot(0, self.update_3d_button_position)
         # Show floating overlay buttons (hidden during start screen)
-        for _btn in ('threeD_button', 'camera_floating_button', 'tunnel_camera_button', 'rotation_state_badge'):
+        ## Mayur Wakhare 13/7/2026 robot bar button right side tunnel 
+        for _btn in ('threeD_button', 'camera_floating_button', 'tunnel_camera_button', 'underpass_camera_button', 'rotation_state_badge'):
+            #####################################################
             if hasattr(self, _btn):
                 getattr(self, _btn).setVisible(True)
                 getattr(self, _btn).raise_()
@@ -746,7 +808,10 @@ class ApplicationUI(QMainWindow):
         if hasattr(self, 'left_toggle_btn'):
             self.left_toggle_btn.setVisible(False)
         # Hide floating overlay buttons — not relevant on the start screen
-        for _btn in ('threeD_button', 'camera_floating_button', 'tunnel_camera_button', 'rotation_state_badge'):
+        ## Mayur Wakhare 13/7/2026 robot bar button right side tunnel 
+        
+        for _btn in ('threeD_button', 'camera_floating_button', 'tunnel_camera_button', 'underpass_camera_button', 'rotation_state_badge'):
+         #################################################################
             if hasattr(self, _btn):
                 getattr(self, _btn).setVisible(False)
     
@@ -955,14 +1020,14 @@ class ApplicationUI(QMainWindow):
         self.tunnel_excavation_button.clicked.connect(toggle_tunnel_sub)
         self.expanding_road_button = QPushButton("Expanding Road")
         self.expanding_road_button.setFixedHeight(40)   
-        self.expanding_road_button.setFixedWidth(100)
+        self.expanding_road_button.setFixedWidth(120)
         self.expanding_road_button.clicked.connect(self.open_expanding_road_dialog)
         menu_bar_dd_layout.addWidget(self.expanding_road_button)
 
         # Excavation Button (Moved here as requested by USER)
         self.excavation_btn = QPushButton("⛏ Excavation")
         self.excavation_btn.setFixedHeight(40)
-        self.excavation_btn.setFixedWidth(100)
+        self.excavation_btn.setFixedWidth(120)
         self.excavation_btn.setCursor(Qt.PointingHandCursor)
         self.excavation_btn.setStyleSheet("""
             QPushButton {
@@ -1593,11 +1658,11 @@ class ApplicationUI(QMainWindow):
         """)
         merger_layout.addWidget(merger_title)
         merger_layout.addStretch()
-        
+    
+
         # --------------------------------------------------------------------------- 
         # 3D Layers Section
         # ---------------------------------------------------------------------------
-        
         self.three_D_frame = QFrame()
         self.three_D_frame.setFrameStyle(QFrame.Box | QFrame.Raised)
         self.three_D_frame.setStyleSheet("""
@@ -1657,7 +1722,6 @@ class ApplicationUI(QMainWindow):
         
         three_D_scroll.setWidget(three_D_content)
         three_D_layout.addWidget(three_D_scroll)
-
 # ---------------------------------------------------------------------------
         # Worksheets Section
         # ---------------------------------------------------------------------------
@@ -1887,9 +1951,10 @@ class ApplicationUI(QMainWindow):
         self.checkboxes = self.add_layers_content()
         self.left_layout.addWidget(self.checkboxes)
         self.left_layout.addWidget(merger_frame)
-        self.left_layout.addWidget(self.three_D_frame)
+        # self.left_layout.addWidget(self.three_D_frame)
         self.left_layout.addWidget(self.worksheets_frame)
         self.left_layout.addWidget(self.two_D_frame)
+        self.left_layout.addWidget(self.three_D_frame)
         self.checkboxes.setVisible(False)
 
         # Optional: Add stretch at bottom so layers stay at top
@@ -2462,133 +2527,168 @@ class ApplicationUI(QMainWindow):
         # Hidden until point cloud / viewer is active (shown in show_viewer)
         self.tunnel_camera_button.setVisible(False)
         self.tunnel_camera_button.raise_()
+        ### Mayur Wakhare 13/7/2026 robot bar button right side tunnel underpass
+        # ======= Underpass Camera View floating button =======
+        underpass_cam_svg = r'''
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <!-- underpass box -->
+          <rect x="10" y="24" width="44" height="28" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"/>
+          <line x1="10" y1="24" x2="54" y2="24" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round"/>
+          <!-- road lines -->
+          <line x1="22" y1="52" x2="22" y2="36" stroke="#FFFFFF" stroke-width="2" stroke-dasharray="4,3"/>
+          <line x1="42" y1="52" x2="42" y2="36" stroke="#FFFFFF" stroke-width="2" stroke-dasharray="4,3"/>
+          <!-- road base -->
+          <line x1="6" y1="52" x2="58" y2="52" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        '''
 
-        # ======= Tunnel Bottom Control Bar =======
+        underpass_cam_pix = QPixmap(64, 64)
+        underpass_cam_pix.fill(Qt.transparent)
+        try:
+            underpass_cam_renderer = QSvgRenderer(bytearray(underpass_cam_svg, 'utf-8'))
+            underpass_cam_painter = QPainter(underpass_cam_pix)
+            underpass_cam_renderer.render(underpass_cam_painter)
+            underpass_cam_painter.end()
+            underpass_cam_icon = QIcon(underpass_cam_pix)
+        except Exception:
+            underpass_cam_icon = QIcon()
+
+        self.underpass_camera_button = QPushButton("", self)
+        self.underpass_camera_button.setObjectName("FloatingUnderpassCameraButton")
+        self.underpass_camera_button.setToolTip("Underpass Camera View")
+        self.underpass_camera_button.setCursor(Qt.PointingHandCursor)
+        self.underpass_camera_button.setFlat(True)
+        self.underpass_camera_button.setAutoFillBackground(False)
+        self.underpass_camera_button.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.underpass_camera_button.setFixedSize(58, 58)
+        self.underpass_camera_button.setIcon(underpass_cam_icon)
+        self.underpass_camera_button.setIconSize(QSize(32, 32))
+        self.underpass_camera_button.setMask(QRegion(0, 0, 58, 58, QRegion.Ellipse))
+        self.underpass_camera_button.setStyleSheet("""
+            #FloatingUnderpassCameraButton {
+                background-color: #00695C;
+                border: 2px solid rgba(255, 255, 255, 215);
+                border-radius: 29px;
+                padding: 0px;
+            }
+            #FloatingUnderpassCameraButton:hover {
+                background-color: #00897B;
+                border: 2px solid rgba(255, 255, 255, 245);
+            }
+            #FloatingUnderpassCameraButton:pressed {
+                background-color: #004D40;
+                border: 2px solid rgba(255, 255, 255, 210);
+            }
+        """)
+        self.underpass_camera_button.clicked.connect(self.on_underpass_camera_button_clicked)
+        self.underpass_camera_button.setVisible(False)
+        self.underpass_camera_button.raise_()
+        ##############################################################################################
+        ## Mayur Wakhare 10-6-2026 robot button (reset,.....)
+        print(f"""
+DEBUG INFO:
+Camera button:
+- objectName: {self.camera_floating_button.objectName()}
+- className: {self.camera_floating_button.__class__.__name__}
+- geometry: {self.camera_floating_button.geometry()}
+
+Tunnel Camera View button:
+- objectName: {self.tunnel_camera_button.objectName()}
+- className: {self.tunnel_camera_button.__class__.__name__}
+- geometry: {self.tunnel_camera_button.geometry()}
+""")
+###########################################################################################################
+######## Mayur Wakhare 10-6-2026 robot button (reset,.....)
+
+        # ======= Tunnel Right-Side Floating Control Bar =======
         self.tunnel_control_bar = QWidget(self)
         self.tunnel_control_bar.setObjectName("TunnelControlBar")
         self.tunnel_control_bar.setVisible(False)
-        self.tunnel_control_bar.setFixedSize(720, 50)
+        self.tunnel_control_bar.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.tunnel_control_bar.setFixedSize(128, 128)
         self.tunnel_control_bar.setStyleSheet("""
             QWidget#TunnelControlBar {
                 background-color: rgba(30, 30, 30, 200);
-                border-radius: 10px;
-                border: 1px solid #555;
+                border-radius: 64px;
+                border: 1px solid rgba(255, 255, 255, 50);
             }
             QPushButton {
-                background: transparent;
                 color: white;
-                font-size: 14px;
+                font-size: 20px;
                 font-weight: bold;
-                border: none;
-                padding: 5px;
-            }
-            QPushButton:hover {
-                color: #00BCD4;
-            }
-            QPushButton:checked {
-                color: #4CAF50;
-            }
-            QSlider::groove:horizontal {
-                border: 1px solid #999999;
-                height: 8px;
-                background: #444;
-                margin: 2px 0;
-                border-radius: 4px;
-            }
-            QSlider::handle:horizontal {
-                background: #00BCD4;
-                border: 1px solid #5c5c5c;
-                width: 18px;
-                margin: -5px 0;
-                border-radius: 9px;
+                border-radius: 22px;
+                min-width: 44px;
+                max-width: 44px;
+                min-height: 44px;
+                max-height: 44px;
+                margin: 0px;
             }
         """)
-        tcb_layout = QHBoxLayout(self.tunnel_control_bar)
-        tcb_layout.setContentsMargins(10, 5, 10, 5)
-        tcb_layout.setSpacing(6)
 
-        self.tc_play_btn = QPushButton("▶ Auto")
+        try:
+            from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+            from PyQt5.QtGui import QColor
+            shadow = QGraphicsDropShadowEffect()
+            shadow.setBlurRadius(15)
+            shadow.setColor(QColor(0, 0, 0, 150))
+            shadow.setOffset(0, 4)
+            self.tunnel_control_bar.setGraphicsEffect(shadow)
+        except ImportError:
+            pass
+
+        from PyQt5.QtWidgets import QGridLayout
+        tcb_layout = QGridLayout(self.tunnel_control_bar)
+        tcb_layout.setContentsMargins(15, 15, 15, 15)
+        tcb_layout.setSpacing(10)
+
+        self.tc_play_btn = QPushButton("▶")
         self.tc_play_btn.setCheckable(True)
         self.tc_play_btn.setChecked(False)
         self.tc_play_btn.setCursor(Qt.PointingHandCursor)
+        self.tc_play_btn.setToolTip("Auto")
+        self.tc_play_btn.setStyleSheet("""
+            QPushButton { background: rgba(76, 175, 80, 150); border: 1px solid rgba(76, 175, 80, 200); }
+            QPushButton:hover { background: rgba(76, 175, 80, 200); border: 1px solid #4CAF50; }
+            QPushButton:checked { background: rgba(76, 175, 80, 255); border: 2px solid white; }
+        """)
         
-        self.tc_stop_btn = QPushButton("⏹ Stop")
+        self.tc_stop_btn = QPushButton("⏹")
         self.tc_stop_btn.setCursor(Qt.PointingHandCursor)
-        self.tc_stop_btn.setToolTip("Pause and go to overview")
+        self.tc_stop_btn.setToolTip("Stop")
+        self.tc_stop_btn.setStyleSheet("""
+            QPushButton { background: rgba(244, 67, 54, 150); border: 1px solid rgba(244, 67, 54, 200); }
+            QPushButton:hover { background: rgba(244, 67, 54, 200); border: 1px solid #F44336; }
+            QPushButton:pressed { background: rgba(244, 67, 54, 255); }
+        """)
         
-        self.tc_slider = QSlider(Qt.Horizontal)
-        self.tc_slider.setRange(0, 1000) # 0 to 100.0%
-        self.tc_slider.setValue(0)
-        self.tc_slider.setCursor(Qt.PointingHandCursor)
-        
-        self.tc_reset_btn = QPushButton("↻ Reset")
+        self.tc_reset_btn = QPushButton("↻")
         self.tc_reset_btn.setCursor(Qt.PointingHandCursor)
-
-        # ── Look direction buttons ──
-        _look_btn_style = """
-            QPushButton {
-                background: rgba(255,255,255,30);
-                color: white;
-                font-size: 16px;
-                font-weight: bold;
-                border: 1px solid #666;
-                border-radius: 4px;
-                padding: 2px 6px;
-                min-width: 28px;
-                max-width: 28px;
-            }
-            QPushButton:hover {
-                background: rgba(0,188,212,120);
-                border: 1px solid #00BCD4;
-            }
-            QPushButton:pressed {
-                background: rgba(0,188,212,200);
-            }
-        """
-        self.tc_look_left = QPushButton("\u25c0")
-        self.tc_look_left.setStyleSheet(_look_btn_style)
-        self.tc_look_left.setCursor(Qt.PointingHandCursor)
-        self.tc_look_left.setToolTip("Look Left (5\u00b0)")
-
-        self.tc_look_right = QPushButton("\u25b6")
-        self.tc_look_right.setStyleSheet(_look_btn_style)
-        self.tc_look_right.setCursor(Qt.PointingHandCursor)
-        self.tc_look_right.setToolTip("Look Right (5\u00b0)")
-
-        self.tc_look_up = QPushButton("\u25b2")
-        self.tc_look_up.setStyleSheet(_look_btn_style)
-        self.tc_look_up.setCursor(Qt.PointingHandCursor)
-        self.tc_look_up.setToolTip("Look Up (5\u00b0)")
-
-        self.tc_look_down = QPushButton("\u25bc")
-        self.tc_look_down.setStyleSheet(_look_btn_style)
-        self.tc_look_down.setCursor(Qt.PointingHandCursor)
-        self.tc_look_down.setToolTip("Look Down (5\u00b0)")
-
+        self.tc_reset_btn.setToolTip("Reset")
+        self.tc_reset_btn.setStyleSheet("""
+            QPushButton { background: rgba(255, 152, 0, 150); border: 1px solid rgba(255, 152, 0, 200); }
+            QPushButton:hover { background: rgba(255, 152, 0, 200); border: 1px solid #FF9800; }
+            QPushButton:pressed { background: rgba(255, 152, 0, 255); }
+        """)
+        
         self.tc_reset_view_btn = QPushButton("🎯")
-        self.tc_reset_view_btn.setStyleSheet(_look_btn_style)
         self.tc_reset_view_btn.setCursor(Qt.PointingHandCursor)
         self.tc_reset_view_btn.setToolTip("Reset View Direction")
+        self.tc_reset_view_btn.setStyleSheet("""
+            QPushButton { background: rgba(33, 150, 243, 150); border: 1px solid rgba(33, 150, 243, 200); }
+            QPushButton:hover { background: rgba(33, 150, 243, 200); border: 1px solid #2196F3; }
+            QPushButton:pressed { background: rgba(33, 150, 243, 255); }
+        """)
 
-        tcb_layout.addWidget(self.tc_play_btn)
-        tcb_layout.addWidget(self.tc_stop_btn)
-        tcb_layout.addWidget(self.tc_slider)
-        tcb_layout.addWidget(self.tc_reset_btn)
-        tcb_layout.addWidget(self.tc_look_left)
-        tcb_layout.addWidget(self.tc_look_up) 
-        tcb_layout.addWidget(self.tc_look_down)
-        tcb_layout.addWidget(self.tc_look_right)
-        tcb_layout.addWidget(self.tc_reset_view_btn)
+        tcb_layout.addWidget(self.tc_play_btn, 0, 0)
+        tcb_layout.addWidget(self.tc_stop_btn, 0, 1)
+        tcb_layout.addWidget(self.tc_reset_btn, 1, 0)
+        tcb_layout.addWidget(self.tc_reset_view_btn, 1, 1)
+######################################################################################################
 ########### Mayur Wakhare 1-7-2026 Camera Control
         self.tc_play_btn.clicked.connect(self._toggle_tunnel_auto)
         ######################################################
         self.tc_stop_btn.clicked.connect(self._on_tunnel_stop_clicked)
-        self.tc_slider.valueChanged.connect(self._on_tunnel_slider_changed)
         self.tc_reset_btn.clicked.connect(self._reset_tunnel_camera)
-        self.tc_look_left.clicked.connect(lambda: self._tunnel_look_rotate(yaw_deg=5.0))
-        self.tc_look_right.clicked.connect(lambda: self._tunnel_look_rotate(yaw_deg=-5.0))
-        self.tc_look_up.clicked.connect(lambda: self._tunnel_look_rotate(pitch_deg=5.0))
-        self.tc_look_down.clicked.connect(lambda: self._tunnel_look_rotate(pitch_deg=-5.0))
         ##### Mayur Wakhare 1-7-2026 Camera
         self.tc_reset_view_btn.clicked.connect(self._tunnel_reset_view_direction)
 ###########################################################################
@@ -3830,6 +3930,11 @@ class ApplicationUI(QMainWindow):
             self.threeD_button,
             self.camera_floating_button,
             self.tunnel_camera_button,
+            ## Mayur Wakhare 13-7-2026
+            self.underpass_camera_button,
+            ## Mayur Wakhare 10-07-2026
+            self.tunnel_control_bar,
+            ##############################
             self.rotation_state_badge,
             self.view_top_button,
             self.view_left_button,
@@ -3855,6 +3960,10 @@ class ApplicationUI(QMainWindow):
             self.threeD_button,
             self.camera_floating_button,
             self.tunnel_camera_button,
+            self.underpass_camera_button,
+            #Mayur Wakhare 10-7-2026 ...robot control bartunnel
+            self.tunnel_control_bar,
+#########################################################################
             self.rotation_state_badge,
             self.view_top_button,
             self.view_left_button,
@@ -3937,7 +4046,38 @@ class ApplicationUI(QMainWindow):
             # Open the preview dialog
             preview_dialog = UnderPassPreviewDialog(self.under_pass_values, self)
             preview_dialog.exec_()
+##### Mayur Wakhare 14-7-2026 underpass lights button on menu bar ##################
+    def open_underpass_light_dialog(self, *args):
+        if not getattr(self, "current_worksheet_name", None):
+            QMessageBox.warning(self, "No Worksheet", "Please open a worksheet first.")
+            return
+        dialog = UnderpassLightDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data.get("verified") and data.get("light_mode") == "single":
+                up = dialog.underpass_data.get(data.get("up_id"))
+                if up and hasattr(self, '_place_single_underpass_light'):
+                    self._place_single_underpass_light(data, up)
+                    
+                    if hasattr(self, 'vtk_widget') and self.vtk_widget:
+                        self.vtk_widget.GetRenderWindow().Render()
+### Mayur Wakhare 15-07-2026 Underpass CCTV button on menu bar ##################
+    def open_underpass_cctv_dialog(self, *args):
+        if not getattr(self, "current_worksheet_name", None):
+            QMessageBox.warning(self, "No Worksheet", "Please open a worksheet first.")
+            return
+        dialog = UnderpassCCTVDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data.get("verified"):
+                up = dialog.underpass_data.get(data.get("up_id"))
+                if up and hasattr(self, '_place_underpass_cctv'):
+                    self._place_underpass_cctv(data, up)
+                    
+                    if hasattr(self, 'vtk_widget') and self.vtk_widget:
+                        self.vtk_widget.GetRenderWindow().Render()
 
+#############################################################################
     def place_under_pass(self, dimensions, placement_values):
         from PyQt5.QtWidgets import QMessageBox
         import os
@@ -5719,42 +5859,111 @@ class ApplicationUI(QMainWindow):
             badge_y = y + btn_h + vertical_gap
             self.rotation_state_badge.move(badge_x, badge_y)
             self.rotation_state_badge.raise_()
+##### Mayur Wakhare 13-07-2026 underpass camera view button
+        # Track running Y coordinate to strictly prevent overlaps
+        current_y = y + btn_h + vertical_gap
+        if hasattr(self, 'rotation_state_badge'):
+            current_y = self.rotation_state_badge.y() + self.rotation_state_badge.height() + vertical_gap
 
-        # Camera button — centred below the badge
+        # 1. Reset Camera View
         if hasattr(self, 'camera_floating_button'):
             self.camera_floating_button.adjustSize()
-            camera_w = self.camera_floating_button.width()
-            camera_h = self.camera_floating_button.height()
-            camera_x = x + max(0, (btn_w - camera_w) // 2)
-            if hasattr(self, 'rotation_state_badge'):
-                camera_y = self.rotation_state_badge.y() + self.rotation_state_badge.height() + vertical_gap
-            else:
-                camera_y = y + btn_h + vertical_gap
-            self.camera_floating_button.move(camera_x, camera_y)
+            cw = self.camera_floating_button.width()
+            ch = self.camera_floating_button.height()
+            cx = x + max(0, (btn_w - cw) // 2)
+            self.camera_floating_button.move(cx, current_y)
             self.camera_floating_button.raise_()
+            if self.camera_floating_button.isVisible():
+                current_y += ch + vertical_gap
 
-        # Tunnel camera button — centred below the camera button
+        # 2. Tunnel Camera View
         if hasattr(self, 'tunnel_camera_button'):
             self.tunnel_camera_button.adjustSize()
-            tcam_w = self.tunnel_camera_button.width()
-            tcam_h = self.tunnel_camera_button.height()
-            if hasattr(self, 'camera_floating_button'):
-                tcam_x = self.camera_floating_button.x() + max(0, (self.camera_floating_button.width() - tcam_w) // 2)
-                tcam_y = self.camera_floating_button.y() + self.camera_floating_button.height() + vertical_gap
-            else:
-                tcam_x = x + max(0, (btn_w - tcam_w) // 2)
-                tcam_y = y + btn_h + vertical_gap
-            self.tunnel_camera_button.move(tcam_x, tcam_y)
+            tw = self.tunnel_camera_button.width()
+            th = self.tunnel_camera_button.height()
+            tx = x + max(0, (btn_w - tw) // 2)
+            self.tunnel_camera_button.move(tx, current_y)
             self.tunnel_camera_button.raise_()
+            if self.tunnel_camera_button.isVisible():
+                current_y += th + vertical_gap
 
+        # 3. Underpass Camera View
+        if hasattr(self, 'underpass_camera_button'):
+            self.underpass_camera_button.adjustSize()
+            uw = self.underpass_camera_button.width()
+            uh = self.underpass_camera_button.height()
+            ux = x + max(0, (btn_w - uw) // 2)
+            self.underpass_camera_button.move(ux, current_y)
+            self.underpass_camera_button.raise_()
+            if self.underpass_camera_button.isVisible():
+                current_y += uh + vertical_gap
+
+        # --- User requested debug logs ---
+        if hasattr(self, 'camera_floating_button'):
+            print(f"Reset Button Y: {self.camera_floating_button.y()}")
+        if hasattr(self, 'tunnel_camera_button'):
+            print(f"Tunnel Button Y: {self.tunnel_camera_button.y()}")
+        if hasattr(self, 'underpass_camera_button'):
+            print(f"Underpass Button Y: {self.underpass_camera_button.y()}")
+            
+        print("Function modifying geometry: update_3d_button_position")
+
+            ##########################################################
+            ## Mayur Wakhare 10-7-2026 robot bar button right side tunnel
+        print(f"""
+DEBUG INFO:
+Camera button:
+- objectName: {self.camera_floating_button.objectName()}
+- className: {self.camera_floating_button.__class__.__name__}
+- geometry: {self.camera_floating_button.geometry()}
+
+Tunnel Camera View button:
+- objectName: {self.tunnel_camera_button.objectName()}
+- className: {self.tunnel_camera_button.__class__.__name__}
+- geometry: {self.tunnel_camera_button.geometry()}
+""")
+########################################################################################
+
+###### Mayur Wakhare 10-7-2026 robot bar button right side tunnel
         # Tunnel Control Bar
         if hasattr(self, 'tunnel_control_bar') and self.tunnel_control_bar.isVisible():
             tcb_w = self.tunnel_control_bar.width()
             tcb_h = self.tunnel_control_bar.height()
-            if hasattr(self, 'vtk_container'):
-                cx = self.vtk_container.x() + (self.vtk_container.width() - tcb_w) // 2
-                cy = self.vtk_container.y() + self.vtk_container.height() - tcb_h - 20
+            
+          ## Mayur Wakhare 13-07-2026 underpass camera button -> 4 buttons position
+            if hasattr(self, 'underpass_camera_button') and self.underpass_camera_button.isVisible():
+                geom = self.underpass_camera_button.geometry()
+                
+                # Center horizontally relative to Underpass Camera View button
+                cx = geom.center().x() - tcb_w // 2
+                
+                if cx + tcb_w > geom.right():
+                    cx = geom.right() - tcb_w
+                
+                # Place directly below with a 20px gap
+                cy = geom.bottom() + 20
                 self.tunnel_control_bar.move(cx, cy)
+            elif hasattr(self, 'tunnel_camera_button') and self.tunnel_camera_button.isVisible():
+                ###########################################################
+                geom = self.tunnel_camera_button.geometry()
+                
+                # Center horizontally relative to Tunnel Camera View button
+                cx = geom.center().x() - tcb_w // 2
+                
+                # Clamp horizontally so it NEVER overlaps the right-side toolbar/panel.
+                # Because the button is close to the right edge, centering a 128px hub pushes it past the edge.
+                if cx + tcb_w > geom.right():
+                    cx = geom.right() - tcb_w
+                
+                # Place directly below with a 20px gap
+                cy = geom.bottom() + 20
+                self.tunnel_control_bar.move(cx, cy)
+            elif hasattr(self, 'vtk_container'):
+                # Fallback if tunnel_camera_button is hidden
+                cx = self.vtk_container.x() + self.vtk_container.width() - tcb_w - 20
+                cy = self.vtk_container.y() + (self.vtk_container.height() - tcb_h) // 2
+                self.tunnel_control_bar.move(cx, cy)
+ ##########################################################################################               
             self.tunnel_control_bar.raise_()
 
         # ── Three view shortcut buttons (TOP / LEFT / Right) ──
@@ -5848,12 +6057,16 @@ class ApplicationUI(QMainWindow):
         self.update_rotation_state_badge()
 ## Mayur Wakhare 01-07-2026 Camera Button 
     def on_tunnel_camera_button_clicked(self):
+        ### Mayur Wakhare 13-7-2026 underpass camera 
+        self._underpass_camera_active = False
+###################################################################
         """Read the tunnel definition from the active design configuration/model data
         instead of VTK actors. Uses design.tunnel as the authoritative source.
         Stores the detected tunnel model data for future camera calculations.
         No camera movement happens here.
         """
-        print("\n--- Tunnel Camera View Activated ---")
+        print("\n[TunnelCamera]")
+        print("- Button Clicked")
         import os
         import json
 
@@ -5868,27 +6081,59 @@ class ApplicationUI(QMainWindow):
             if base_dir and ws_name and layer_name:
                 layer_folder = os.path.join(base_dir, ws_name, subfolder, layer_name)
 
+        mode_str = 'Merged' if subfolder == 'merger' else 'Single'
+        print(f"- Current Mode: {mode_str}")
+        
+        viewer_addr = hex(id(self.vtk_widget)) if hasattr(self, 'vtk_widget') else 'None'
+        print(f"- Active Viewer Address: {viewer_addr}")
+
         config_paths = []
-        if layer_folder and os.path.exists(layer_folder):
-            # Gather config files (handles normal and merger modes)
-            if subfolder == "merger":
-                merger_jsons = [f for f in os.listdir(layer_folder) if f.endswith('.json')]
+    ###### Mayur 17-7-2026 Tunnel camera view id selection    
+        # 1. Gather ALL actively rendered layers from the 3D viewer state
+        active_layer_paths = list(getattr(self, '_per_layer_actors', {}).keys())
+        
+        # 2. Add the currently selected folder as a fallback if not in active paths
+        if layer_folder and os.path.exists(layer_folder) and layer_folder not in active_layer_paths:
+            active_layer_paths.append(layer_folder)
+
+        # 3. Process every active path to find design configurations
+        for p in active_layer_paths:
+            if not p or not isinstance(p, str) or not os.path.exists(p):
+                continue
+                
+            is_merger = False
+            # Check if this is a merger folder by checking for .json files with merger_points
+            if "merger" in p.lower() or subfolder == "merger":
+                merger_jsons = [f for f in os.listdir(p) if f.endswith('.json')]
                 for mj in merger_jsons:
                     try:
-                        with open(os.path.join(layer_folder, mj), 'r', encoding='utf-8') as f:
+                        with open(os.path.join(p, mj), 'r', encoding='utf-8') as f:
                             merger_data = json.load(f)
-                        for pt in merger_data.get("merger_points", []):
-                            for lyr in pt.get("layers", []):
-                                src = lyr.get("json_path")
-                                if src and os.path.exists(src) and src not in config_paths:
-                                    config_paths.append(src)
+                        if "merger_points" in merger_data:
+                            is_merger = True
+                            for pt in merger_data.get("merger_points", []):
+                                def add_cfg(json_file_path):
+                                    if json_file_path:
+                                        d_path = os.path.dirname(json_file_path)
+                                        cfg = os.path.join(d_path, 'design_construction_config.json')
+                                        if os.path.exists(cfg) and cfg not in config_paths:
+                                            config_paths.append(cfg)
+                                
+                                add_cfg(pt.get("primary_json_path"))
+                                for lyr in pt.get("layers", []):
+                                    add_cfg(lyr.get("json_path"))
                     except Exception:
                         pass
-            else:
-                cfg = os.path.join(layer_folder, 'design_construction_config.json')
-                if os.path.exists(cfg):
+                        
+            # If not a merger folder, just add its own design config
+            if not is_merger:
+                cfg = os.path.join(p, 'design_construction_config.json')
+                if os.path.exists(cfg) and cfg not in config_paths:
                     config_paths.append(cfg)
-
+                    
+        active_layer_count = len(config_paths)
+        print(f"- Active Layer Count: {active_layer_count}")
+#########################################################################################################
         # Search for design.tunnel
         found_tunnels = []
         for cp in config_paths:
@@ -5896,15 +6141,115 @@ class ApplicationUI(QMainWindow):
                 with open(cp, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 tunnel_obj = data.get('design', {}).get('tunnel')
+                
+                # Check for zero_line_config fallback if tunnel not found
+                if not tunnel_obj:
+                    zero_config = data.get('design', {}).get('zero_line_config')
+                    if zero_config:
+                        tunnel_obj = {
+                            'id': 'fallback_tunnel',
+                            'start_km': zero_config.get('point1', {}).get('from_km', 0),
+                            'start_chainage': zero_config.get('point1', {}).get('from_chainage', 0),
+                            'end_km': zero_config.get('point2', {}).get('to_km', 0),
+                            'end_chainage': zero_config.get('point2', {}).get('to_chainage', 0),
+                            'radius': 5.0
+                        }
+
                 if tunnel_obj and isinstance(tunnel_obj, dict):
+                    tunnel_obj['source_layer_folder'] = os.path.dirname(cp)
                     found_tunnels.append(tunnel_obj)
             except Exception as e:
                 pass
+                
+        print(f"- Tunnel Count: {len(found_tunnels)}")
+        
         # Process results
-        if found_tunnels:
-            # If multiple tunnels exist, use the first tunnel for now
-            target_tunnel = found_tunnels[0]
+ ###### Mayur 17-7-2026 tunnel camere view buuton to show active layers
+        # Debug info
+        active_layers_debug = set()
+        tunnel_count_per_layer = {}
+        tunnel_ids_per_layer = {}
+
+        # Deduplicate found tunnels
+        unique_tunnels = {}
+        import os
+        for t in found_tunnels:
+            tid = t.get('tunnel_id', t.get('id', 'Unknown'))
+            layer_folder = t.get('source_layer_folder', '')
+            layer_name = os.path.basename(layer_folder) if layer_folder else 'Unknown'
+            
+            active_layers_debug.add(layer_name)
+            tunnel_count_per_layer[layer_name] = tunnel_count_per_layer.get(layer_name, 0) + 1
+            if layer_name not in tunnel_ids_per_layer:
+                tunnel_ids_per_layer[layer_name] = []
+            tunnel_ids_per_layer[layer_name].append(tid)
+            
+            key = (layer_name, tid)
+            if key not in unique_tunnels:
+                unique_tunnels[key] = (t, layer_name, tid)
+                
+        print("\nActive merged layers:")
+        print(f"Layers scanned: {list(active_layers_debug)}")
+        for ln in active_layers_debug:
+            print(f"Tunnels found in {ln}: {tunnel_count_per_layer.get(ln, 0)}")
+        print(f"Final dropdown list: {len(unique_tunnels)}\n")
+                
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Tunnel Selection")
+        dlg.resize(300, 100)
+        
+        layout = QVBoxLayout(dlg)
+        
+        info_label = QLabel("Tunnel Information")
+        layout.addWidget(info_label)
+        
+        combo_layout = QHBoxLayout()
+        combo_layout.addWidget(QLabel("Tunnel ID:"))
+        tunnel_combo = QComboBox()
+        
+        if not unique_tunnels:
+            tunnel_combo.addItem("No Tunnel Available")
+            tunnel_combo.setEnabled(False)
+        else:
+            for key, (t, layer_name, tid) in unique_tunnels.items():
+                display_text = f"{tid} ({layer_name})"
+                tunnel_combo.addItem(display_text, userData=t)
+            
+        combo_layout.addWidget(tunnel_combo)
+        layout.addLayout(combo_layout)
+        
+        btn_layout = QHBoxLayout()
+        btn_ok = QPushButton("OK")
+        btn_cancel = QPushButton("Cancel")
+        
+        if not unique_tunnels:
+            btn_ok.setEnabled(False)
+            
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_ok)
+        btn_layout.addWidget(btn_cancel)
+        layout.addLayout(btn_layout)
+        
+        btn_ok.clicked.connect(dlg.accept)
+        btn_cancel.clicked.connect(dlg.reject)
+        
+        if dlg.exec_() != QDialog.Accepted:
+            return
+            
+        target_tunnel = tunnel_combo.currentData()
+        
+        if target_tunnel:
+            #########################################################################################
             self._tunnel_camera_target = target_tunnel
+            active_tunnel_id = target_tunnel.get('id', target_tunnel.get('tunnel_id', 'N/A'))
+            target_layer = target_tunnel.get('source_layer_folder', '')
+            layer_name = os.path.basename(target_layer) if target_layer else 'Unknown'
+            
+            print(f"Selected Tunnel ID: {active_tunnel_id}")
+            print(f"Selected Layer: {layer_name}")
+            print(f"Matched Tunnel: {target_tunnel}")
+            print(f"Camera initialized for: {active_tunnel_id} in {layer_name}")
             
             # Calculate dimensions for logging
             try:
@@ -5926,8 +6271,6 @@ class ApplicationUI(QMainWindow):
                 wall_t = target_tunnel.get('wall_thickness', 'N/A')
                 dimensions_str = f"Length={length:.2f}m, Wall Thickness={wall_t}m"
 
-                print(f"Number of tunnels found: {len(found_tunnels)}")
-                print("Tunnel type: Arch Tunnel (design.tunnel dict)")
                 print(f"Tunnel dimensions: {dimensions_str}")
                 print("Tunnel successfully selected.")
 
@@ -5937,8 +6280,24 @@ class ApplicationUI(QMainWindow):
                 if hasattr(self, 'get_curve_aware_path'):
                     # get_curve_aware_path returns (chainage, pos_xyz, perp_vec, dir_vec)
                     # pos_xyz uses the road_surface_baseline Z elevation automatically
-                    path_samples = self.get_curve_aware_path(start_ch_abs - 5.0, end_ch_abs, step=1.0)
+                    path_samples = self.get_curve_aware_path(start_ch_abs - 5.0, end_ch_abs, step=1.0, target_layer=target_layer)
+                  ######### Mayur Wakhare 10-7-2026 tunnel camera right side buttons   
+                    master_samples_count = len(getattr(self, 'master_curved_path_samples', [])) if hasattr(self, 'master_curved_path_samples') and getattr(self, 'master_curved_path_samples') else 0
                     
+                    if path_samples:
+                        print(f"- Navigation Path Available: Yes")
+                        print(f"- Path Sample Count: {len(path_samples)}")
+                        if len(path_samples) >= 2:
+                            print("- Camera Initialized: Yes")
+                        else:
+                            print("- Camera Initialized: No")
+                            print("- Initialization Failed Reason: Navigation Path Size < 2.")
+                    else:
+                        print(f"- Navigation Path Available: No")
+                        print(f"- Path Sample Count: 0")
+                        print("- Camera Initialized: No")
+                        print("- Initialization Failed Reason: Navigation Path is empty.")
+                    ##########################################################################
                     if path_samples and len(path_samples) >= 2:
                         start_sample = path_samples[0]
                         end_sample = path_samples[-1]
@@ -5973,7 +6332,27 @@ class ApplicationUI(QMainWindow):
                             entry_pos  = entry_sample[1]   # [x, y, z]
                             entry_fwd_raw = entry_sample[3] # forward direction (may not be unit length)
                             entry_perp = entry_sample[2]    # perpendicular vector
-
+######## Mayur Wakhare 13-07-2026 tunnel camera view
+                            # === DIAGNOSTIC LOGGING FOR USER COMPARISON ===
+                            print("\n" + "="*50)
+                            print(f"--- TUNNEL CAMERA INIT MODE: {'MERGED' if subfolder == 'merger' else 'SINGLE'} ---")
+                            print(f"master_curved_path_samples length: {master_samples_count}")
+                            if master_samples_count > 0:
+                                print(f"master_curved_path_samples[0] chainage: {self.master_curved_path_samples[0]['ch']}")
+                                print(f"master_curved_path_samples[-1] chainage: {self.master_curved_path_samples[-1]['ch']}")
+                            print(f"tunnel_entry_position (start_ch_abs={start_ch_abs}): {entry_pos}")
+                            print(f"tunnel_exit_position (end_ch_abs={end_ch_abs}): {path_samples[-1][1]}")
+                            print(f"navigation_path length: {len(path_samples)}")
+                            if len(path_samples) > 1:
+                                print(f"path ordering (first 2 ch): {path_samples[0][0]}, {path_samples[1][0]}")
+                                print(f"path ordering (last 2 ch): {path_samples[-2][0]}, {path_samples[-1][0]}")
+                            print(f"path index (tunnel_entry_idx_in_path): {tunnel_entry_idx_in_path}")
+                            print(f"dir_vec (entry_fwd_raw): {entry_fwd_raw}")
+                            print(f"tangent vector (from path logic): {entry_fwd_raw}")
+                            print(f"normal (entry_perp): {entry_perp}")
+                            print("="*50 + "\n")
+                            # ===============================================
+#############################################################################################
                             # ── Normalize forward vector (XY) ──
                             # get_curve_aware_path dir_vec may NOT be unit-length.
                             # Without normalization, '10m offset' could be < 1m.
@@ -6063,6 +6442,43 @@ class ApplicationUI(QMainWindow):
 
                                 # Verify camera position immediately after SetPosition
                                 cam_after = self.renderer.GetActiveCamera().GetPosition()
+                                #### Mayur Wakhare 13-07-2026 
+                                cam_fp = self.renderer.GetActiveCamera().GetFocalPoint()
+
+                            # === DIAGNOSTIC LOGGING FOR USER COMPARISON ===
+                            try:
+                                import json
+                                debug_file = os.path.join(getattr(self, 'WORKSHEETS_BASE_DIR', ''), 'tunnel_camera_debug.json')
+                                debug_data = {}
+                                if os.path.exists(debug_file):
+                                    with open(debug_file, 'r') as df:
+                                        try: debug_data = json.load(df)
+                                        except: pass
+                                
+                                mode_key = "Merged" if subfolder == "merger" else "Single"
+                                debug_data[mode_key] = {
+                                    "Tunnel ID": str(target_tunnel.get('uuid', 'N/A')),
+                                    "Tunnel Entry Position": f"({entry_pos[0]:.2f}, {entry_pos[1]:.2f}, {entry_pos[2]:.2f})",
+                                    "Tunnel Exit Position": f"({path_samples[-1][1][0]:.2f}, {path_samples[-1][1][1]:.2f}, {path_samples[-1][1][2]:.2f})",
+                                    "Navigation Path Size": str(len(path_samples)),
+                                    "First Path Point": f"ch={path_samples[0][0]:.2f}, pos=({path_samples[0][1][0]:.2f}, {path_samples[0][1][1]:.2f}, {path_samples[0][1][2]:.2f})",
+                                    "Last Path Point": f"ch={path_samples[-1][0]:.2f}, pos=({path_samples[-1][1][0]:.2f}, {path_samples[-1][1][1]:.2f}, {path_samples[-1][1][2]:.2f})",
+                                    "Current Path Index": str(tunnel_entry_idx_in_path),
+                                    "Robot Spawn Position": f"({self._tunnel_entry_pos[0]:.2f}, {self._tunnel_entry_pos[1]:.2f}, {self._tunnel_entry_pos[2]:.2f})",
+                                    "Robot Forward Vector": f"({self._tunnel_entry_fwd[0]:.4f}, {self._tunnel_entry_fwd[1]:.4f}, {self._tunnel_entry_fwd[2]:.4f})",
+                                    "Camera Position": f"({cam_after[0]:.2f}, {cam_after[1]:.2f}, {cam_after[2]:.2f})",
+                                    "Camera Focal Point": f"({cam_fp[0]:.2f}, {cam_fp[1]:.2f}, {cam_fp[2]:.2f})",
+                                    "dir_vec": f"({entry_fwd_raw[0]:.4f}, {entry_fwd_raw[1]:.4f}, {entry_fwd_raw[2]:.4f})",
+                                    "normal": f"({entry_perp[0]:.4f}, {entry_perp[1]:.4f}, {entry_perp[2]:.4f})",
+                                    "tangent": f"({entry_fwd_raw[0]:.4f}, {entry_fwd_raw[1]:.4f}, {entry_fwd_raw[2]:.4f})"
+                                }
+                                with open(debug_file, 'w') as df:
+                                    json.dump(debug_data, df, indent=4)
+                                print(f"=== Debug data written for {mode_key} mode to {debug_file} ===")
+                            except Exception as e:
+                                print(f"Failed to write debug data: {e}")
+                            # ===============================================
+################################################################################################################
 
                             # Start smooth fly-through setup
                             if not hasattr(self, '_tunnel_fly_timer'):
@@ -6096,13 +6512,40 @@ class ApplicationUI(QMainWindow):
                                 self.tunnel_control_bar.setVisible(True)
                                 self.update_3d_button_position()
 ###### Mayur Wakhare 30-06-2026 Robot Camera control
+                                print(f"- Robot Exists: Yes")
                                 # ── Spawn Robot at tunnel entrance ──
                                 import math as _m
                                 _entry_pos = getattr(self, '_tunnel_entry_pos', None)
                                 _entry_fwd = getattr(self, '_tunnel_entry_fwd', [1, 0, 0])
+                                
+                                _exit_pos = self._fly_path[-1][1] if hasattr(self, '_fly_path') and self._fly_path else None
+                                _total_pts = len(self._fly_path) if hasattr(self, '_fly_path') else 0
+                                _robot_yaw = _m.atan2(_entry_fwd[1], _entry_fwd[0])
+                                
+                                print("--- TUNNEL CAMERA INIT DEBUG ---")
+                                print(f"Tunnel Entry Position: {_entry_pos}")
+                                print(f"Tunnel Exit Position: {_exit_pos}")
+                                print(f"Current Path Index: {getattr(self, '_tunnel_entry_idx', 0)}")
+                                print(f"Total Path Points: {_total_pts}")
+                                print(f"dir_vec: {_entry_fwd}")
+                                print(f"Robot Forward Vector: ({_m.cos(_robot_yaw):.4f}, {_m.sin(_robot_yaw):.4f}, 0.0)")
+                                
+                                if hasattr(self, 'renderer') and self.renderer:
+                                    _cam = self.renderer.GetActiveCamera()
+                                    if _cam:
+                                        _cp = _cam.GetPosition()
+                                        _cf = _cam.GetFocalPoint()
+                                        _cfx = _cf[0] - _cp[0]
+                                        _cfy = _cf[1] - _cp[1]
+                                        _cfz = _cf[2] - _cp[2]
+                                        _cd = _m.sqrt(_cfx**2 + _cfy**2 + _cfz**2)
+                                        if _cd > 0:
+                                            _cfx /= _cd; _cfy /= _cd; _cfz /= _cd
+                                        print(f"Camera Forward Vector: ({_cfx:.4f}, {_cfy:.4f}, {_cfz:.4f})")
+                                print("--------------------------------")
+
                                 if _entry_pos:
                                     _robot_z = _entry_pos[2]  # Road surface Z at entrance
-                                    _robot_yaw = _m.atan2(_entry_fwd[1], _entry_fwd[0])
                                     self._create_robot_actor(
                                         position=[_entry_pos[0], _entry_pos[1], _robot_z],
                                         yaw=_robot_yaw
@@ -6126,9 +6569,496 @@ class ApplicationUI(QMainWindow):
                 pass
         else:
             self._tunnel_camera_target = None
-            print("Number of tunnels found: 0")
-            print("No tunnel found in active design configurations.")
-            print("Tunnel selection failed.")
+            print("- Active Tunnel ID: None")
+            print("- Navigation Path Available: No")
+            print("- Path Sample Count: 0")
+            print("- Robot Exists: No")
+            print("- Camera Initialized: No")
+            print("- Initialization Failed Reason: No tunnel configuration found in the active layer or its merged layers.")
+            try:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Tunnel Camera", "Cannot activate Tunnel Camera View.\nNo tunnel configuration found in the active layer or its merged layers.")
+            except ImportError:
+                pass
+########## Mayur Wakhare 13-7-2026 underpass camera button clicked
+    def on_underpass_camera_button_clicked(self):
+
+        self._underpass_camera_active = True
+        """Find the underpass in active config, generate a synthetic path, and reuse tunnel camera mode."""
+        print("\n[Underpass Camera activated]")
+        print("- Button Clicked")
+        import os
+        import json
+        import math
+
+        config_paths = set()
+        
+        # 1. Gather all directories from eye-open states
+        active_layer_folders = []
+        if hasattr(self, '_eye_open_states'):
+            for folder, is_open in self._eye_open_states.items():
+                if is_open and folder and os.path.exists(folder):
+                    active_layer_folders.append(folder)
+                    
+        # 2. Add the current active layer folder just in case
+        layer_folder = getattr(self, 'current_design_layer_path', None)
+        if layer_folder and os.path.exists(layer_folder) and layer_folder not in active_layer_folders:
+            active_layer_folders.append(layer_folder)
+            
+        # 3. Fallback to worksheet properties if still empty
+        if not active_layer_folders:
+            subfolder = getattr(self, 'current_subfolder_type', 'designs')
+            ws_name = getattr(self, 'current_worksheet_name', '')
+            base_dir = getattr(self, 'WORKSHEETS_BASE_DIR', '')
+            layer_name = getattr(self, 'current_layer_name', '')
+            if base_dir and ws_name and layer_name:
+                folder = os.path.join(base_dir, ws_name, subfolder, layer_name)
+                if os.path.exists(folder):
+                    active_layer_folders.append(folder)
+                    
+        num_loaded = len(active_layer_folders)
+        num_merged_sources = 0
+        
+        for folder in active_layer_folders:
+            if "merger" in folder.lower():
+                merger_jsons = [f for f in os.listdir(folder) if f.endswith('.json')]
+                for mj in merger_jsons:
+                    try:
+                        with open(os.path.join(folder, mj), 'r', encoding='utf-8') as f:
+                            merger_data = json.load(f)
+                        for pt in merger_data.get("merger_points", []):
+                            primary_src = pt.get("primary_json_path")
+                            if primary_src and os.path.exists(primary_src):
+                                config_paths.add(primary_src)
+                                num_merged_sources += 1
+                            for lyr in pt.get("layers", []):
+                                src = lyr.get("json_path")
+                                if src and os.path.exists(src):
+                                    config_paths.add(src)
+                                    num_merged_sources += 1
+                    except Exception:
+                        pass
+            else:
+                cfg = os.path.join(folder, 'design_construction_config.json')
+                if os.path.exists(cfg):
+                    config_paths.add(cfg)
+                    
+        config_paths = list(config_paths)
+
+        print(f"- Number of loaded layers (eye open/active): {num_loaded}")
+        print(f"- Number of merged source layers: {num_merged_sources}")
+        print(f"- Total config files to check: {len(config_paths)}")
+
+        # Search for underpasses
+        found_underpasses = []
+        for cp in config_paths:
+            print(f"  Checking layer config: {cp}")
+            try:
+                with open(cp, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                # Check top-level list
+                ups = data.get("under_passes", [])
+                
+                # Check reference_assets legacy list
+                ref_ups = data.get("reference_assets", {}).get("under_pass", [])
+                if isinstance(ref_ups, list):
+                    ups.extend(ref_ups)
+                elif isinstance(ref_ups, dict):
+                    ups.append(ref_ups)
+                    
+                if ups:
+                    print(f"    -> Found {len(ups)} Underpass(es) in this config.")
+                    found_underpasses.extend(ups)
+                else:
+                    print("    -> No Underpass found.")
+            except Exception as e:
+                print(f"    -> Error checking config: {e}")
+                
+        if not found_underpasses:
+            print("- No Underpass found in active layers.")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Underpass Camera", "No Underpass found in active layers.")
+            self._underpass_camera_active = False
+            return
+
+        # --- Underpass selection dialog ---
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton
+        from PyQt5.QtCore import Qt
+
+        select_dlg = QDialog(self)
+        select_dlg.setWindowTitle("Camera View")
+        select_dlg.setModal(True)
+        select_dlg.setMinimumWidth(320)
+        select_dlg.setStyleSheet("""
+            QDialog { background-color: #F5F5F5; font-family: Segoe UI; }
+            QLabel  { font-size: 13px; color: #333; font-weight: bold; }
+            QComboBox {
+                padding: 6px; border: 2px solid #BBB;
+                border-radius: 6px; font-size: 13px;
+                background-color: white;
+            }
+            QPushButton {
+                padding: 8px 18px; border-radius: 6px;
+                font-weight: bold; font-size: 13px;
+            }
+        """)
+
+        dlg_layout = QVBoxLayout(select_dlg)
+        dlg_layout.addWidget(QLabel("Select Underpass:"))
+
+        combo = QComboBox()
+        for idx, up in enumerate(found_underpasses):
+            up_id = up.get("id", f"Underpass_{idx + 1}")
+            combo.addItem(str(up_id), idx)  # store list index as user data
+        dlg_layout.addWidget(combo)
+
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet("background-color: #E0E0E0; color: #333;")
+        ok_btn.clicked.connect(select_dlg.accept)
+        cancel_btn.clicked.connect(select_dlg.reject)
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        dlg_layout.addLayout(btn_layout)
+
+        if select_dlg.exec_() != QDialog.Accepted:
+            print("- Underpass selection cancelled by user.")
+            self._underpass_camera_active = False
+            return
+
+        selected_idx = combo.currentData()
+        target_up = found_underpasses[selected_idx]
+        print(f"- User selected Underpass: {combo.currentText()} (index {selected_idx})")
+
+        if True:  # preserves original indentation block
+            dims = target_up.get("dimensions", {})
+            length = float(dims.get("length", 20.0))
+            width = float(dims.get("width", 20.0))
+            height = float(dims.get("height", 6.0))
+            
+            wc = target_up.get("world_coordinates", [0, 0, 0])
+            tangent = target_up.get("tangent", [1, 0, 0])
+            
+            # The underpass tangent is the main road's tangent (X-axis).
+            mag = math.sqrt(tangent[0]**2 + tangent[1]**2)
+            if mag > 0:
+                tx, ty = tangent[0]/mag, tangent[1]/mag
+            else:
+                tx, ty = 1.0, 0.0
+                
+            angle_rad = math.atan2(ty, tx)
+            
+            print(f"- Found Underpass at: ({wc[0]:.2f}, {wc[1]:.2f}, {wc[2]:.2f})")
+            print(f"- Dimensions: L={length:.2f}, W={width:.2f}, H={height:.2f}")
+
+            intersecting_road_path = []
+            
+            # Helper to check if a point is inside the underpass box
+            def is_point_in_underpass(px, py, pz):
+                # Translate to local
+                dx = px - wc[0]
+                dy = py - wc[1]
+                dz = pz - wc[2]
+                # Rotate back by -angle_rad around Z
+                # Main road tangent is X-axis. Underpass goes across, so underpass length is along Y-axis, width is along X-axis.
+                local_x = dx * math.cos(-angle_rad) - dy * math.sin(-angle_rad)
+                local_y = dx * math.sin(-angle_rad) + dy * math.cos(-angle_rad)
+                local_z = dz
+                # Check bounds with extra margin for Z (road could be slightly above/below the exact center)
+                return (abs(local_x) <= (width / 2.0) + 5.0) and (abs(local_y) <= (length / 2.0) + 10.0) and (abs(local_z) <= (height / 2.0) + 10.0)
+
+            candidate_paths = []
+
+            # Search all configs for road_surface_baseline
+            for cp in config_paths:
+                try:
+                    with open(cp, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    design = data.get("design", {})
+                    road_surface = design.get("road_surface_baseline") or design.get("road_surface")
+                    if road_surface and isinstance(road_surface, dict):
+                        for poly in road_surface.get("polylines", []):
+                            pts = poly.get("points", [])
+                            # Check overlap with the underpass by interpolating segments
+                            overlap_points = []
+                            intersection_length = 0.0
+                            
+                            for k in range(len(pts) - 1):
+                                p1 = pts[k].get("world_coordinates")
+                                p2 = pts[k+1].get("world_coordinates")
+                                if not p1 or not p2: continue
+                                
+                                if k == 0 and is_point_in_underpass(p1[0], p1[1], p1[2]):
+                                    overlap_points.append(p1)
+                                    
+                                if is_point_in_underpass(p2[0], p2[1], p2[2]):
+                                    overlap_points.append(p2)
+                                
+                                dx, dy, dz = p2[0]-p1[0], p2[1]-p1[1], p2[2]-p1[2]
+                                seg_len = math.sqrt(dx*dx + dy*dy + dz*dz)
+                                if seg_len > 0:
+                                    # Sample this segment every 0.5 meters
+                                    samples = int(math.ceil(seg_len / 0.5))
+                                    inside_samples = 0
+                                    for j in range(samples):
+                                        t = (j + 0.5) / float(samples) # Check midpoint of sub-segment
+                                        sp = [p1[0] + dx*t, p1[1] + dy*t, p1[2] + dz*t]
+                                        if is_point_in_underpass(sp[0], sp[1], sp[2]):
+                                            inside_samples += 1
+                                            
+                                    fraction_inside = inside_samples / float(samples)
+                                    intersection_length += (seg_len * fraction_inside)
+                                        
+                            if intersection_length > 0:
+                                # Extract points for this entire polyline
+                                extracted_path = []
+                                for i, pt in enumerate(pts):
+                                    pwc = pt.get("world_coordinates")
+                                    ch = float(pt.get("chainage_m", 0.0))
+                                    if not pwc: continue
+                                    
+                                    # Calculate dir_vec (using next point or previous if last)
+                                    if i < len(pts) - 1:
+                                        nxt = pts[i+1].get("world_coordinates")
+                                        if nxt:
+                                            dx = nxt[0] - pwc[0]
+                                            dy = nxt[1] - pwc[1]
+                                            dz = nxt[2] - pwc[2]
+                                            dmag = math.sqrt(dx*dx + dy*dy + dz*dz)
+                                            if dmag > 0:
+                                                dir_vec = [dx/dmag, dy/dmag, dz/dmag]
+                                            else:
+                                                dir_vec = [1, 0, 0]
+                                        else:
+                                            dir_vec = [1, 0, 0]
+                                    else:
+                                        if extracted_path:
+                                            dir_vec = extracted_path[-1][3]
+                                        else:
+                                            dir_vec = [1, 0, 0]
+                                    
+                                    # Perp vec (horizontal)
+                                    perp_vec = [-dir_vec[1], dir_vec[0], 0.0]
+                                    pmag = math.sqrt(perp_vec[0]**2 + perp_vec[1]**2)
+                                    if pmag > 0:
+                                        perp_vec = [perp_vec[0]/pmag, perp_vec[1]/pmag, 0.0]
+                                        
+                                    extracted_path.append([ch, pwc, perp_vec, dir_vec])
+                                    
+                                # Calculate average distance of overlapping points to underpass center
+                                if overlap_points:
+                                    total_dist = sum(math.sqrt((p[0]-wc[0])**2 + (p[1]-wc[1])**2 + (p[2]-wc[2])**2) for p in overlap_points)
+                                    avg_dist = total_dist / len(overlap_points)
+                                else:
+                                    # If no discrete points inside but intersection length > 0, the segment just crosses it
+                                    avg_dist = 0.0
+                                
+                                candidate_paths.append({
+                                    "path": extracted_path,
+                                    "intersection_length": intersection_length,
+                                    "overlap_count": len(overlap_points),
+                                    "avg_dist": avg_dist,
+                                    "file": cp
+                                })
+                except Exception as e:
+                    pass
+                    
+            intersecting_road_path = []
+            if candidate_paths:
+                import os
+                print("\n[Underpass Camera Detection Ranking]")
+                # Rank primarily by longest intersection length, then minimum avg distance
+                candidate_paths.sort(key=lambda x: (-x["intersection_length"], x["avg_dist"]))
+                
+                for rank, cand in enumerate(candidate_paths, start=1):
+                    folder_name = os.path.basename(os.path.dirname(cand["file"]))
+                    print(f"  Rank {rank}:")
+                    print(f"    - Layer Name: {folder_name}")
+                    print(f"    - Config Path: {cand['file']}")
+                    print(f"    - Intersection Length: {cand['intersection_length']:.2f} m")
+                    print(f"    - Overlap count: {cand['overlap_count']}")
+                    print(f"    - Avg distance: {cand['avg_dist']:.2f}")
+
+                best_candidate = candidate_paths[0]
+                intersecting_road_path = best_candidate["path"]
+                best_layer_name = os.path.basename(os.path.dirname(best_candidate["file"]))
+                
+                print(f"\n[Selected Reference Layer]")
+                print(f"- Selected Layer: {best_layer_name}")
+                print(f"- Config Path: {best_candidate['file']}")
+                print(f"- Reason for selection: Achieved Rank 1 with the longest intersection path ({best_candidate['intersection_length']:.2f} m) passing directly through the underpass volume.")
+                
+                # Assign to a clear property for debugging
+                self._tunnel_active_reference_layer = best_layer_name
+                    
+            if not intersecting_road_path:
+                print("- No intersecting road layer found for the underpass.")
+                try:
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.warning(self, "Underpass Camera", "Cannot activate Underpass Camera View.\nNo road surface passes through the underpass volume.")
+                except ImportError:
+                    pass
+            else:
+                print(f"- Found intersecting road layer! Extracted {len(intersecting_road_path)} points.")
+                
+                # Filter path to just the segment around the underpass (+ some margin)
+                filtered_path = []
+                for sample in intersecting_road_path:
+                    pwc = sample[1]
+                    if is_point_in_underpass(pwc[0], pwc[1], pwc[2]):
+                        filtered_path.append(sample)
+                        
+                # If filtered is empty or too small, fallback to whole path
+                if len(filtered_path) >= 2:
+                    path_samples = filtered_path
+                else:
+                    path_samples = intersecting_road_path
+                    
+                start_sample = path_samples[0]
+                end_sample = path_samples[-1]
+                mid_idx = len(path_samples) // 2
+                center_sample = path_samples[mid_idx]
+
+                # Store properties to reuse Tunnel Camera logic
+                self._tunnel_centerline = path_samples
+                self._tunnel_forward_dir = center_sample[3]
+                self._tunnel_center_point = center_sample[1]
+                self._tunnel_road_surface_z = center_sample[1][2]
+                self._tunnel_h_val = height
+
+                entry_sample = path_samples[0]
+                entry_pos  = entry_sample[1]
+                entry_fwd = entry_sample[3]
+                
+                # Setup Entry Coordinates for _set_camera_to_initial_outside_view
+                self._tunnel_entry_pos = list(entry_pos)
+                self._tunnel_entry_fwd = list(entry_fwd)
+                
+                
+                ## Mayur Wakhare 13-07-2026 underpass offset starting
+                # Configurable offset before the underpass entrance (meters)
+                self.UNDERPASS_PRE_ENTRY_OFFSET = 50.0 ## Main starting offet camera position from underpass entrance
+                ####################################################
+                pre_entry_path = []
+               ### Mayur Wakhare 13-07-2026 underpass offset ending
+                # Find where the entry_sample is in the full intersecting_road_path
+                entry_idx_in_full = -1
+                for idx, sample in enumerate(intersecting_road_path):
+                    if sample is entry_sample:
+                        entry_idx_in_full = idx
+                        break
+                        
+                if entry_idx_in_full > 0:
+                    collected_dist = 0.0
+                    last_pos = entry_sample[1]
+                    
+                    # Collect actual road samples backwards until we reach the desired offset
+                    # or the start of the available road
+                    for i in range(entry_idx_in_full - 1, -1, -1):
+                        sample = intersecting_road_path[i]
+                        pre_entry_path.insert(0, sample)
+                        
+                        curr_pos = sample[1]
+                        import math
+                        dist = math.sqrt((curr_pos[0]-last_pos[0])**2 + (curr_pos[1]-last_pos[1])**2 + (curr_pos[2]-last_pos[2])**2)
+                        collected_dist += dist
+                        last_pos = curr_pos
+                        
+                        if collected_dist >= self.UNDERPASS_PRE_ENTRY_OFFSET:
+                            break
+                        #######################################################################
+                            
+                self._fly_path = pre_entry_path + path_samples
+                self._fly_idx = 0
+                self._fly_t = 0.0
+                self._fly_speed = 0.015
+
+                # CLEAR previous camera caches so we re-compute approach for the new underpass
+                self._initial_cam_pos = None
+                if hasattr(self, 'renderer') and self.renderer:
+                    self.renderer.GetActiveCamera().SetViewUp(0, 0, 1)
+
+            ## Mayur Wakhare 13-07-2026 underpass offset ending camera start position
+                # Set entry index so the camera starts outside, facing in, and
+                # transitions to the road-centerline path at the underpass entrance.
+                self._tunnel_entry_idx = len(pre_entry_path)
+                self._pre_entry_offset = self.UNDERPASS_PRE_ENTRY_OFFSET
+
+                # Set clipping range appropriate for the underpass size
+                underpass_length_safe = max(50.0, length)
+                if hasattr(self, 'renderer') and self.renderer:
+                    self.renderer.GetActiveCamera().SetClippingRange(0.5, underpass_length_safe + 200.0)
+
+                print(f"- Pre-entry points: {len(pre_entry_path)}, Path points: {len(path_samples)}")
+                print(f"- Total fly path: {len(self._fly_path)} points")
+                print(f"- Tunnel entry at path index: {self._tunnel_entry_idx}")
+##############################################################
+                # Setup the UI
+                is_resuming = hasattr(self, '_saved_tunnel_cam_pos') and self._saved_tunnel_cam_pos is not None
+                if is_resuming:
+                    if hasattr(self, 'renderer') and self.renderer:
+                        camera = self.renderer.GetActiveCamera()
+                        camera.SetPosition(*self._saved_tunnel_cam_pos)
+                        camera.SetFocalPoint(*self._saved_tunnel_cam_fp)
+                        self.vtk_widget.GetRenderWindow().Render()
+                    self._saved_tunnel_cam_pos = None
+                    self._saved_tunnel_cam_fp = None
+                else:
+                    if hasattr(self, 'tc_slider'):
+                        self.tc_slider.blockSignals(True)
+                        self.tc_slider.setValue(0)
+                        self.tc_slider.blockSignals(False)
+
+                    ## Mayur Wakhare 13-07-2026 underpass offset ending
+                    # Initialize camera directly onto the road surface offset path
+                    print(f"Initial path index after camera initialization: {self._fly_idx}")
+                    self._set_camera_to_path_index(self._fly_idx, self._fly_t)
+                ##############################################################
+                if not hasattr(self, '_tunnel_fly_timer'):
+                    from PyQt5.QtCore import QTimer
+                    self._tunnel_fly_timer = QTimer(self)
+                    self._tunnel_fly_timer.timeout.connect(self._update_tunnel_flythrough)
+
+                if hasattr(self, 'tunnel_control_bar'):
+                    if hasattr(self, 'vtk_widget') and self.vtk_widget:
+                        interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
+                        if interactor:
+                            current_style = interactor.GetInteractorStyle()
+                            current_picker = interactor.GetPicker()
+                            ## Mayur Wakhare 13-07-2026 underpass offset ending
+                            if getattr(self, '_saved_interactor_style', None) is None:
+                                #######################################################
+                                self._saved_interactor_style = current_style
+                                self._saved_picker = current_picker
+
+                            tunnel_style = TunnelFPSInteractorStyle(viewer=self)
+                            cam_pos = self.renderer.GetActiveCamera().GetPosition()
+                            tunnel_style.set_locked_position(*cam_pos)
+                            interactor.SetInteractorStyle(tunnel_style)
+                            interactor.SetPicker(None)
+                            self._tunnel_fps_style = tunnel_style
+                            ##### Mayur Wakhare 13-07-2026 underpass camera view button ending
+                            has_fwd = tunnel_style.HasObserver("MouseWheelForwardEvent")
+                            print(f"- Mouse wheel observers registered: {'Yes' if has_fwd else 'No'}")
+                            valid_path = hasattr(self, '_fly_path') and bool(self._fly_path)
+                            print(f"- Current camera path valid: {'Yes' if valid_path else 'No'}")
+                            print(f"- Current path index: {getattr(self, '_fly_idx', 0)}")
+                            #####################################################################
+
+                    self.tunnel_control_bar.setVisible(True)
+                    self.update_3d_button_position()
+                    
+                    if hasattr(self, 'tc_play_btn'):
+                        self.tc_play_btn.blockSignals(True)
+                        self.tc_play_btn.setChecked(False)
+                        self.tc_play_btn.blockSignals(False)
+                    self.tunnel_control_bar.raise_()
+
+        # (empty-underpass case is now handled above with early return)
+
 #######################################################################
 ######## Mayur Wakhare 1-7-2026 Tunnel Fly through update code Camera Follow path in tunnel ####
     def _update_tunnel_flythrough(self):
@@ -6219,6 +7149,9 @@ class ApplicationUI(QMainWindow):
                 self._set_camera_to_path_index(self._fly_idx, self._fly_t)
 
     def _on_tunnel_stop_clicked(self):
+        #### Mayur Wakhare 13-07-2026 Underpass Camera movement 
+        self._underpass_camera_active = False
+        ######################################################
         """Pause tunnel flythrough, save current camera state, and move to overview."""
         if not hasattr(self, 'renderer') or not self.renderer:
             return
@@ -6258,6 +7191,9 @@ class ApplicationUI(QMainWindow):
 
 ## Mayur Wakhare 1-7-2026 Camera
     def _reset_tunnel_camera(self):
+        ### Mayur Wakhare 13-07-2026 Underpass Camera movement 
+        self._underpass_camera_active = False
+        ######################################################
         if not hasattr(self, '_fly_path') or not self._fly_path:
             return
             
@@ -6640,6 +7576,18 @@ class ApplicationUI(QMainWindow):
         Clicking the camera icon also resets to FREE mode (slider uses auto side-view again).
         # ======= Aniket Added on 08-05-2026: reset active view mode + spin animation =======
         """
+      # Mayur Wakhare 13-07-2026 underpass camera view button
+        print("\n[Reset Camera View clicked]")
+        print(f"- Current Underpass Camera active flag: {getattr(self, '_underpass_camera_active', False)}")
+        
+        if getattr(self, '_underpass_camera_active', False):
+            print("- Underpass Camera deactivated")
+            
+        self._underpass_camera_active = False
+        self._fly_path = []
+        self._fly_idx = 0
+        self._tunnel_entry_idx = 0
+#########################################################################################
         if hasattr(self, 'tunnel_control_bar'):
             self.tunnel_control_bar.setVisible(False)
 
@@ -7325,9 +8273,8 @@ class ApplicationUI(QMainWindow):
             1: {"name": "Road", "icon": "🛣️", "layout": None, "container": None, "button": None},
             2: {"name": "Bridge", "icon": "🌉", "layout": None, "container": None, "button": None},
             3: {"name": "Building", "icon": "🏢", "layout": None, "container": None, "button": None},
-
-            5: {"name": "Tunnel", "icon": "🏢", "layout": None, "container": None, "button": None}
-
+            5: {"name": "Tunnel", "icon":"🚇","layout": None, "container": None, "button": None},
+            6: {"name": "UnderPass", "icon":"🛣️", "layout": None, "container": None, "button": None}
         }
         
         # Create Category Buttons and Containers based on metadata ONLY
@@ -7405,7 +8352,12 @@ class ApplicationUI(QMainWindow):
                             "dividers": "open_divider_dialog",
                             ## Mayur Wakhare 3-7-2026 Tunnel Fire
                             "tunnel light": "open_tunnel_light_dialog",
-                            "fire extinguisher": "open_fire_extinguisher_dialog"
+                            "underpass light": "open_underpass_light_dialog",
+                            "underpass cctv": "open_underpass_cctv_dialog",
+                            "fire extinguisher": "open_fire_extinguisher_dialog",
+                            "cctv camera": "open_cctv_camera_dialog",
+                            "tunnel exhaust fan": "open_tunnel_exhaust_fan_dialog",
+                            "water pipe": "open_water_pipe_dialog"
                             ########################################
                         }
 
@@ -7438,13 +8390,51 @@ class ApplicationUI(QMainWindow):
                                 """)
                                 asset_btn.setCursor(Qt.PointingHandCursor)
                                 asset_btn.setObjectName(f"btn_asset_{lower_name.replace(' ', '_')}")
-                                
-                                handler_name = handlers_map.get(lower_name)
-                                if hasattr(self, 'handle_asset_selection') and handler_name:
-                                    a_id = asset.get('aha_id') or asset.get('asset_id')
-                                    asset_btn.clicked.connect(lambda ch, x_id=a_id, x_h=handler_name: self.handle_asset_selection(x_id, x_h))
-                                elif handler_name and hasattr(self, handler_name):
-                                    asset_btn.clicked.connect(getattr(self, handler_name))
+                                ### Mayur Wakhare 4-7-2026 Tunnel Signage Board Code start
+                                if lower_name == "tunnel signage board":
+                                    from PyQt5.QtWidgets import QMenu, QAction
+                                    menu = QMenu(asset_btn)
+                                    menu.setStyleSheet("""
+                                        QMenu { background-color: white; border: 1px solid #ccc; }
+                                        QMenu::item { padding: 8px 25px; font-size: 13px; color: #333; }
+                                        QMenu::item:selected { background-color: #f8fff9; color: #28a745; font-weight: bold; }
+                                    """)
+                                    
+                                    actions_map = {
+                                        "Tunnel Information Board": "open_tunnel_info_board_dialog",
+                                        # "Speed Limit Board": "open_speed_limit_board_dialog",
+                                        # "Emergency Exit Board": "open_emergency_exit_board_dialog",
+                                        "Fire Extinguisher Board": "open_fire_extinguisher_dir_board_dialog",
+                                        "Emergency Telephone Board": "open_emergency_telephone_board_dialog",
+                                        # "CCTV Surveillance Board": "open_cctv_surveillance_board_dialog",
+                                        # "Headlights ON Board": "open_headlights_on_board_dialog",
+                                        # "No Overtaking Board": "open_no_overtaking_board_dialog",
+                                        # "Variable Message Sign (VMS)": "open_vms_board_dialog",
+                                        # "Exit Distance Board": "open_exit_distance_board_dialog"
+                                    }
+                                    
+                                    for label, method_name in actions_map.items():
+                                        action = QAction(label, menu)
+                                        menu.addAction(action)
+                                        
+                                        if hasattr(self, 'handle_asset_selection'):
+                                            a_id = asset.get('aha_id') or asset.get('asset_id')
+                                            action.triggered.connect(lambda ch=False, x_id=a_id, m=method_name: self.handle_asset_selection(x_id, m))
+                                        else:
+                                            if hasattr(self, method_name):
+                                                action.triggered.connect(getattr(self, method_name))
+                                                
+                                    asset_btn.setMenu(menu)
+                                else:
+                                    #######################################################
+                                    handler_name = handlers_map.get(lower_name)
+                                    if hasattr(self, 'handle_asset_selection') and handler_name:
+                                        a_id = asset.get('aha_id') or asset.get('asset_id')
+                                    ### Mayur Wakhare 4-7-2026 Tunnel Signage Board
+                                        asset_btn.clicked.connect(lambda ch=False, x_id=a_id, x_h=handler_name: self.handle_asset_selection(x_id, x_h))
+                                    ########################################################################################
+                                    elif handler_name and hasattr(self, handler_name):
+                                        asset_btn.clicked.connect(getattr(self, handler_name))
                                 
                                 # Compatibility references
                                 if lower_name in ["street lights", "street light"]:
