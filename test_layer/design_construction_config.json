@@ -1,0 +1,60 @@
+{
+  "design": {
+    "tunnel": {
+      "id": "T1",
+      "tunnel_id": "T1",
+      "arc_points": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          1,
+          1,
+          1
+        ],
+        [
+          2,
+          0,
+          0
+        ]
+      ]
+    }
+  },
+  "tunnel_information_boards": [
+    {
+      "id": "5e7e7397-80e6-4e8b-9213-d0691c345b8b",
+      "config": {
+        "km": 0,
+        "chainage": 100,
+        "display_text": "WELCOME\nDRIVE SAFELY",
+        "speed_limit": "80 km/h",
+        "asset_name": "TunnelInformationBoard",
+        "tunnel_id": "T1",
+        "layer_id": "test_layer"
+      },
+      "world_position": [
+        0.0,
+        1.8369701987210297e-16,
+        2.0
+      ],
+      "normal": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "dir_vec": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "ceiling_z": 3.0
+    }
+  ]
+}

@@ -25166,7 +25166,7 @@ class PointCloudViewer(ApplicationUI):
         
         outer_assembly.AddPart(assembly)
         return outer_assembly
-
+######### Mayur 21-7-2026
     def _place_tunnel_exhaust_fans(self, data):
         """Place tunnel exhaust fans (jet fans) based on dialog data."""
         import numpy as np
@@ -25187,17 +25187,100 @@ class PointCloudViewer(ApplicationUI):
             return
             
         import os
+        import json
         from json_manager import DesignConstructionManager
-        master_data = DesignConstructionManager.load_master(layer_folder)
-        tunnel_config = master_data.get("design", {}).get("tunnel")
+        
+        tunnel_id = data.get("tunnel_id", "Unknown")
+        layer_name = data.get("layer_name", "Unknown")
+        source_layer_folder = data.get("source_layer_folder", "")
+        
+        target_layer_path = None
+        tunnel_config = None
+        
+        # Helper to load tunnel config from a given layer folder
+        def _get_tunnel_from_layer(p, tid):
+            is_m = False
+            subf = getattr(self, 'current_subfolder_type', 'designs')
+            t_cfg = None
+            if "merger" in p.lower() or subf == "merger":
+                try:
+                    for mj in [f for f in os.listdir(p) if f.endswith('.json')]:
+                        with open(os.path.join(p, mj), 'r', encoding='utf-8') as f:
+                            m_data = json.load(f)
+                        if "merger_points" in m_data:
+                            is_m = True
+                            for pt in m_data.get("merger_points", []):
+                                cfgs = [pt.get("primary_json_path")] + [l.get("json_path") for l in pt.get("layers", [])]
+                                for cfg in cfgs:
+                                    if cfg and os.path.exists(cfg):
+                                        with open(cfg, 'r', encoding='utf-8') as fcfg:
+                                            cfg_data = json.load(fcfg)
+                                        t_c = cfg_data.get("design", {}).get("tunnel")
+                                        if not t_c:
+                                            zc = cfg_data.get("design", {}).get("zero_line_config")
+                                            if zc:
+                                                t_c = {"id": "fallback_tunnel", "arc_points": zc.get("arc_points", [])}
+                                        if t_c and str(t_c.get("tunnel_id", t_c.get("id", "Unknown"))) == str(tid):
+                                            return t_c, True
+                except Exception:
+                    pass
+            
+            if not t_cfg and not is_m:
+                try:
+                    m_data = DesignConstructionManager.load_master(p)
+                    t_c = m_data.get("design", {}).get("tunnel")
+                    if not t_c:
+                        zc = m_data.get("design", {}).get("zero_line_config")
+                        if zc:
+                            t_c = {"id": "fallback_tunnel", "arc_points": zc.get("arc_points", [])}
+                    if t_c and str(t_c.get("tunnel_id", t_c.get("id", "Unknown"))) == str(tid):
+                        return t_c, is_m
+                except Exception:
+                    pass
+            return None, is_m
+
+        # 1. Prefer the direct source folder reference
+        if source_layer_folder and os.path.exists(source_layer_folder):
+            target_layer_path = source_layer_folder
+            tunnel_config, _ = _get_tunnel_from_layer(target_layer_path, tunnel_id)
+            
+        # 2. If not found via direct reference, scan all active design layers
         if not tunnel_config:
+            active_paths = list(getattr(self, '_per_layer_actors', {}).keys())
+            if layer_folder and layer_folder not in active_paths:
+                active_paths.append(layer_folder)
+                
+            for p in active_paths:
+                if p and os.path.exists(p):
+                    t_c, _ = _get_tunnel_from_layer(p, tunnel_id)
+                    if t_c:
+                        tunnel_config = t_c
+                        target_layer_path = p
+                        break
+
+        print("\n--- Exhaust Fan Placement Debug ---")
+        print(f"Selected Tunnel ID: {tunnel_id}")
+        print(f"Selected Layer: {layer_name}")
+        
+        if not tunnel_config:
+            print("Placement Tunnel ID: None")
+            print("Placement Layer: None")
+            print("Exhaust Fan created for: FAILED - Tunnel not found")
+            print("-----------------------------------\n")
+            QMessageBox.warning(self, "Placement Error", f"Could not find tunnel {tunnel_id} in layer {layer_name}.")
             return
             
-        arc_points_raw = tunnel_config.get("arc_points", []) if tunnel_config else []
+        print(f"Placement Tunnel ID: {tunnel_config.get('tunnel_id', tunnel_config.get('id', 'Unknown'))}")
+        print(f"Tunnel Start Chainage: {tunnel_config.get('start_chainage', 0)}")
+        print(f"Tunnel End Chainage: {tunnel_config.get('end_chainage', 0)}")
+        print(f"Tunnel Object Memory: {id(tunnel_config)}")
+        print("-----------------------------------\n")
+            
+        arc_points_raw = tunnel_config.get("arc_points", [])
         
-        path_samples = self.get_curve_aware_path(start_abs, start_abs, step=1.0)
+        path_samples = self.get_curve_aware_path(start_abs, start_abs, step=1.0, target_layer=target_layer_path)
         if not path_samples:
-            path_samples = self.get_curve_aware_path(start_abs - 0.5, start_abs + 0.5, step=0.5)
+            path_samples = self.get_curve_aware_path(start_abs - 0.5, start_abs + 0.5, step=0.5, target_layer=target_layer_path)
             if not path_samples:
                 QMessageBox.warning(self, "Placement Error", f"Could not locate chainage {start_abs} on the road geometry.")
                 return
@@ -25260,9 +25343,9 @@ class PointCloudViewer(ApplicationUI):
         
         for fan_info in fans_to_place:
             c = fan_info["chainage"]
-            p_samples = self.get_curve_aware_path(c, c, step=1.0)
+            p_samples = self.get_curve_aware_path(c, c, step=1.0, target_layer=target_layer_path)
             if not p_samples:
-                p_samples = self.get_curve_aware_path(c - 0.5, c + 0.5, step=0.5)
+                p_samples = self.get_curve_aware_path(c - 0.5, c + 0.5, step=0.5, target_layer=target_layer_path)
                 if not p_samples:
                     continue
                     
@@ -25271,6 +25354,8 @@ class PointCloudViewer(ApplicationUI):
             center_3d = P_b + uc * p_vec + vc * up_vec
             nominal_fan_pos = center_3d + R * up_vec - ceiling_offset * up_vec
             fan_pos = nominal_fan_pos + fan_info["offset_x"] * p_vec
+            
+            print(f"Fan at Chainage {c} placement coordinates: {fan_pos}")
             
             actor = self._create_jet_fan_actor()
             
@@ -25324,11 +25409,15 @@ class PointCloudViewer(ApplicationUI):
                 "json_ids": [f["id"] for f in fan_data_list]
             }
             
-            if "tunnel_exhaust_fans" not in master_data:
-                master_data["tunnel_exhaust_fans"] = []
+            if not target_layer_path:
+                target_layer_path = layer_folder
+            save_master_data = DesignConstructionManager.load_master(target_layer_path)
+            
+            if "tunnel_exhaust_fans" not in save_master_data:
+                save_master_data["tunnel_exhaust_fans"] = []
                 
-            master_data["tunnel_exhaust_fans"].extend(fan_data_list)
-            DesignConstructionManager.save_master(layer_folder, master_data)
+            save_master_data["tunnel_exhaust_fans"].extend(fan_data_list)
+            DesignConstructionManager.save_master(target_layer_path, save_master_data)
             
             if hasattr(self, 'output_list'):
                 self.output_list.addItem(f"✅ Placed {len(fan_data_list)} Tunnel Exhaust Fans.")

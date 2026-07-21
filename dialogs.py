@@ -20621,6 +20621,16 @@ class TunnelExhaustFanDialog(QDialog):
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: #D32F2F;")
         layout.addWidget(title)
 
+        # ── Tunnel Selection ──
+        tunnel_sel_group = QGroupBox("Tunnel Selection")
+        tunnel_sel_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CCC; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
+        tunnel_sel_layout = QHBoxLayout(tunnel_sel_group)
+        tunnel_sel_layout.addWidget(QLabel("Tunnel ID:"))
+        self.tunnel_combo = QComboBox()
+        self.tunnel_combo.setStyleSheet("padding: 4px; border: 1px solid #BBB; border-radius: 4px;")
+        tunnel_sel_layout.addWidget(self.tunnel_combo)
+        layout.addWidget(tunnel_sel_group)
+
         grid = QGridLayout()
         grid.setSpacing(10)
 
@@ -20781,45 +20791,152 @@ class TunnelExhaustFanDialog(QDialog):
        ########################################################################## 
         layout.addLayout(buttons_layout)
 
-        # ── Auto-populate chainage from tunnel ──
-        tunnel_found = False
-        t_start_km, t_start_ch = "", ""
-        t_end_km, t_end_ch = "", ""
-        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
-        import os
-        if layer_folder and os.path.exists(layer_folder):
-            try:
-                from json_manager import DesignConstructionManager
-                m_data = DesignConstructionManager.load_master(layer_folder)
-                t_conf = m_data.get("design", {}).get("tunnel", {})
-                if t_conf and "start_km" in t_conf:
-                    t_start_km = str(t_conf.get("start_km", ""))
-                    t_start_ch = str(t_conf.get("start_chainage", ""))
-                    t_end_km = str(t_conf.get("end_km", ""))
-                    t_end_ch = str(t_conf.get("end_chainage", ""))
-                    tunnel_found = True
-            except Exception:
-                pass
-                
-        if tunnel_found:
-            def clean_str(val):
-                return val[:-2] if val.endswith(".0") else val
-                
-            self.start_km_input.setText(clean_str(t_start_km))
-            self.start_ch_input.setText(clean_str(t_start_ch))
-            self.end_km_input.setText(clean_str(t_end_km))
-            self.end_ch_input.setText(clean_str(t_end_ch))
-            
+        # ── Scan and populate tunnels from all active design layers ──
+        self.available_tunnels = []
+        self._populate_tunnels()
+
         # Connections for live update
         self.start_km_input.textChanged.connect(self.invalidate_verification)
         self.start_ch_input.textChanged.connect(self.invalidate_verification)
         self.end_km_input.textChanged.connect(self.invalidate_verification)
         self.end_ch_input.textChanged.connect(self.invalidate_verification)
 
+        self.tunnel_combo.currentIndexChanged.connect(self._on_tunnel_selected)
         self.pair_inst_rb.toggled.connect(self.toggle_mode)
         self.num_pairs_input.valueChanged.connect(self.update_summary)
         self.num_fans_input.valueChanged.connect(self.update_summary)
-        
+
+        # Auto-select first tunnel if available
+        if self.available_tunnels:
+            self._on_tunnel_selected(0)
+        else:
+            self.update_summary()
+## Mauyur 21-7-2026 
+    def _populate_tunnels(self):
+        """Scan all active design layers for tunnel configurations and populate the dropdown."""
+        import os
+        import json
+        if not self.parent:
+            return
+
+        active_layer_paths = list(getattr(self.parent, '_per_layer_actors', {}).keys())
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        if layer_folder and os.path.exists(layer_folder) and layer_folder not in active_layer_paths:
+            active_layer_paths.append(layer_folder)
+
+        subfolder = getattr(self.parent, 'current_subfolder_type', 'designs')
+        config_paths = []
+
+        for p in active_layer_paths:
+            if not p or not isinstance(p, str) or not os.path.exists(p):
+                continue
+            is_merger = False
+            if "merger" in p.lower() or subfolder == "merger":
+                merger_jsons = [f for f in os.listdir(p) if f.endswith('.json')]
+                for mj in merger_jsons:
+                    try:
+                        with open(os.path.join(p, mj), 'r', encoding='utf-8') as f:
+                            merger_data = json.load(f)
+                        if "merger_points" in merger_data:
+                            is_merger = True
+                            for pt in merger_data.get("merger_points", []):
+                                def add_cfg(json_file_path):
+                                    if json_file_path:
+                                        d_path = os.path.dirname(json_file_path)
+                                        cfg = os.path.join(d_path, 'design_construction_config.json')
+                                        if os.path.exists(cfg) and cfg not in config_paths:
+                                            config_paths.append(cfg)
+                                add_cfg(pt.get("primary_json_path"))
+                                for lyr in pt.get("layers", []):
+                                    add_cfg(lyr.get("json_path"))
+                    except Exception:
+                        pass
+            if not is_merger:
+                cfg = os.path.join(p, 'design_construction_config.json')
+                if os.path.exists(cfg) and cfg not in config_paths:
+                    config_paths.append(cfg)
+
+        found_tunnels = []
+        for cp in config_paths:
+            try:
+                with open(cp, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                tunnel_obj = data.get('design', {}).get('tunnel')
+                if not tunnel_obj:
+                    zero_config = data.get('design', {}).get('zero_line_config')
+                    if zero_config:
+                        tunnel_obj = {
+                            'id': 'fallback_tunnel',
+                            'start_km': zero_config.get('point1', {}).get('from_km', 0),
+                            'start_chainage': zero_config.get('point1', {}).get('from_chainage', 0),
+                            'end_km': zero_config.get('point2', {}).get('to_km', 0),
+                            'end_chainage': zero_config.get('point2', {}).get('to_chainage', 0)
+                        }
+                if tunnel_obj and isinstance(tunnel_obj, dict):
+                    tunnel_obj['source_layer_folder'] = os.path.dirname(cp)
+                    found_tunnels.append(tunnel_obj)
+            except Exception:
+                pass
+
+        unique_tunnels = {}
+        for t in found_tunnels:
+            tid = t.get('tunnel_id', t.get('id', 'Unknown'))
+            t_layer_folder = t.get('source_layer_folder', '')
+            layer_name = os.path.basename(t_layer_folder) if t_layer_folder else 'Unknown'
+            key = (layer_name, tid)
+            if key not in unique_tunnels:
+                unique_tunnels[key] = (t, layer_name, tid)
+
+        self.available_tunnels = list(unique_tunnels.values())
+
+        self.tunnel_combo.blockSignals(True)
+        self.tunnel_combo.clear()
+        if self.available_tunnels:
+            for t, layer_name, tid in self.available_tunnels:
+                display_text = f"{tid} ({layer_name})"
+                self.tunnel_combo.addItem(display_text)
+        else:
+            self.tunnel_combo.addItem("No Tunnel Found")
+            # Disable all controls when no tunnel exists
+            self.start_km_input.setEnabled(False)
+            self.start_ch_input.setEnabled(False)
+            self.end_km_input.setEnabled(False)
+            self.end_ch_input.setEnabled(False)
+            self.verify_btn.setEnabled(False)
+            self.controls_widget.setEnabled(False)
+            self.ok_btn.setEnabled(False)
+        self.tunnel_combo.blockSignals(False)
+
+    def _on_tunnel_selected(self, index):
+        """Handle tunnel selection — auto-fill KM/Chainage and auto-verify."""
+        if index < 0 or index >= len(self.available_tunnels):
+            return
+        t, layer_name, tid = self.available_tunnels[index]
+
+        def clean_str(val):
+            val = str(val)
+            return val[:-2] if val.endswith(".0") else val
+
+        # Block signals to avoid invalidate_verification while auto-populating
+        self.start_km_input.blockSignals(True)
+        self.start_ch_input.blockSignals(True)
+        self.end_km_input.blockSignals(True)
+        self.end_ch_input.blockSignals(True)
+
+        self.start_km_input.setText(clean_str(t.get('start_km', '0')))
+        self.start_ch_input.setText(clean_str(t.get('start_chainage', '0')))
+        self.end_km_input.setText(clean_str(t.get('end_km', '0')))
+        self.end_ch_input.setText(clean_str(t.get('end_chainage', '0')))
+
+        self.start_km_input.blockSignals(False)
+        self.start_ch_input.blockSignals(False)
+        self.end_km_input.blockSignals(False)
+        self.end_ch_input.blockSignals(False)
+
+        # Auto-verify (same behavior as the existing Verify functionality)
+        self.verified = True
+        self.controls_widget.setEnabled(True)
+        self.ok_btn.setEnabled(True)
         self.update_summary()
 
     def toggle_mode(self):
@@ -20838,10 +20955,9 @@ class TunnelExhaustFanDialog(QDialog):
             "background-color: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 6px; "
             "padding: 10px; font-size: 12px; color: #E65100; font-weight: normal;"
         )
-
+### Mayur 21-7-2026
     def verify_chainage(self):
         from PyQt5.QtWidgets import QMessageBox
-        import os
         try:
             s_km = float(self.start_km_input.text() or 0.0)
             s_ch = float(self.start_ch_input.text() or 0.0)
@@ -20854,26 +20970,25 @@ class TunnelExhaustFanDialog(QDialog):
         start_abs = s_km * 1000 + s_ch
         end_abs = e_km * 1000 + e_ch
 
-        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
-        if layer_folder and os.path.exists(layer_folder):
-            from json_manager import DesignConstructionManager
-            master_data = DesignConstructionManager.load_master(layer_folder)
-            tunnel_data = master_data.get("design", {}).get("tunnel")
-            if tunnel_data:
-                ts_km = tunnel_data.get("start_km", 0.0)
-                ts_ch = tunnel_data.get("start_chainage", 0.0)
-                te_km = tunnel_data.get("end_km", 0.0)
-                te_ch = tunnel_data.get("end_chainage", 0.0)
-                t_start = ts_km * 1000 + ts_ch
-                t_end = te_km * 1000 + te_ch
+       
+        # Validate against the currently selected tunnel
+        idx = self.tunnel_combo.currentIndex()
+        if idx >= 0 and idx < len(self.available_tunnels):
+            t_data, _, _ = self.available_tunnels[idx]
+            ts_km = float(t_data.get("start_km", 0.0))
+            ts_ch = float(t_data.get("start_chainage", 0.0))
+            te_km = float(t_data.get("end_km", 0.0))
+            te_ch = float(t_data.get("end_chainage", 0.0))
+            t_start = ts_km * 1000 + ts_ch
+            t_end = te_km * 1000 + te_ch
 
-                if start_abs < t_start or start_abs > t_end or end_abs < t_start or end_abs > t_end:
-                    QMessageBox.warning(self, "Out of Bounds", f"Locations must be within tunnel limits ({t_start} - {t_end}).")
-                    return
-                if start_abs >= end_abs:
-                    QMessageBox.warning(self, "Invalid Range", "Start chainage must be less than End chainage.")
-                    return
-        
+            if start_abs < t_start or start_abs > t_end or end_abs < t_start or end_abs > t_end:
+                QMessageBox.warning(self, "Out of Bounds", f"Locations must be within tunnel limits ({t_start} - {t_end}).")
+                return
+            if start_abs >= end_abs:
+                QMessageBox.warning(self, "Invalid Range", "Start chainage must be less than End chainage.")
+                return
+
         self.verified = True
         self.controls_widget.setEnabled(True)
         self.ok_btn.setEnabled(True)
@@ -20901,13 +21016,26 @@ class TunnelExhaustFanDialog(QDialog):
             return None
             
         try:
+            ### Mayur 21-7-2026
+            idx = self.tunnel_combo.currentIndex()
+            t_id = "Unknown"
+            l_name = "Unknown"
+            t_obj = {}
+            if idx >= 0 and idx < len(self.available_tunnels):
+                t_obj, l_name, t_id = self.available_tunnels[idx]
+            ########################################################
             data = {
                 "start_km": float(self.start_km_input.text() or 0.0),
                 "start_chainage": float(self.start_ch_input.text() or 0.0),
                 "end_km": float(self.end_km_input.text() or 0.0),
                 "end_chainage": float(self.end_ch_input.text() or 0.0),
                 "airflow_direction": "exit" if self.towards_exit_rb.isChecked() else "entry",
-                "ceiling_offset": float(self.ceiling_offset_input.value())
+            # Mayur 21-7-2026
+                "ceiling_offset": float(self.ceiling_offset_input.value()),
+                "tunnel_id": t_id,
+                "layer_name": l_name,
+                "source_layer_folder": t_obj.get("source_layer_folder", "")
+                ####################################################################
             }
             if self.pair_inst_rb.isChecked():
                 data["installation_type"] = "pair"
