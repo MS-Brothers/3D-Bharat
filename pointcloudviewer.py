@@ -39,7 +39,7 @@ from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, Mate
                     StreetLightDialog, SignalPoleDialog, LaneMarkingDialog, PoleAssetDialog, BuddyDialog, BuddiesWorksheetsDialog, OneDirectionStreetLightDialog, 
                     TwoDirectionStreetLightDialog, FourDirectionStreetLightDialog, OneDirectionSignalPoleDialog, TwoDirectionSignalPoleDialog, FourDirectionSignalPoleDialog, 
                     ##### Mayur Wakhare 1-7-2026 Tunnel Light
-                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog)
+                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog,UnderPassDialog,UnderPassPreviewDialog,UnderpassCCTVDialog,UnderpassLightDialog)
                     ###########################################################
 from measurement_widget import MeasurementWidget
 from digging_point import DiggingPointInput
@@ -22735,6 +22735,21 @@ class PointCloudViewer(ApplicationUI):
                 ### Mayur Wakhare 3-7-2026 Tunnel light json
                 self._sync_tunnel_lights_to_json()
             ###################################################
+## Mayur 21-7-2026 tunnel wall
+    def open_tunnel_wall_dialog(self):
+        """Open the Tunnel Wall dialog."""
+        from dialogs import TunnelWallDialog
+        from PyQt5.QtWidgets import QDialog
+        import json
+        
+        dialog = TunnelWallDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data:
+                if hasattr(self, 'output_list'):
+                    self.output_list.addItem(f"✅ Tunnel Wall Data: {json.dumps(data)}")
+                print(f"Tunnel Wall Data: {data}")
+#####################################################################################################
 ##### Mayur Wakhare 6-7-2026 tunnel fan 
     def open_tunnel_exhaust_fan_dialog(self):
         """Open the Tunnel Exhaust Fan dialog."""
@@ -45001,6 +45016,637 @@ class PointCloudViewer(ApplicationUI):
                 0.0
             ]
         }
+    
+
+    ###### Mayur Wakhare 05-06-2026 : Added "Under pass" button on Menu bar ############
+    def handle_under_pass_clicked(self):
+        """Open the Under Pass configuration dialog."""
+        dialog = UnderPassDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            self.under_pass_values = dialog.under_pass_values
+            print(f"Under Pass values: {self.under_pass_values}")
+            
+            # Open the preview dialog
+            preview_dialog = UnderPassPreviewDialog(self.under_pass_values, self)
+            preview_dialog.exec_()
+
+
+    def open_underpass_light_dialog(self, *args):
+        if not getattr(self, "current_worksheet_name", None):
+            QMessageBox.warning(self, "No Worksheet", "Please open a worksheet first.")
+            return
+        dialog = UnderpassLightDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data.get("verified") and data.get("light_mode") == "single":
+                up = dialog.underpass_data.get(data.get("up_id"))
+                if up and hasattr(self, '_place_single_underpass_light'):
+                    self._place_single_underpass_light(data, up)
+                    
+                    if hasattr(self, 'vtk_widget') and self.vtk_widget:
+                        self.vtk_widget.GetRenderWindow().Render()
+### Mayur Wakhare 15-07-2026 Underpass CCTV button on menu bar ##################
+    def open_underpass_cctv_dialog(self, *args):
+        if not getattr(self, "current_worksheet_name", None):
+            QMessageBox.warning(self, "No Worksheet", "Please open a worksheet first.")
+            return
+        dialog = UnderpassCCTVDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data.get("verified"):
+                up = dialog.underpass_data.get(data.get("up_id"))
+                if up and hasattr(self, '_place_underpass_cctv'):
+                    self._place_underpass_cctv(data, up)
+                    
+                    if hasattr(self, 'vtk_widget') and self.vtk_widget:
+                        self.vtk_widget.GetRenderWindow().Render()
+
+#############################################################################
+    def place_under_pass(self, dimensions, placement_values):
+        from PyQt5.QtWidgets import QMessageBox
+        import os
+        import json
+        import math
+        import random
+
+        if not getattr(self, 'current_worksheet_name', None):
+            QMessageBox.warning(self, "No Worksheet", "Please load a worksheet first.")
+            return
+
+        design_layer = placement_values.get("design_layer")
+        if not design_layer:
+            QMessageBox.warning(self, "Error", "No Design Layer specified.")
+            return
+        
+        # Load unified config
+        try:
+            from json_manager import DesignConstructionManager
+            subfolder = getattr(self, 'current_subfolder_type', 'designs')
+            designs_base = os.path.join(self.WORKSHEETS_BASE_DIR, self.current_worksheet_name, subfolder)
+            
+            # Fast path: if current_design_layer_path matches, use it directly
+            active_path = getattr(self, 'current_design_layer_path', None)
+            if active_path and os.path.exists(active_path) and os.path.basename(active_path) == design_layer:
+                layer_folder = active_path
+                print(f"Design Layer resolved from active path: {layer_folder}")
+            else:
+                layer_folder = os.path.join(designs_base, design_layer)
+            
+            # If exact match not found, try partial match (e.g. user enters "D1", folder is "W1 - D1")
+            if not os.path.exists(layer_folder):
+                matched_folder = None
+                if os.path.isdir(designs_base):
+                    available_layers = [d for d in os.listdir(designs_base) if os.path.isdir(os.path.join(designs_base, d))]
+                    print(f"User entered: {design_layer}")
+                    print(f"Available layers:")
+                    for lyr in available_layers:
+                        print(f"  - {lyr}")
+                    
+                    # Try suffix match: "W1 - D1" ends with "D1"
+                    for lyr in available_layers:
+                        if lyr.endswith(design_layer) or lyr.endswith(f"- {design_layer}") or lyr.endswith(f" {design_layer}"):
+                            matched_folder = lyr
+                            break
+                    
+                    # Try contains match as fallback
+                    if not matched_folder:
+                        for lyr in available_layers:
+                            if design_layer in lyr:
+                                matched_folder = lyr
+                                break
+                
+                if matched_folder:
+                    print(f"Matched Design Layer: {matched_folder}")
+                    layer_folder = os.path.join(designs_base, matched_folder)
+                    design_layer = matched_folder
+                else:
+                    QMessageBox.warning(self, "Error", f"Design Layer '{design_layer}' not found.\nAvailable: {', '.join(available_layers) if os.path.isdir(designs_base) else 'N/A'}")
+                    return
+
+            road_data = DesignConstructionManager.load_baseline_from_unified(layer_folder, 'road_surface_baseline')
+            if not road_data:
+                road_data = DesignConstructionManager.load_baseline_from_unified(layer_folder, 'surface_baseline')
+                if not road_data:
+                    QMessageBox.warning(self, "Missing Data", "No surface baseline found in the specified design layer.")
+                    return
+            
+            # Find coordinates for chainage
+            km_str = placement_values.get("km", "0").strip()
+            ch_str = placement_values.get("chainage", "0").strip()
+            if not km_str: km_str = "0"
+            if not ch_str: ch_str = "0"
+            
+            # Handle chainage in "KM+chainage" format (e.g. "101+080")
+            if "+" in ch_str:
+                parts = ch_str.split("+")
+                km = float(parts[0])
+                chainage = float(parts[1])
+            else:
+                km = float(km_str)
+                chainage = float(ch_str)
+            target_abs = km * 1000 + chainage
+            
+            # Extract world_coordinates
+            all_points = []
+            for poly in road_data.get("polylines", []):
+                for pt in poly.get("points", []):
+                    pt_ch_str = pt.get("chainage_str", "")
+                    if "+" in pt_ch_str:
+                        try:
+                            k_s, c_s = pt_ch_str.split("+")
+                            pt_abs = float(k_s) * 1000 + float(c_s)
+                            wc = pt.get("world_coordinates")
+                            if wc and len(wc) >= 3:
+                                all_points.append((pt_abs, wc))
+                        except Exception:
+                            pass
+            
+            if not all_points:
+                QMessageBox.warning(self, "Error", "No valid coordinates found in the baseline.")
+                return
+            
+            # Sort points by absolute chainage
+            all_points.sort(key=lambda x: x[0])
+            
+            target_coord = None
+            tangent_vec = None
+            
+            # Find the segment containing the target chainage
+            for i in range(len(all_points) - 1):
+                p1_abs, p1_wc = all_points[i]
+                p2_abs, p2_wc = all_points[i+1]
+                
+                if p1_abs <= target_abs <= p2_abs:
+                    if p2_abs - p1_abs > 0.001:
+                        t = (target_abs - p1_abs) / (p2_abs - p1_abs)
+                    else:
+                        t = 0
+                    
+                    target_coord = [
+                        p1_wc[0] + t * (p2_wc[0] - p1_wc[0]),
+                        p1_wc[1] + t * (p2_wc[1] - p1_wc[1]),
+                        p1_wc[2] + t * (p2_wc[2] - p1_wc[2])
+                    ]
+                    
+                    vx = p2_wc[0] - p1_wc[0]
+                    vy = p2_wc[1] - p1_wc[1]
+                    vz = p2_wc[2] - p1_wc[2]
+                    length = math.sqrt(vx*vx + vy*vy + vz*vz)
+                    if length > 0:
+                        tangent_vec = [vx/length, vy/length, vz/length]
+                    break
+            
+            if not target_coord:
+                if target_abs < all_points[0][0]:
+                    target_coord = list(all_points[0][1])
+                    if len(all_points) > 1:
+                        vx = all_points[1][1][0] - all_points[0][1][0]
+                        vy = all_points[1][1][1] - all_points[0][1][1]
+                        vz = all_points[1][1][2] - all_points[0][1][2]
+                    else:
+                        vx, vy, vz = 1, 0, 0
+                else:
+                    target_coord = list(all_points[-1][1])
+                    if len(all_points) > 1:
+                        vx = all_points[-1][1][0] - all_points[-2][1][0]
+                        vy = all_points[-1][1][1] - all_points[-2][1][1]
+                        vz = all_points[-1][1][2] - all_points[-2][1][2]
+                    else:
+                        vx, vy, vz = 1, 0, 0
+                
+                length = math.sqrt(vx*vx + vy*vy + vz*vz)
+                if length > 0:
+                    tangent_vec = [vx/length, vy/length, vz/length]
+                else:
+                    tangent_vec = [1.0, 0.0, 0.0]
+            
+            # Apply depth offset
+            try:
+                depth_str = str(placement_values.get("depth", "0")).replace("e.g.", "").replace("m", "").strip()
+                DepthFromRoadSurface = float(depth_str) if depth_str else 0.5
+            except Exception:
+                DepthFromRoadSurface = 0.5
+                
+            # RoadSurface_Z = road elevation at selected KM/Chainage
+            RoadSurface_Z = target_coord[2]
+            
+            # TopOfUnderPass_Z = RoadSurface_Z - DepthFromRoadSurface
+            TopOfUnderPass_Z = RoadSurface_Z - DepthFromRoadSurface
+            
+            # The depth from user represents the vertical distance between road surface and TOP slab.
+            # Since visualize_under_pass builds geometry with local Z=0 at the center,
+            # and the top slab is at +height/2.0, the world center needs to be positioned
+            # so the top slab reaches exactly TopOfUnderPass_Z.
+            # We apply this as a true vertical offset.
+            height = float(dimensions.get("height", 6.0))
+            target_coord[2] = TopOfUnderPass_Z - (height / 2.0)
+
+            
+            # Calculate rotation angle from tangent
+            angle_rad = math.atan2(tangent_vec[1], tangent_vec[0])
+            angle_deg = math.degrees(angle_rad)
+            
+            # Build comprehensive Under Pass data record
+            under_pass_id = f"UP_{int(km):03d}_{int(chainage):03d}_{random.randint(100, 999)}"
+############################################################################ Mayur Wakhare 09-06-2026 : New Code Added          
+            # Pre-compute cavity (hollow interior) dimensions for geometry subtraction
+            up_length = float(dimensions.get("length", 20.0))
+            up_width = float(dimensions.get("width", 10.0))
+            up_height_val = float(dimensions.get("height", 6.0))
+            up_wall_t = float(dimensions.get("wall_thickness", 0.7))
+            up_slab_t = float(dimensions.get("slab_thickness", 0.7))
+            up_bottom_t = float(dimensions.get("bottom_thickness", 0.8))
+
+            cavity_hollow_width = up_width - 2.0 * up_wall_t
+            cavity_hollow_length = up_length
+            cavity_hollow_height = up_height_val - up_slab_t - up_bottom_t
+            cavity_center_z_offset = (up_bottom_t - up_slab_t) / 2.0
+############################################################################ Mayur Wakhare 09-06-2026 : New Code Added          
+            under_pass_data = {
+                "id": under_pass_id,
+                "worksheet": self.current_worksheet_name,
+                "design_layer": design_layer,
+                "length": up_length,
+                "width": up_width,
+                "height": up_height_val,
+                "wall_thickness": up_wall_t,
+                "slab_thickness": up_slab_t,
+                "bottom_thickness": up_bottom_t,
+########################################################################
+                "km": int(km),
+                "chainage": f"{int(km)}+{int(chainage):03d}",
+                "chainage_abs": target_abs,
+                "depth_from_road_surface": DepthFromRoadSurface,
+                "road_surface_z": RoadSurface_Z,
+                "position": {
+                    "x": round(target_coord[0], 6),
+                    "y": round(target_coord[1], 6),
+                    "z": round(target_coord[2], 6)
+                },
+                "rotation": {
+                    "rx": 0.0,
+                    "ry": 0.0,
+                    "rz": round(angle_deg, 4)
+                },
+                "tangent": tangent_vec,
+                # Keep dimensions dict for backward compatibility with visualize_under_pass
+                "dimensions": dimensions,
+###########################################################################
+# Mayur Wakhare 09-06-2026 New Code Added
+                "world_coordinates": target_coord,
+                # Pre-computed cavity bounds for permanent geometry subtraction
+                "cavity": {
+                    "hollow_width": round(cavity_hollow_width, 6),
+                    "hollow_length": round(cavity_hollow_length, 6),
+                    "hollow_height": round(cavity_hollow_height, 6),
+                    "hollow_center_z_offset": round(cavity_center_z_offset, 6),
+                    "world_center": [round(target_coord[0], 6), round(target_coord[1], 6), round(target_coord[2], 6)],
+                    "rotation_deg": round(angle_deg, 4),
+                    "tangent": tangent_vec
+                }
+###########################################################################
+            }
+            
+            # ── Save to design_construction_config.json ──
+            master_data = DesignConstructionManager.load_master(layer_folder)
+            
+            # Ensure under_passes section exists at top level
+            if "under_passes" not in master_data:
+                master_data["under_passes"] = []
+            
+            # Also keep backward-compatible reference_assets entry
+            if "reference_assets" not in master_data:
+                master_data["reference_assets"] = {}
+            if "under_pass" not in master_data["reference_assets"]:
+                master_data["reference_assets"]["under_pass"] = []
+            
+            # Append to both locations
+            master_data["under_passes"].append(under_pass_data)
+            
+            current_ref = master_data["reference_assets"]["under_pass"]
+            if isinstance(current_ref, list):
+                current_ref.append(under_pass_data)
+            else:
+                master_data["reference_assets"]["under_pass"] = [under_pass_data]
+            
+            DesignConstructionManager.save_master(layer_folder, master_data)
+            
+            print(f"Under Pass saved: {under_pass_id} at {int(km)}+{int(chainage):03d}")
+            print(f"  Position: ({target_coord[0]:.3f}, {target_coord[1]:.3f}, {target_coord[2]:.3f})")
+            print(f"  Rotation: {angle_deg:.2f} degrees")
+            print(f"  Layer: {design_layer}")
+            print(f"  Saved to: {layer_folder}")
+            
+            QMessageBox.information(self, "Success", f"Under Pass '{under_pass_id}' placed at {int(km)}+{int(chainage):03d} in layer '{design_layer}'.")
+            
+            # ── Immediately render the actor ──
+            up_actor = self.visualize_under_pass(under_pass_data)
+            
+            # ── Rebuild material meshes with permanent geometry subtraction ──
+            # Instead of runtime clipping, re-generate material 3D meshes so the
+            # cavity hole is baked into the geometry and survives save/reload.
+#Mayur Wakhare 09-06-2026 Update code
+            self._rebuild_materials_after_underpass()
+            self._rebuild_baselines_after_underpass()
+                
+        except Exception as e:
+            print(f"Error placing Under Pass: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Error", f"Failed to place Under Pass: {str(e)}")
+
+    def apply_under_pass_clipping(self, data, under_pass_actor=None):
+        """
+        Removes the material/construction layers from the hollow internal cavity 
+        of the Under Pass to create a clear empty passage.
+        """
+        print("DEBUG: apply_under_pass_clipping called")
+        import vtk
+        import math
+
+        if not hasattr(self, 'vtk_widget') or not self.vtk_widget:
+            return
+
+        renderer = self.vtk_widget.GetRenderWindow().GetRenderers().GetFirstRenderer()
+        if not renderer: return
+
+        dims = data.get("dimensions", {})
+        length = float(dims.get("length", 20.0))
+        width = float(dims.get("width", 10.0))
+        height = float(dims.get("height", 6.0))
+        wall_t = float(dims.get("wall_thickness", 0.7))
+        slab_t = float(dims.get("slab_thickness", 0.7))
+        bottom_t = float(dims.get("bottom_thickness", 0.8))
+
+        wc = data.get("world_coordinates", [0, 0, 0])
+        tangent = data.get("tangent", [1, 0, 0])
+        
+        # Calculate angle of tangent from X axis
+        tx, ty = tangent[0], tangent[1]
+        angle_rad = math.atan2(ty, tx)
+        angle_deg = math.degrees(angle_rad)
+
+        # The space occupied by the tunnel opening
+        hollow_width = width - 2.0 * wall_t
+        hollow_length = length  # Use exact internal length
+        hollow_height = height - slab_t - bottom_t
+        hollow_center_z = (bottom_t - slab_t) / 2.0
+
+        box = vtk.vtkBox()
+        box.SetBounds(
+            -hollow_width / 2.0, hollow_width / 2.0,
+            -hollow_length / 2.0, hollow_length / 2.0,
+            hollow_center_z - hollow_height / 2.0, hollow_center_z + hollow_height / 2.0
+        )
+
+        # The Box evaluates points in its local space. 
+        # We need to supply the INVERSE transform so world coordinates map to the box's local origin.
+        transform = vtk.vtkTransform()
+        transform.Translate(wc[0], wc[1], wc[2])
+        transform.RotateZ(angle_deg)
+        
+        inv_transform = vtk.vtkTransform()
+        inv_transform.DeepCopy(transform)
+        inv_transform.Inverse()
+        box.SetTransform(inv_transform)
+
+        actors = renderer.GetActors()
+        actors.InitTraversal()
+        num_actors = actors.GetNumberOfItems()
+
+        for _ in range(num_actors):
+            a = actors.GetNextActor()
+            if not a.GetVisibility():
+                continue
+            
+            # Skip clipping the under pass itself
+            if a == under_pass_actor:
+                continue
+
+            mapper = a.GetMapper()
+            if not mapper:
+                continue
+
+            mapper.Update()
+            if hasattr(mapper, 'GetInputDataObject'):
+                input_data = mapper.GetInputDataObject(0, 0)
+            else:
+                input_data = mapper.GetInput()
+
+            if not input_data or not input_data.IsA("vtkDataSet"):
+                continue
+
+            actor_matrix = a.GetMatrix()
+            actor_to_world = vtk.vtkTransform()
+            actor_to_world.SetMatrix(actor_matrix)
+
+            box_transform = vtk.vtkTransform()
+            box_transform.PostMultiply()
+            box_transform.Concatenate(actor_to_world)
+            box_transform.Concatenate(inv_transform)
+            
+            box_clone = vtk.vtkBox()
+            box_clone.SetBounds(box.GetBounds())
+            box_clone.SetTransform(box_transform)
+
+            # Use vtkClipPolyData for PolyData to preserve structures (like point clouds), else vtkClipDataSet
+            if input_data.IsA("vtkPolyData"):
+                clipper = vtk.vtkClipPolyData()
+            else:
+                clipper = vtk.vtkClipDataSet()
+                
+            clipper.SetInputData(input_data)
+            clipper.SetClipFunction(box_clone)
+            clipper.SetInsideOut(False) 
+            clipper.Update()
+
+            new_data = clipper.GetOutput()
+            if new_data and new_data.GetNumberOfPoints() > 0:
+                if isinstance(mapper, vtk.vtkPolyDataMapper) and not new_data.IsA("vtkPolyData"):
+                    surface_filter = vtk.vtkDataSetSurfaceFilter()
+                    surface_filter.SetInputData(new_data)
+                    surface_filter.Update()
+                    mapper.SetInputData(surface_filter.GetOutput())
+                else:
+                    mapper.SetInputData(new_data)
+            else:
+                a.SetVisibility(False)
+
+                # Apply clipping to material layer actors (if any)\n        if hasattr(self, 'material_3d_actors'):\n            for actor_list in self.material_3d_actors.values():\n                for act in actor_list:\n                    if not act.GetVisibility():\n                        continue\n                    mapper = act.GetMapper()\n                    if not mapper:\n                        continue\n                    mapper.Update()\n                    if hasattr(mapper, 'GetInputDataObject'):\n                        input_data = mapper.GetInputDataObject(0, 0)\n                    else:\n                        input_data = mapper.GetInput()\n                    if not input_data or not input_data.IsA("vtkDataSet"):\n                        continue\n                    # Transform box to actor space\n                    actor_matrix = act.GetMatrix()\n                    actor_to_world = vtk.vtkTransform()\n                    actor_to_world.SetMatrix(actor_matrix)\n                    box_transform = vtk.vtkTransform()\n                    box_transform.PostMultiply()\n                    box_transform.Concatenate(actor_to_world)\n                    box_transform.Concatenate(inv_transform)\n                    box_clone = vtk.vtkBox()\n                    box_clone.SetBounds(box.GetBounds())\n                    box_clone.SetTransform(box_transform)\n                    # Choose appropriate clipper\n                    if input_data.IsA("vtkPolyData"):\n                        clipper = vtk.vtkClipPolyData()\n                    else:\n                        clipper = vtk.vtkClipDataSet()\n                    clipper.SetInputData(input_data)\n                    clipper.SetClipFunction(box_clone)\n                    clipper.SetInsideOut(False)\n                    clipper.Update()\n                    new_data = clipper.GetOutput()\n                    if new_data and new_data.GetNumberOfPoints() > 0:\n                        if isinstance(mapper, vtk.vtkPolyDataMapper) and not new_data.IsA("vtkPolyData"):\n                            surface_filter = vtk.vtkDataSetSurfaceFilter()\n                            surface_filter.SetInputData(new_data)\n                            surface_filter.Update()\n                            mapper.SetInputData(surface_filter.GetOutput())\n                        else:\n                            mapper.SetInputData(new_data)\n                    else:\n                        act.SetVisibility(False)\n        # Render the updated scene\n        self.vtk_widget.GetRenderWindow().Render()
+# Mayur Wakhare 09-06-2026 : New Code Added
+    def _rebuild_materials_after_underpass(self):
+        """
+        Re-generate all active material 3D actors so that the geometry subtraction
+        in draw_material_filling produces permanent hollow meshes at Under Pass cavities.
+        Called after an Under Pass is placed instead of runtime clipping.
+        """
+        print("DEBUG: Rebuilding material actors")
+        try:
+            if not hasattr(self, 'material_3d_actors') or not self.material_3d_actors:
+                return
+
+            # Get the list of active material indices that have 3D actors
+            active_indices = list(self.material_3d_actors.keys())
+            if not active_indices:
+                return
+
+            print(f"Rebuilding {len(active_indices)} material layers after Under Pass placement...")
+            
+            # Print underpass count here to verify
+            if hasattr(self, '_get_all_under_pass_cavities'):
+                cavs = self._get_all_under_pass_cavities()
+                print(f"DEBUG: Found {len(cavs) if cavs else 0} cavities in _get_all_under_pass_cavities before rebuild loop")
+
+            for material_index in active_indices:
+                try:
+                    self.load_and_draw_material_filling(material_index)
+                    print(f"  Rebuilt material M{material_index + 1} with cavity subtraction")
+                except Exception as e:
+                    print(f"  Error rebuilding material M{material_index + 1}: {e}")
+
+            # Render the updated scene
+            if hasattr(self, 'vtk_widget') and self.vtk_widget:
+                self.vtk_widget.GetRenderWindow().Render()
+
+            print("Material rebuild complete — cavities permanently subtracted.")
+        except Exception as e:
+            print(f"Error in _rebuild_materials_after_underpass: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _rebuild_baselines_after_underpass(self):
+        """
+        Re-generate baseline 3D planes so that the cavity hole is accurately clipped
+        for surface lines during live mode placement.
+        """
+        print("DEBUG: Rebuilding baseline actors")
+        try:
+            layer_folder = getattr(self, 'current_design_layer_path', None)
+            if not layer_folder:
+                return
+
+            # Clear existing 3D baseline planes from the scene
+            if hasattr(self, 'clear_baseline_planes'):
+                self.clear_baseline_planes()
+                
+            # Reload and draw them using the existing loaded configuration
+            if hasattr(self, 'load_all_baselines_from_layer') and hasattr(self, 'map_baselines_to_3d_planes_from_data'):
+                loaded_baselines = self.load_all_baselines_from_layer(layer_folder)
+                if loaded_baselines:
+                    self.map_baselines_to_3d_planes_from_data(loaded_baselines)
+                    print("  Rebuilt baselines with cavity subtraction")
+                    
+            if hasattr(self, 'vtk_widget') and self.vtk_widget:
+                self.vtk_widget.GetRenderWindow().Render()
+
+        except Exception as e:
+            print(f"Error in _rebuild_baselines_after_underpass: {e}")
+            import traceback
+            traceback.print_exc()
+###########################################################################
+    def visualize_under_pass(self, data):
+        import vtk
+        import math
+
+        if not hasattr(self, 'vtk_widget') or not self.vtk_widget:
+            return
+
+        renderer = self.vtk_widget.GetRenderWindow().GetRenderers().GetFirstRenderer()
+        if not renderer: return
+
+        dims = data.get("dimensions", {})
+        length = dims.get("length", 20.0)
+        width = dims.get("width", 10.0)
+        height = dims.get("height", 6.0)
+        wall_t = dims.get("wall_thickness", 0.7)
+        slab_t = dims.get("slab_thickness", 0.7)
+        bottom_t = dims.get("bottom_thickness", 0.8)
+
+        append_filter = vtk.vtkAppendPolyData()
+
+        # Top Slab
+        top_slab = vtk.vtkCubeSource()
+        top_slab.SetXLength(width)
+        top_slab.SetYLength(length)
+        top_slab.SetZLength(slab_t)
+        top_slab.SetCenter(0, 0, height/2.0 - slab_t/2.0)
+        append_filter.AddInputConnection(top_slab.GetOutputPort())
+
+        # Bottom Slab
+        bottom_slab = vtk.vtkCubeSource()
+        bottom_slab.SetXLength(width)
+        bottom_slab.SetYLength(length)
+        bottom_slab.SetZLength(bottom_t)
+        bottom_slab.SetCenter(0, 0, -height/2.0 + bottom_t/2.0)
+        append_filter.AddInputConnection(bottom_slab.GetOutputPort())
+
+        # Left Wall
+        left_wall = vtk.vtkCubeSource()
+        left_wall.SetXLength(wall_t)
+        left_wall.SetYLength(length)
+        wall_height = height - slab_t - bottom_t
+        left_wall.SetZLength(wall_height if wall_height > 0 else 0.1)
+        left_wall.SetCenter(-width/2.0 + wall_t/2.0, 0, (bottom_t - slab_t)/2.0)
+        append_filter.AddInputConnection(left_wall.GetOutputPort())
+
+        # Right Wall
+        right_wall = vtk.vtkCubeSource()
+        right_wall.SetXLength(wall_t)
+        right_wall.SetYLength(length)
+        right_wall.SetZLength(wall_height if wall_height > 0 else 0.1)
+        right_wall.SetCenter(width/2.0 - wall_t/2.0, 0, (bottom_t - slab_t)/2.0)
+        append_filter.AddInputConnection(right_wall.GetOutputPort())
+
+        wc = data.get("world_coordinates", [0, 0, 0])
+        tangent = data.get("tangent", [1, 0, 0])
+        
+        # Calculate angle of tangent from X axis
+        tx, ty = tangent[0], tangent[1]
+        angle_rad = math.atan2(ty, tx)
+        angle_deg = math.degrees(angle_rad)
+
+        transform = vtk.vtkTransform()
+        transform.Translate(wc[0], wc[1], wc[2])
+        transform.RotateZ(angle_deg)
+
+        transform_filter = vtk.vtkTransformPolyDataFilter()
+        transform_filter.SetTransform(transform)
+        transform_filter.SetInputConnection(append_filter.GetOutputPort())
+        transform_filter.Update()
+
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(transform_filter.GetOutputPort())
+
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        actor.GetProperty().SetColor(0.55, 0.55, 0.55)
+        
+        # Track actor for general references
+        if hasattr(self, 'reference_actors'):
+            self.reference_actors.append(actor)
+            
+        # Track actor for layer-specific visibility
+        if hasattr(self, '_per_layer_actors'):
+            layer_path = None
+            ws_name = data.get("worksheet", getattr(self, 'current_worksheet_name', ''))
+            layer_name = data.get("design_layer", getattr(self, 'current_layer_name', ''))
+            subfolder = getattr(self, 'current_subfolder_type', 'designs')
+            
+            if hasattr(self, 'WORKSHEETS_BASE_DIR') and ws_name and layer_name:
+                layer_path = os.path.join(self.WORKSHEETS_BASE_DIR, ws_name, subfolder, layer_name)
+            elif hasattr(self, 'current_design_layer_path') and getattr(self, 'current_design_layer_path'):
+                layer_path = getattr(self, 'current_design_layer_path')
+                
+            if layer_path:
+                if layer_path not in self._per_layer_actors:
+                    self._per_layer_actors[layer_path] = []
+                if actor not in self._per_layer_actors[layer_path]:
+                    self._per_layer_actors[layer_path].append(actor)
+                self.message_text.append(f" Under Pass added to layer: {layer_name}")
+
+        renderer.AddActor(actor)
+        self.vtk_widget.GetRenderWindow().Render()
+        return actor
 
 # ====================================================================================================================================================================
 # #                                                                       *** END OF APPLICAATION ***

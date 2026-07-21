@@ -21059,6 +21059,367 @@ class TunnelExhaustFanDialog(QDialog):
             if success:
                 self.undo_btn.setEnabled(False)
             ##############################################################################################
+### Mayur 21-7-2026 Tunnel wall
+class TunnelWallDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Tunnel Wall")
+        self.setModal(True)
+        self.setMinimumWidth(450)
+        self.parent = parent
+        self.verified = False
+        
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F5F5F5;
+                font-family: Segoe UI;
+            }
+            QLabel { font-size: 13px; color: #333; font-weight: bold; }
+            QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox {
+                padding: 6px;
+                border: 2px solid #BBB;
+                border-radius: 6px;
+                font-size: 13px;
+                background-color: white;
+            }
+            QPushButton {
+                padding: 8px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Tunnel Wall")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #673AB7;")
+        layout.addWidget(title)
+
+        # ── Tunnel Selection ──
+        tunnel_sel_group = QGroupBox("Tunnel Selection")
+        tunnel_sel_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CCC; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
+        tunnel_sel_layout = QHBoxLayout(tunnel_sel_group)
+        tunnel_sel_layout.addWidget(QLabel("Tunnel ID:"))
+        self.tunnel_combo = QComboBox()
+        self.tunnel_combo.setStyleSheet("padding: 4px; border: 1px solid #BBB; border-radius: 4px;")
+        tunnel_sel_layout.addWidget(self.tunnel_combo)
+        layout.addWidget(tunnel_sel_group)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        grid.addWidget(QLabel("Start KM:"), 0, 0)
+        self.start_km_input = QLineEdit()
+        grid.addWidget(self.start_km_input, 0, 1)
+
+        grid.addWidget(QLabel("+"), 0, 2)
+        self.start_ch_input = QLineEdit()
+        grid.addWidget(self.start_ch_input, 0, 3)
+
+        self.verify_btn = QPushButton("Verify")
+        self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 6px; font-weight: bold; border-radius: 4px;")
+        grid.addWidget(self.verify_btn, 1, 0, 1, 4)
+        self.verify_btn.clicked.connect(self.verify_chainage)
+        
+        layout.addLayout(grid)
+
+        # Main controls container (enabled after verify)
+        self.controls_widget = QWidget()
+        controls_layout = QVBoxLayout(self.controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        self.controls_widget.setEnabled(False)
+
+        # ── Wall Settings ──
+        wall_settings_group = QGroupBox("Wall Settings")
+        wall_settings_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CCC; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
+        ws_layout = QGridLayout(wall_settings_group)
+        
+        ws_layout.addWidget(QLabel("Portal Side:"), 0, 0)
+        self.portal_side_combo = QComboBox()
+        self.portal_side_combo.addItems(["Start Portal", "End Portal", "Both"])
+        ws_layout.addWidget(self.portal_side_combo, 0, 1)
+        
+        ws_layout.addWidget(QLabel("Wall Type:"), 1, 0)
+        self.wall_type_combo = QComboBox()
+        self.wall_type_combo.addItems(["Concrete", "Brick", "Panel"])
+        ws_layout.addWidget(self.wall_type_combo, 1, 1)
+        
+        ws_layout.addWidget(QLabel("Wall Thickness (m):"), 2, 0)
+        self.wall_thickness_input = QDoubleSpinBox()
+        self.wall_thickness_input.setRange(0.1, 5.0)
+        self.wall_thickness_input.setSingleStep(0.1)
+        self.wall_thickness_input.setValue(0.5)
+        ws_layout.addWidget(self.wall_thickness_input, 2, 1)
+        
+        ws_layout.addWidget(QLabel("Wall Height:"), 3, 0)
+        height_layout = QHBoxLayout()
+        self.auto_height_cb = QCheckBox("Auto")
+        self.auto_height_cb.setChecked(True)
+        self.wall_height_input = QDoubleSpinBox()
+        self.wall_height_input.setRange(1.0, 20.0)
+        self.wall_height_input.setSingleStep(0.5)
+        self.wall_height_input.setValue(5.0)
+        self.wall_height_input.setEnabled(False)
+        self.auto_height_cb.toggled.connect(lambda checked: self.wall_height_input.setEnabled(not checked))
+        height_layout.addWidget(self.auto_height_cb)
+        height_layout.addWidget(self.wall_height_input)
+        ws_layout.addLayout(height_layout, 3, 1)
+        
+        ws_layout.addWidget(QLabel("Wall Offset (m):"), 4, 0)
+        self.wall_offset_input = QDoubleSpinBox()
+        self.wall_offset_input.setRange(-5.0, 5.0)
+        self.wall_offset_input.setSingleStep(0.1)
+        self.wall_offset_input.setValue(0.0)
+        ws_layout.addWidget(self.wall_offset_input, 4, 1)
+        
+        controls_layout.addWidget(wall_settings_group)
+        layout.addWidget(self.controls_widget)
+
+        # ── Placement Summary (read-only preview) ──
+        self.summary_label = QLabel("")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setStyleSheet(
+            "background-color: #FFEBEE; border: 1px solid #FFCDD2; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #333; font-weight: normal;"
+        )
+        layout.addWidget(self.summary_label)
+
+        # OK / Cancel
+        buttons_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        self.ok_btn.clicked.connect(self.accept)
+        self.ok_btn.setEnabled(False)
+        buttons_layout.addWidget(self.ok_btn)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet("background-color: #9E9E9E; color: white;")
+        self.cancel_btn.clicked.connect(self.reject)
+        buttons_layout.addWidget(self.cancel_btn)
+        
+        layout.addLayout(buttons_layout)
+
+        # ── Scan and populate tunnels from all active design layers ──
+        self.available_tunnels = []
+        self._populate_tunnels()
+
+        # Connections for live update
+        self.start_km_input.textChanged.connect(self.invalidate_verification)
+        self.start_ch_input.textChanged.connect(self.invalidate_verification)
+        self.tunnel_combo.currentIndexChanged.connect(self._on_tunnel_selected)
+
+        # Auto-select first tunnel if available
+        if self.available_tunnels:
+            self._on_tunnel_selected(0)
+        else:
+            self.update_summary()
+
+    def _populate_tunnels(self):
+        """Scan all active design layers for tunnel configurations and populate the dropdown."""
+        import os
+        import json
+        if not self.parent:
+            return
+
+        active_layer_paths = list(getattr(self.parent, '_per_layer_actors', {}).keys())
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        if layer_folder and os.path.exists(layer_folder) and layer_folder not in active_layer_paths:
+            active_layer_paths.append(layer_folder)
+
+        subfolder = getattr(self.parent, 'current_subfolder_type', 'designs')
+        config_paths = []
+
+        for p in active_layer_paths:
+            if not p or not isinstance(p, str) or not os.path.exists(p):
+                continue
+            is_merger = False
+            if "merger" in p.lower() or subfolder == "merger":
+                merger_jsons = [f for f in os.listdir(p) if f.endswith('.json')]
+                for mj in merger_jsons:
+                    try:
+                        with open(os.path.join(p, mj), 'r', encoding='utf-8') as f:
+                            merger_data = json.load(f)
+                        if "merger_points" in merger_data:
+                            is_merger = True
+                            for pt in merger_data.get("merger_points", []):
+                                def add_cfg(json_file_path):
+                                    if json_file_path:
+                                        d_path = os.path.dirname(json_file_path)
+                                        cfg = os.path.join(d_path, 'design_construction_config.json')
+                                        if os.path.exists(cfg) and cfg not in config_paths:
+                                            config_paths.append(cfg)
+                                add_cfg(pt.get("primary_json_path"))
+                                for lyr in pt.get("layers", []):
+                                    add_cfg(lyr.get("json_path"))
+                    except Exception:
+                        pass
+            if not is_merger:
+                cfg = os.path.join(p, 'design_construction_config.json')
+                if os.path.exists(cfg) and cfg not in config_paths:
+                    config_paths.append(cfg)
+
+        found_tunnels = []
+        for cp in config_paths:
+            try:
+                with open(cp, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                tunnel_obj = data.get('design', {}).get('tunnel')
+                if not tunnel_obj:
+                    zero_config = data.get('design', {}).get('zero_line_config')
+                    if zero_config:
+                        tunnel_obj = {
+                            'id': 'fallback_tunnel',
+                            'start_km': zero_config.get('point1', {}).get('from_km', 0),
+                            'start_chainage': zero_config.get('point1', {}).get('from_chainage', 0),
+                            'end_km': zero_config.get('point2', {}).get('to_km', 0),
+                            'end_chainage': zero_config.get('point2', {}).get('to_chainage', 0)
+                        }
+                if tunnel_obj and isinstance(tunnel_obj, dict):
+                    tunnel_obj['source_layer_folder'] = os.path.dirname(cp)
+                    found_tunnels.append(tunnel_obj)
+            except Exception:
+                pass
+
+        unique_tunnels = {}
+        for t in found_tunnels:
+            tid = t.get('tunnel_id', t.get('id', 'Unknown'))
+            t_layer_folder = t.get('source_layer_folder', '')
+            layer_name = os.path.basename(t_layer_folder) if t_layer_folder else 'Unknown'
+            key = (layer_name, tid)
+            if key not in unique_tunnels:
+                unique_tunnels[key] = (t, layer_name, tid)
+
+        self.available_tunnels = list(unique_tunnels.values())
+
+        self.tunnel_combo.blockSignals(True)
+        self.tunnel_combo.clear()
+        if self.available_tunnels:
+            for t, layer_name, tid in self.available_tunnels:
+                display_text = f"{tid} ({layer_name})"
+                self.tunnel_combo.addItem(display_text)
+        else:
+            self.tunnel_combo.addItem("No Tunnel Found")
+            # Disable all controls when no tunnel exists
+            self.start_km_input.setEnabled(False)
+            self.start_ch_input.setEnabled(False)
+            self.verify_btn.setEnabled(False)
+            self.controls_widget.setEnabled(False)
+            self.ok_btn.setEnabled(False)
+        self.tunnel_combo.blockSignals(False)
+
+    def _on_tunnel_selected(self, index):
+        """Handle tunnel selection — auto-fill KM/Chainage and auto-verify."""
+        if index < 0 or index >= len(self.available_tunnels):
+            return
+        t, layer_name, tid = self.available_tunnels[index]
+
+        def clean_str(val):
+            val = str(val)
+            return val[:-2] if val.endswith(".0") else val
+
+        # Block signals to avoid invalidate_verification while auto-populating
+        self.start_km_input.blockSignals(True)
+        self.start_ch_input.blockSignals(True)
+
+        self.start_km_input.setText(clean_str(t.get('start_km', '0')))
+        self.start_ch_input.setText(clean_str(t.get('start_chainage', '0')))
+
+        self.start_km_input.blockSignals(False)
+        self.start_ch_input.blockSignals(False)
+
+        # Auto-verify
+        self.verified = True
+        self.controls_widget.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        self.update_summary()
+
+    def invalidate_verification(self):
+        self.verified = False
+        self.ok_btn.setEnabled(False)
+        self.controls_widget.setEnabled(False)
+        self.summary_label.setText("Please Verify chainage location first.")
+        self.summary_label.setStyleSheet(
+            "background-color: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #E65100; font-weight: normal;"
+        )
+
+    def verify_chainage(self):
+        from PyQt5.QtWidgets import QMessageBox
+        try:
+            s_km = float(self.start_km_input.text() or 0.0)
+            s_ch = float(self.start_ch_input.text() or 0.0)
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric values for KM and Chainage.")
+            return
+
+        start_abs = s_km * 1000 + s_ch
+
+        # Validate against the currently selected tunnel
+        idx = self.tunnel_combo.currentIndex()
+        if idx >= 0 and idx < len(self.available_tunnels):
+            t_data, _, _ = self.available_tunnels[idx]
+            ts_km = float(t_data.get("start_km", 0.0))
+            ts_ch = float(t_data.get("start_chainage", 0.0))
+            te_km = float(t_data.get("end_km", 0.0))
+            te_ch = float(t_data.get("end_chainage", 0.0))
+            t_start = ts_km * 1000 + ts_ch
+            t_end = te_km * 1000 + te_ch
+
+            if start_abs < t_start or start_abs > t_end:
+                QMessageBox.warning(self, "Out of Bounds", f"Locations must be within tunnel limits ({t_start} - {t_end}).")
+                return
+
+        self.verified = True
+        self.controls_widget.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        self.update_summary()
+        QMessageBox.information(self, "Verified", "Chainage location successfully verified.")
+
+    def update_summary(self):
+        if not self.verified:
+            self.invalidate_verification()
+            return
+            
+        self.summary_label.setStyleSheet(
+            "background-color: #E8F5E9; border: 1px solid #C8E6C9; border-radius: 6px; "
+            "padding: 10px; font-size: 12px; color: #2E7D32; font-weight: bold;"
+        )
+        side = self.portal_side_combo.currentText()
+        self.summary_label.setText(f"✅ Ready to Place\n\nTunnel Wall at: {side}")
+
+    def get_data(self):
+        if not self.verified:
+            return None
+            
+        try:
+            idx = self.tunnel_combo.currentIndex()
+            t_id = "Unknown"
+            l_name = "Unknown"
+            t_obj = {}
+            if idx >= 0 and idx < len(self.available_tunnels):
+                t_obj, l_name, t_id = self.available_tunnels[idx]
+                
+            data = {
+                "start_km": float(self.start_km_input.text() or 0.0),
+                "start_chainage": float(self.start_ch_input.text() or 0.0),
+                "portal_side": self.portal_side_combo.currentText(),
+                "wall_type": self.wall_type_combo.currentText(),
+                "thickness": self.wall_thickness_input.value(),
+                "auto_height": self.auto_height_cb.isChecked(),
+                "height": self.wall_height_input.value(),
+                "offset": self.wall_offset_input.value(),
+                "tunnel_id": t_id,
+                "layer_name": l_name,
+                "source_layer_folder": t_obj.get("source_layer_folder", "")
+            }
+            return data
+        except ValueError:
+            return None
+###############################################################
 ### Mayur Wakhare 7-7-2026 pipe dailog box tunnel
 class WaterPipeDialog(QDialog):
     def __init__(self, parent=None):
