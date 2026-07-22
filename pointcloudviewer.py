@@ -36224,6 +36224,13 @@ class PointCloudViewer(ApplicationUI):
                 loaded_any = True
         except Exception as e:
             self.message_text.append(f"Error loading tunnel lights: {str(e)}")
+        
+        try:
+            if self._load_tunnel_walls_from_json(layer_path):
+                loaded_any = True
+        except Exception as e:
+            self.message_text.append(f"Error loading tunnel walls: {str(e)}")
+
    ####### Mayur Wakhare 4-7-2026 Json fire tunnel          
         try:
             if self._load_fire_extinguishers_from_json(layer_path):
@@ -45967,3 +45974,297 @@ class PointCloudViewer(ApplicationUI):
 # #                                                                       *** END OF APPLICAATION ***
 # # ====================================================================================================================================================================
 ####################################################
+### Mayur 22-7-2026 tunnnel wall json
+    def _sync_tunnel_walls_to_json(self, target_layer=None):
+        import os, json
+        layer_folder = target_layer if target_layer else getattr(self, 'current_design_layer_path', None)
+        if not layer_folder or not os.path.exists(layer_folder):
+            return
+
+        config_path = os.path.join(layer_folder, "design_construction_config.json")
+        try:
+            cfg_data = {}
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    cfg_data = json.load(f)
+            
+            if not hasattr(self, 'tunnel_walls'):
+                self.tunnel_walls = []
+                
+            cfg_data["tunnel_walls"] = self.tunnel_walls
+            
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(cfg_data, f, indent=4)
+        except Exception as e:
+            print(f"Error syncing tunnel walls to JSON: {e}")
+
+    def _load_tunnel_walls_from_json(self, layer_path):
+        import os, json
+        if not layer_path or not os.path.exists(layer_path):
+            return False
+            
+        config_path = os.path.join(layer_path, "design_construction_config.json")
+        if not os.path.exists(config_path):
+            return False
+            
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                cfg_data = json.load(f)
+                
+            walls_data = cfg_data.get("tunnel_walls", [])
+            if not walls_data:
+                return False
+                
+            if not hasattr(self, 'tunnel_walls'):
+                self.tunnel_walls = []
+                
+            loaded_any = False
+            for w_data in walls_data:
+                w_data["source_layer_folder"] = layer_path
+                self._place_tunnel_wall_from_arc_points(w_data)
+                loaded_any = True
+                
+            return loaded_any
+        except Exception as e:
+            print(f"Error loading tunnel walls from JSON: {e}")
+            return False
+
+    def _place_tunnel_wall_from_arc_points(self, data):
+        import os, json
+        import vtk
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox
+
+        if data.get("wall_type") != "Concrete":
+            QMessageBox.information(self, "Coming Soon", f"{data.get('wall_type')} wall type is coming soon!")
+            return
+
+        source_layer_folder = data.get("source_layer_folder")
+        if not source_layer_folder or not os.path.exists(source_layer_folder):
+            print("Error: Source layer folder not found.")
+            return
+
+        config_path = os.path.join(source_layer_folder, "design_construction_config.json")
+        if not os.path.exists(config_path):
+            print("Error: Design config not found.")
+            return
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                cfg_data = json.load(f)
+            
+            tunnel_config = cfg_data.get("design", {}).get("tunnel", {})
+            arc_points = tunnel_config.get("arc_points", [])
+            
+            if not arc_points and "zero_line_config" in cfg_data.get("design", {}):
+                arc_points = cfg_data["design"]["zero_line_config"].get("arc_points", [])
+
+            if len(arc_points) < 3:
+                print("Error: Tunnel arc points not found or incomplete.")
+                return
+
+            pts = [np.array(p, dtype=float) for p in arc_points[:3]]
+            crown_idx = np.argmax([p[2] for p in pts])
+            crown_pt = pts[crown_idx]
+            
+            base_pts = [pts[i] for i in range(3) if i != crown_idx]
+            p0 = base_pts[0]
+            p2 = base_pts[1]
+
+            base_center = (p0 + p2) / 2.0
+            
+            up_vector = np.array([0.0, 0.0, 1.0])
+
+            v_across = p2 - p0
+            v_across[2] = 0.0
+            norm_across = np.linalg.norm(v_across)
+            if norm_across > 0:
+                x_axis = v_across / norm_across
+            else:
+                x_axis = np.array([1.0, 0.0, 0.0])
+
+            portal_normal = np.cross(x_axis, up_vector)
+            norm_length = np.linalg.norm(portal_normal)
+            if norm_length > 0:
+                portal_normal = portal_normal / norm_length
+            else:
+                portal_normal = np.array([0.0, 1.0, 0.0])
+
+            wall_width_val = float(data.get("wall_width", 10.0))
+            wall_thickness = float(data.get("thickness", 0.5))
+
+            tunnel_height = np.linalg.norm(crown_pt - base_center)
+            
+            if data.get("auto_height"):
+                wall_height_val = tunnel_height
+            else:
+                wall_height_val = float(data.get("height", 5.0))
+
+            wall_center = base_center + portal_normal * (wall_thickness / 2.0)
+
+            # --- Match 3D Tunnel Mesh Profile (Circle Fit) ---
+            pts_local = []
+            for p in [p0, crown_pt, p2]:
+                delta = p - base_center
+                u_val = float(np.dot(delta, x_axis))
+                v_val = float(np.dot(delta, up_vector))
+                pts_local.append((u_val, v_val))
+                
+            u1, v1 = pts_local[0]
+            u2, v2 = pts_local[1]
+            u3, v3 = pts_local[2]
+
+            A_mat = np.array([
+                [2.0 * u1, 2.0 * v1, 1.0],
+                [2.0 * u2, 2.0 * v2, 1.0],
+                [2.0 * u3, 2.0 * v3, 1.0],
+            ], dtype=float)
+            B_vec = np.array([
+                u1**2 + v1**2,
+                u2**2 + v2**2,
+                u3**2 + v3**2,
+            ], dtype=float)
+
+            det_val = np.linalg.det(A_mat)
+            if abs(det_val) < 1e-12:
+                uc = (u1 + u3) / 2.0
+                vc = 0.0
+                R  = max(abs(u3 - u1) / 2.0, 3.0)
+            else:
+                sol = np.linalg.solve(A_mat, B_vec)
+                uc = sol[0]
+                vc = sol[1]
+                discriminant = sol[2] + uc**2 + vc**2
+                R = np.sqrt(discriminant) if discriminant > 0 else 5.0
+                
+            if R < 0.1: R = 3.0
+            elif R > 500: R = 10.0
+
+            # --- Create Wall with Arch Cutout using 2D Polygon Extrusion ---
+            points = vtk.vtkPoints()
+            polygon = vtk.vtkPolygon()
+            
+            num_arch_pts = 40
+            polygon.GetPointIds().SetNumberOfIds(4 + num_arch_pts)
+            
+            idx = 0
+            # 1. Outer boundary (Counter-Clockwise)
+            points.InsertNextPoint(wall_width_val / 2.0, 0.0, 0.0)
+            polygon.GetPointIds().SetId(idx, idx); idx += 1
+            points.InsertNextPoint(wall_width_val / 2.0, wall_height_val, 0.0)
+            polygon.GetPointIds().SetId(idx, idx); idx += 1
+            points.InsertNextPoint(-wall_width_val / 2.0, wall_height_val, 0.0)
+            polygon.GetPointIds().SetId(idx, idx); idx += 1
+            points.InsertNextPoint(-wall_width_val / 2.0, 0.0, 0.0)
+            polygon.GetPointIds().SetId(idx, idx); idx += 1
+            
+            # 2. Inner boundary (Arch cutout, Clockwise from left to right)
+            for j in range(num_arch_pts):
+                t_val = j / float(num_arch_pts - 1)
+                theta = np.pi - t_val * np.pi
+                
+                px = uc + R * np.cos(theta)
+                py = 0.0 + R * np.sin(theta)
+                
+                if py > wall_height_val:
+                    py = wall_height_val
+                
+                half_w = wall_width_val / 2.0
+                if px > half_w:
+                    px = half_w
+                elif px < -half_w:
+                    px = -half_w
+
+                points.InsertNextPoint(px, py, 0.0)
+                polygon.GetPointIds().SetId(idx, idx); idx += 1
+                
+            cells = vtk.vtkCellArray()
+            cells.InsertNextCell(polygon)
+            
+            polyData2D = vtk.vtkPolyData()
+            polyData2D.SetPoints(points)
+            polyData2D.SetPolys(cells)
+            
+            triangulator = vtk.vtkTriangleFilter()
+            triangulator.SetInputData(polyData2D)
+            triangulator.Update()
+            
+            extrusion = vtk.vtkLinearExtrusionFilter()
+            extrusion.SetInputConnection(triangulator.GetOutputPort())
+            extrusion.SetExtrusionTypeToNormalExtrusion()
+            extrusion.SetVector(0, 0, 1) # Extrude along Z-axis
+            extrusion.SetScaleFactor(wall_thickness)
+            extrusion.Update()
+            
+            center_transform = vtk.vtkTransform()
+            center_transform.Translate(0, 0, -wall_thickness / 2.0)
+            
+            center_filter = vtk.vtkTransformPolyDataFilter()
+            center_filter.SetInputConnection(extrusion.GetOutputPort())
+            center_filter.SetTransform(center_transform)
+            center_filter.Update()
+
+            matrix = vtk.vtkMatrix4x4()
+            for i in range(3):
+                matrix.SetElement(i, 0, x_axis[i])
+                matrix.SetElement(i, 1, up_vector[i])
+                matrix.SetElement(i, 2, portal_normal[i])
+                matrix.SetElement(i, 3, wall_center[i])
+
+            world_transform = vtk.vtkTransform()
+            world_transform.SetMatrix(matrix)
+
+            world_filter = vtk.vtkTransformPolyDataFilter()
+            world_filter.SetInputConnection(center_filter.GetOutputPort())
+            world_filter.SetTransform(world_transform)
+            world_filter.Update()
+
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputConnection(world_filter.GetOutputPort())
+
+            actor = vtk.vtkActor()
+            actor.SetMapper(mapper)
+            actor.GetProperty().SetColor(0.7, 0.7, 0.7)
+
+            if hasattr(self, 'renderer'):
+                self.renderer.AddActor(actor)
+                if hasattr(self, 'vtk_widget'):
+                    self.vtk_widget.GetRenderWindow().Render()
+                    
+            if not hasattr(self, 'tunnel_walls'):
+                self.tunnel_walls = []
+            
+            # Avoid adding duplicates if loading
+            duplicate = False
+            for w in self.tunnel_walls:
+                if w.get('tunnel_id') == data.get('tunnel_id') and w.get('source_layer_folder') == data.get('source_layer_folder'):
+                    duplicate = True
+                    break
+                    
+            if not duplicate:
+                self.tunnel_walls.append(data)
+                
+            if hasattr(self, 'message_text'):
+                self.message_text.append(f"✅ Tunnel Wall placed for tunnel {data.get('tunnel_id')}")
+
+        except Exception as e:
+            print(f"Error placing tunnel wall: {e}")
+            #######################################################################################
+    ## Mayur 21-7-2026 tunnel wall
+    def open_tunnel_wall_dialog(self):
+        """Open the Tunnel Wall dialog."""
+        from dialogs import TunnelWallDialog
+        from PyQt5.QtWidgets import QDialog
+        import json
+        
+        dialog = TunnelWallDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data:
+                if hasattr(self, 'output_list'):
+                    self.output_list.addItem(f"✅ Tunnel Wall Data: {json.dumps(data)}")
+                print(f"Tunnel Wall Data: {data}")
+                self._place_tunnel_wall_from_arc_points(data)
+                layer_folder = data.get("source_layer_folder")
+                if layer_folder:
+                    self._sync_tunnel_walls_to_json(layer_folder)
