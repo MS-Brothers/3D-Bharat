@@ -25973,6 +25973,9 @@ class PointCloudViewer(ApplicationUI):
                     # Construct a mock single light data dictionary
                     single_data = {
                         "light_mode": "single",
+                        "tunnel_id": data.get("tunnel_id", "Unknown"),
+                        "layer_name": data.get("layer_name", "Unknown"),
+                        "source_layer_folder": data.get("source_layer_folder", ""),
                         "km": float(current_abs // 1000),
                         "chainage": float(current_abs % 1000),
                         "interval": interval,
@@ -26006,21 +26009,8 @@ class PointCloudViewer(ApplicationUI):
 ############# Mayur Wakhare 3-7-2026 Tunnel light json
     def _sync_tunnel_lights_to_json(self):
         """Save all current tunnel lights to the master JSON file."""
-        layer_folder = getattr(self, 'current_design_layer_path', None)
-        if not layer_folder or not os.path.exists(layer_folder):
-            return
-            
         from json_manager import DesignConstructionManager
-        json_path = DesignConstructionManager.get_master_path(layer_folder)
-        print("-" * 39)
-        print("Asset Type: Tunnel Light")
-        print(f"Current Project Directory:\n{layer_folder}")
-        print(f"Current JSON Path:\n{json_path}")
-        print("-" * 39)
-        
-        master_data = DesignConstructionManager.load_master(layer_folder)
-        
-        lights_data = []
+        import os
         
         # Combine single groups and batch groups
         all_groups = []
@@ -26031,9 +26021,19 @@ class PointCloudViewer(ApplicationUI):
             for batch in self.multiple_tunnel_light_batches:
                 all_groups.extend(batch)
                 
+        # Group lights by their target source layer folder
+        layer_lights_map = {}
+        
         for group in all_groups:
-            # Strip redundant fields from config before serializing
             config = dict(group.get("config", {}))
+            target_layer = config.get("source_layer_folder")
+            
+            if not target_layer or not os.path.exists(target_layer):
+                continue
+                
+            if target_layer not in layer_lights_map:
+                layer_lights_map[target_layer] = []
+                
             config.pop("verified", None)
             config.pop("created_at", None)
             light_json = {
@@ -26044,10 +26044,30 @@ class PointCloudViewer(ApplicationUI):
                 "dir_vec": group.get("dir_vec"),
                 "scale": [1.0, 1.0, 1.0] # Fulfilling scale requirement
             }
-            lights_data.append(light_json)
+            layer_lights_map[target_layer].append(light_json)
+                
+        for layer_folder, lights_data in layer_lights_map.items():
+            if not layer_folder or not os.path.exists(layer_folder):
+                continue
+                
+            json_path = DesignConstructionManager.get_master_path(layer_folder)
             
-        master_data["tunnel_lights"] = lights_data
-        DesignConstructionManager.save_master(layer_folder, master_data)
+            if lights_data:
+                first_light = lights_data[0]
+                print("\n=== TUNNEL LIGHT JSON SAVE DEBUG ===")
+                print(f"Selected Tunnel ID: {first_light.get('config', {}).get('tunnel_id', 'Unknown')}")
+                print(f"Selected Layer: {first_light.get('config', {}).get('layer_name', 'Unknown')}")
+                print(f"Source Layer Folder: {first_light.get('config', {}).get('source_layer_folder', 'Unknown')}")
+                print(f"Target JSON Path: {json_path}")
+                print(f"JSON Exists: {'Yes' if os.path.exists(json_path) else 'No'}")
+                print(f"Tunnel ID in JSON: {first_light.get('config', {}).get('tunnel_id', 'Unknown')}")
+                print(f"Layer Name in JSON: {os.path.basename(layer_folder)}")
+                print(f"Appending to tunnel_lights count: {len(lights_data)}")
+                print("===================================\n")
+                
+            master_data = DesignConstructionManager.load_master(layer_folder)
+            master_data["tunnel_lights"] = lights_data
+            DesignConstructionManager.save_master(layer_folder, master_data)
 
     def _load_tunnel_lights_from_json(self, layer_path):
         """Recreate all tunnel lights from the loaded JSON array."""
@@ -26652,6 +26672,7 @@ class PointCloudViewer(ApplicationUI):
         print("[JSON] Underpass CCTVs saved successfully.")
 
 #########################################################################################################
+  ## Mayur Tunnel Light place
     def _place_single_tunnel_light(self, data):
         """Place exactly ONE tunnel light actor on the semi-circular arc at the specified chainage.
 
@@ -26677,11 +26698,14 @@ class PointCloudViewer(ApplicationUI):
             if "asset_name" not in data:
                 data["asset_name"] = "TunnelLight"
                 
-            layer_folder = getattr(self, 'current_design_layer_path', None)
-            if "layer_id" not in data:
-                data["layer_id"] = os.path.basename(layer_folder) if layer_folder else "unknown_layer"
+            layer_folder = data.get("source_layer_folder")
+            if not layer_folder or not os.path.exists(layer_folder):
+                layer_folder = getattr(self, 'current_design_layer_path', None)
                 
-            if "tunnel_id" not in data:
+            if "layer_id" not in data:
+                data["layer_id"] = data.get("layer_name") if data.get("layer_name") and data.get("layer_name") != "Unknown" else (os.path.basename(layer_folder) if layer_folder else "unknown_layer")
+                
+            if "tunnel_id" not in data or data["tunnel_id"] == "Unknown":
                 tunnel_id_val = "tunnel_1"
                 if layer_folder and os.path.exists(layer_folder):
                     try:
@@ -26709,16 +26733,35 @@ class PointCloudViewer(ApplicationUI):
                 # ════════════════════════════════════════════════════════════
                 # STEP 1 — Load saved tunnel configuration
                 # ════════════════════════════════════════════════════════════
-                layer_folder = getattr(self, 'current_design_layer_path', None)
+                layer_folder = data.get("source_layer_folder")
+                if not layer_folder or not os.path.exists(layer_folder):
+                    layer_folder = getattr(self, 'current_design_layer_path', None)
+                    
+                print("="*60)
+                print("[TunnelLight Placement DEBUG]")
+                print(f"Selected Tunnel ID (from dialog data): {data.get('tunnel_id')}")
+                print(f"Selected Layer (from dialog data): {data.get('layer_name')}")
+                print(f"Source JSON Path: {os.path.join(layer_folder, 'design_construction_config.json') if layer_folder else 'None'}")
+                print(f"Tunnel ID actually used for placement: {data.get('tunnel_id')}")
+                print(f"Source Layer actually used for placement: {layer_folder}")
+                print("="*60)
+                    
                 if not layer_folder or not os.path.exists(layer_folder):
                     QMessageBox.warning(self, "Error", "No active design layer folder found.")
                     return
 
                 master_data = DesignConstructionManager.load_master(layer_folder)
                 tunnel_config = master_data.get("design", {}).get("tunnel")
+                
+                # If a specific tunnel ID is provided, but it's the fallback tunnel, load zero_line_config
+                if data.get("tunnel_id") == "fallback_tunnel":
+                    zc = master_data.get("design", {}).get("zero_line_config")
+                    if zc:
+                        tunnel_config = {"id": "fallback_tunnel", "arc_points": zc.get("arc_points", [])}
+                        
                 if not tunnel_config:
                     QMessageBox.warning(self, "No Tunnel", 
-                        "No tunnel configuration found in the design layer.\n"
+                        "No tunnel configuration found in the selected design layer.\n"
                         "Please create a tunnel first using Tunnel Configuration.")
                     return
 
@@ -26748,11 +26791,11 @@ class PointCloudViewer(ApplicationUI):
 
                 # Get a single path sample at the target chainage for the cross-section frame
                 # Use a tiny range around the chainage to get one sample
-                path_samples = self.get_curve_aware_path(abs_chainage, abs_chainage, step=1.0)
+                path_samples = self.get_curve_aware_path(abs_chainage, abs_chainage, step=1.0, target_layer=layer_folder)
                 if not path_samples:
                     # Fallback: try a slightly wider range
                     path_samples = self.get_curve_aware_path(
-                        abs_chainage - 0.5, abs_chainage + 0.5, step=0.5)
+                        abs_chainage - 0.5, abs_chainage + 0.5, step=0.5, target_layer=layer_folder)
 
                 if not path_samples:
                     QMessageBox.warning(self, "Error",
@@ -26768,12 +26811,9 @@ class PointCloudViewer(ApplicationUI):
                       f"perp={perp_vec}, dir={dir_vec}")
 
                 # ════════════════════════════════════════════════════════════
-                # STEP 3 — Fit circle through the 3 arc points
-                #          (Reuses the same logic as draw_tunnel_actor STEP 4)
+                # STEP 3 — Reconstruct Tunnel Arch from 3 Arc Points
                 # ════════════════════════════════════════════════════════════
-                # Find the path reference frame nearest to the first arc point
-                # to project arc points into local (u, v) coordinates
-                pts_3d = self.get_road_baseline_points_3d()
+                pts_3d = self.get_road_baseline_points_3d(target_layer=layer_folder)
                 if not pts_3d:
                     QMessageBox.warning(self, "Error", "No road baseline data found.")
                     return
@@ -26790,7 +26830,7 @@ class PointCloudViewer(ApplicationUI):
                 baseline_min_ch = min(p[0] for p in pts_3d)
                 baseline_max_ch = max(p[0] for p in pts_3d)
                 arc_path_samples = self.get_curve_aware_path(
-                    baseline_min_ch, baseline_max_ch, step=2.0)
+                    baseline_min_ch, baseline_max_ch, step=2.0, target_layer=layer_folder)
 
                 # Find closest path sample to first arc point
                 best_ref_idx = 0
@@ -26828,50 +26868,24 @@ class PointCloudViewer(ApplicationUI):
                     ref_perp = ref_perp / rp_len
                 else:
                     ref_perp = np.array([0.0, 1.0, 0.0])
-
-                # Project each arc point to (u, v) local cross-section coordinates
-                pts_local = []
-                for pt_raw in arc_points_raw[:3]:
-                    P = np.array(pt_raw, dtype=float)
-                    delta = P - ref_pos
-                    u_val = float(np.dot(delta, ref_perp))
-                    v_val = float(np.dot(delta, up_vec))
-                    pts_local.append((u_val, v_val))
-
-                # Fit circle through 3 points: (u-uc)² + (v-vc)² = R²
-                u1, v1 = pts_local[0]
-                u2, v2 = pts_local[1]
-                u3, v3 = pts_local[2]
-
-                A_mat = np.array([
-                    [2.0 * u1, 2.0 * v1, 1.0],
-                    [2.0 * u2, 2.0 * v2, 1.0],
-                    [2.0 * u3, 2.0 * v3, 1.0],
-                ], dtype=float)
-                B_vec = np.array([
-                    u1**2 + v1**2,
-                    u2**2 + v2**2,
-                    u3**2 + v3**2,
-                ], dtype=float)
-
-                det_val = np.linalg.det(A_mat)
-                if abs(det_val) < 1e-12:
-                    uc = (u1 + u3) / 2.0
-                    vc = 0.0
-                    R = max(abs(u3 - u1) / 2.0, 3.0)
-                    print(f"[TunnelLight] Points collinear, fallback: center=({uc:.3f},{vc:.3f}), R={R:.3f}")
-                else:
-                    sol = np.linalg.solve(A_mat, B_vec)
-                    uc = sol[0]
-                    vc = sol[1]
-                    discriminant = sol[2] + uc**2 + vc**2
-                    R = np.sqrt(discriminant) if discriminant > 0 else 5.0
-
-                # Sanity-check radius
-                if R < 0.1:
-                    R = 3.0
-                elif R > 500:
-                    R = 10.0
+                    
+                # Use the 3 arc points as the single source of truth for the tunnel profile
+                pts = [np.array(p, dtype=float) for p in arc_points_raw[:3]]
+                crown_idx = np.argmax([p[2] for p in pts])
+                crown_pt = pts[crown_idx]
+                
+                base_pts = [pts[i] for i in range(3) if i != crown_idx]
+                p0 = base_pts[0]
+                p2 = base_pts[1]
+                
+                base_center_3d = (p0 + p2) / 2.0
+                tunnel_width = np.linalg.norm(p2 - p0)
+                R = tunnel_width / 2.0
+                
+                # Compute local offset of the base center from the path reference frame
+                delta = base_center_3d - ref_pos
+                uc = float(np.dot(delta, ref_perp))
+                vc = float(np.dot(delta, up_vec))
 
                 print(f"[TunnelLight] Circle: center=({uc:.3f}, {vc:.3f}), R={R:.3f}m")
 

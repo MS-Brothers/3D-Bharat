@@ -5844,7 +5844,7 @@ class MergerLayerConfigDialog(QDialog):
         self.verified_coordinates = {}
         
         # Tolerance for coordinate matching (in meters)
-        self.coordinate_tolerance = 20.0
+        self.coordinate_tolerance = 100.0
 
         # Add dictionary to store loaded baseline data for each layer
         self.loaded_baseline_data = {}
@@ -18476,6 +18476,16 @@ class TunnelLightDialog(QDialog):
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1565C0;")
         layout.addWidget(title)
 
+        # ── Tunnel Selection ──
+        tunnel_sel_group = QGroupBox("Tunnel Selection")
+        tunnel_sel_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CCC; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
+        tunnel_sel_layout = QHBoxLayout(tunnel_sel_group)
+        tunnel_sel_layout.addWidget(QLabel("Tunnel ID:"))
+        self.tunnel_combo = QComboBox()
+        self.tunnel_combo.setStyleSheet("padding: 4px; border: 1px solid #BBB; border-radius: 4px;")
+        tunnel_sel_layout.addWidget(self.tunnel_combo)
+        layout.addWidget(tunnel_sel_group)
+
         # Radio buttons
         self.single_radio = QRadioButton("Single Light")
         self.multiple_radio = QRadioButton("Multiple Lights")
@@ -18727,6 +18737,90 @@ class TunnelLightDialog(QDialog):
             self.multi_status_label.setText("No active tunnel found.")
 #########################################################################
         self.on_mode_toggled(self.single_radio.isChecked())
+
+        self.available_tunnels = []
+        self._populate_tunnels()
+
+    def _populate_tunnels(self):
+        import os
+        import json
+        if not self.parent:
+            return
+
+        active_layer_paths = list(getattr(self.parent, '_per_layer_actors', {}).keys())
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        if layer_folder and os.path.exists(layer_folder) and layer_folder not in active_layer_paths:
+            active_layer_paths.append(layer_folder)
+
+        subfolder = getattr(self.parent, 'current_subfolder_type', 'designs')
+        config_paths = []
+
+        for p in active_layer_paths:
+            if not p or not isinstance(p, str) or not os.path.exists(p):
+                continue
+            is_merger = False
+            if "merger" in p.lower() or subfolder == "merger":
+                merger_jsons = [f for f in os.listdir(p) if f.endswith('.json')]
+                for mj in merger_jsons:
+                    try:
+                        with open(os.path.join(p, mj), 'r', encoding='utf-8') as f:
+                            merger_data = json.load(f)
+                        if "merger_points" in merger_data:
+                            is_merger = True
+                            for pt in merger_data.get("merger_points", []):
+                                def add_cfg(json_file_path):
+                                    if json_file_path:
+                                        d_path = os.path.dirname(json_file_path)
+                                        cfg = os.path.join(d_path, 'design_construction_config.json')
+                                        if os.path.exists(cfg) and cfg not in config_paths:
+                                            config_paths.append(cfg)
+                                add_cfg(pt.get("primary_json_path"))
+                                for lyr in pt.get("layers", []):
+                                    add_cfg(lyr.get("json_path"))
+                    except Exception:
+                        pass
+            if not is_merger:
+                cfg = os.path.join(p, 'design_construction_config.json')
+                if os.path.exists(cfg) and cfg not in config_paths:
+                    config_paths.append(cfg)
+
+        for cfg_path in config_paths:
+            try:
+                with open(cfg_path, 'r', encoding='utf-8') as f:
+                    cfg_data = json.load(f)
+                    tunnel_config = cfg_data.get("design", {}).get("tunnel")
+                    if tunnel_config:
+                        tid = tunnel_config.get("tunnel_id", tunnel_config.get("id", "Unknown"))
+                        layer_name = os.path.basename(os.path.dirname(cfg_path))
+                        tunnel_config["source_layer_folder"] = os.path.dirname(cfg_path)
+                        self.available_tunnels.append((tunnel_config, layer_name, tid))
+                    else:
+                        zc = cfg_data.get("design", {}).get("zero_line_config")
+                        if zc:
+                            tid = "fallback_tunnel"
+                            layer_name = os.path.basename(os.path.dirname(cfg_path))
+                            fake_tunnel = {"id": tid, "arc_points": zc.get("arc_points", []),
+                                           "start_km": zc.get("point1", {}).get("from_km", 0),
+                                           "start_chainage": zc.get("point1", {}).get("from_chainage", 0),
+                                           "end_km": zc.get("point2", {}).get("to_km", 0),
+                                           "end_chainage": zc.get("point2", {}).get("to_chainage", 0),
+                                           "road_width": zc.get("road_width", 10.0),
+                                           "source_layer_folder": os.path.dirname(cfg_path)}
+                            self.available_tunnels.append((fake_tunnel, layer_name, tid))
+            except Exception as e:
+                pass
+
+        unique_tunnels = {}
+        for t, layer, tid in self.available_tunnels:
+            key = (layer, tid)
+            if key not in unique_tunnels:
+                unique_tunnels[key] = (t, layer, tid)
+                
+        self.available_tunnels = list(unique_tunnels.values())
+
+        self.tunnel_combo.clear()
+        for t, layer, tid in self.available_tunnels:
+            self.tunnel_combo.addItem(f"{tid} (Layer: {layer})")
 
     def update_undo_state(self):
         # Single Light Undo
@@ -19116,7 +19210,24 @@ class TunnelLightDialog(QDialog):
             self.accept()
 
     def get_data(self):
-        data = {"light_mode": self.selected_option}
+        try:
+            idx = self.tunnel_combo.currentIndex()
+            t_id = "Unknown"
+            l_name = "Unknown"
+            t_obj = {}
+            if idx >= 0 and idx < len(getattr(self, 'available_tunnels', [])):
+                t_obj, l_name, t_id = self.available_tunnels[idx]
+        except Exception:
+            t_id = "Unknown"
+            l_name = "Unknown"
+            t_obj = {}
+
+        data = {
+            "light_mode": self.selected_option,
+            "tunnel_id": t_id,
+            "layer_name": l_name,
+            "source_layer_folder": t_obj.get("source_layer_folder", "")
+        }
         if self.selected_option == "single":
             data["km"] = float(self.km_input.text() or 0.0)
             data["chainage"] = float(self.chainage_input.text() or 0.0)
@@ -19140,6 +19251,13 @@ class TunnelLightDialog(QDialog):
                     dist = float(d["input"].text() or 0.0)
                     configs.append({"arc_reference": arc_ref, "distance": dist})
                 data["multi_configs"] = configs
+                
+        print(f"[Dialog get_data] Dropdown current text: {self.tunnel_combo.currentText()}")
+        print(f"[Dialog get_data] Dropdown current index: {self.tunnel_combo.currentIndex()}")
+        print(f"[Dialog get_data] Tunnel ID: {data.get('tunnel_id')}")
+        print(f"[Dialog get_data] Source Layer: {data.get('layer_name')}")
+        print(f"[Dialog get_data] Source Layer Folder: {data.get('source_layer_folder')}")
+        print(f"[Dialog get_data] Final Data Dictionary: {data}")
         return data
 #####################################################################
 ### Mayur Wakhare 3-7-2026 Tunnel Fire Extinguisher Dialog Box ###
@@ -22208,7 +22326,24 @@ class UnderPassLightDialog(QDialog):
             self.accept()
 
     def get_data(self):
-        data = {"light_mode": self.selected_option}
+        try:
+            idx = self.tunnel_combo.currentIndex()
+            t_id = "Unknown"
+            l_name = "Unknown"
+            t_obj = {}
+            if idx >= 0 and idx < len(self.available_tunnels):
+                t_obj, l_name, t_id = self.available_tunnels[idx]
+        except Exception:
+            t_id = "Unknown"
+            l_name = "Unknown"
+            t_obj = {}
+
+        data = {
+            "light_mode": self.selected_option,
+            "tunnel_id": t_id,
+            "layer_name": l_name,
+            "source_layer_folder": t_obj.get("source_layer_folder", "")
+        }
         if self.selected_option == "single":
             data["km"] = float(self.km_input.text() or 0.0)
             data["chainage"] = float(self.chainage_input.text() or 0.0)
