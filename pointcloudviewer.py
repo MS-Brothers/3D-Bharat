@@ -45991,7 +45991,23 @@ class PointCloudViewer(ApplicationUI):
             if not hasattr(self, 'tunnel_walls'):
                 self.tunnel_walls = []
                 
-            cfg_data["tunnel_walls"] = self.tunnel_walls
+            layer_walls = []
+            for w in self.tunnel_walls:
+                source_folder = w.get("source_layer_folder", "")
+                if source_folder and os.path.normpath(source_folder) == os.path.normpath(layer_folder):
+                    layer_walls.append(w)
+                    
+            cfg_data["tunnel_walls"] = layer_walls
+            
+            print("--- Debug JSON Save ---")
+            for w in layer_walls:
+                print(f"Selected Wall Position: {w.get('wall_position')}")
+                print(f"Selected Tunnel ID: {w.get('tunnel_id')}")
+                print(f"Selected Layer: {w.get('layer_name')}")
+                print(f"Source Layer Folder: {w.get('source_layer_folder')}")
+            print(f"Final JSON Object written to {config_path}:")
+            print(json.dumps(cfg_data.get("tunnel_walls", []), indent=4))
+            print("-----------------------")
             
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(cfg_data, f, indent=4)
@@ -46049,6 +46065,10 @@ class PointCloudViewer(ApplicationUI):
             print("Error: Design config not found.")
             return
 
+        wall_position = data.get("wall_position", data.get("portal_side", "Start"))
+        data["wall_position"] = wall_position
+        data["portal_side"] = wall_position  # keep backwards compatibility if anything else reads this
+
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 cfg_data = json.load(f)
@@ -46100,8 +46120,6 @@ class PointCloudViewer(ApplicationUI):
             else:
                 wall_height_val = float(data.get("height", 5.0))
 
-            wall_center = base_center + portal_normal * (wall_thickness / 2.0)
-
             # --- Match 3D Tunnel Mesh Profile (Circle Fit) ---
             pts_local = []
             for p in [p0, crown_pt, p2]:
@@ -46109,6 +46127,40 @@ class PointCloudViewer(ApplicationUI):
                 u_val = float(np.dot(delta, x_axis))
                 v_val = float(np.dot(delta, up_vector))
                 pts_local.append((u_val, v_val))
+
+            if wall_position == "End":
+                end_km = tunnel_config.get("end_km")
+                end_chainage = tunnel_config.get("end_chainage")
+                if end_km is None and "zero_line_config" in cfg_data.get("design", {}):
+                    zc = cfg_data["design"]["zero_line_config"]
+                    end_km = zc.get("point2", {}).get("to_km", 0)
+                    end_chainage = zc.get("point2", {}).get("to_chainage", 0)
+                
+                if end_km is None: end_km = 0
+                if end_chainage is None: end_chainage = 0
+                
+                end_abs = float(end_km) * 1000.0 + float(end_chainage)
+                
+                path_samples = self.get_curve_aware_path(end_abs, end_abs, step=1.0, target_layer=source_layer_folder)
+                if not path_samples:
+                    path_samples = self.get_curve_aware_path(end_abs - 0.5, end_abs + 0.5, step=0.5, target_layer=source_layer_folder)
+                
+                if path_samples:
+                    _, pos_xyz, perp_vec, dir_vec = path_samples[-1]
+                    base_center = np.array(pos_xyz, dtype=float)
+                    
+                    x_axis = np.array(perp_vec, dtype=float)
+                    norm_x = np.linalg.norm(x_axis)
+                    if norm_x > 0: x_axis /= norm_x
+                    
+                    portal_normal = np.array(dir_vec, dtype=float)
+                    norm_p = np.linalg.norm(portal_normal)
+                    if norm_p > 0: portal_normal /= norm_p
+                else:
+                    print(f"Error: Could not locate end chainage {end_abs} for End Wall.")
+                    return
+
+            wall_center = base_center + portal_normal * (wall_thickness / 2.0)
                 
             u1, v1 = pts_local[0]
             u2, v2 = pts_local[1]
@@ -46237,7 +46289,9 @@ class PointCloudViewer(ApplicationUI):
             # Avoid adding duplicates if loading
             duplicate = False
             for w in self.tunnel_walls:
-                if w.get('tunnel_id') == data.get('tunnel_id') and w.get('source_layer_folder') == data.get('source_layer_folder'):
+                if (w.get('tunnel_id') == data.get('tunnel_id') and 
+                    w.get('source_layer_folder') == data.get('source_layer_folder') and
+                    w.get('wall_position') == data.get('wall_position')):
                     duplicate = True
                     break
                     

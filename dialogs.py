@@ -23114,6 +23114,7 @@ class TunnelWallDialog(QDialog):
                 "start_km": 0.0,
                 "start_chainage": 0.0,
                 "portal_side": self.wall_pos_combo.currentText(),
+                "wall_position": self.wall_pos_combo.currentText(),
                 "wall_type": self.wall_type_combo.currentText(),
                 "thickness": self.wall_thickness_input.value(),
                 "wall_width": self.wall_width_input.value(),
