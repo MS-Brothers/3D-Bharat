@@ -25485,89 +25485,59 @@ class PointCloudViewer(ApplicationUI):
         pipe_rgb = [0.8, 0.1, 0.1] if color_str == "fire_red" else [0.2, 0.6, 1.0]
         bracket_rgb = [0.3, 0.3, 0.3]
         
-        layer_folder = getattr(self, 'current_design_layer_path', None)
-        if not layer_folder:
-            return
-            
+        tunnel_id = data.get("tunnel_id", "Unknown")
+        layer_name = data.get("layer_name", "Unknown")
+        source_layer_folder = data.get("source_layer_folder")
+        
         import os
         import json
         from json_manager import DesignConstructionManager
-        master_data = DesignConstructionManager.load_master(layer_folder)
         
-        tunnel_id = data.get("tunnel_id", "Unknown")
-        layer_name = data.get("layer_name", "Unknown")
+        target_layer_path = source_layer_folder
+        if not target_layer_path or not os.path.exists(target_layer_path):
+            target_layer_path = getattr(self, 'current_design_layer_path', None)
         
-        target_layer_path = None
-        for p in getattr(self, '_per_layer_actors', {}).keys():
-            if os.path.basename(p) == layer_name:
-                target_layer_path = p
-                break
-                
-        if not target_layer_path:
-            curr = getattr(self, 'current_design_layer_path', None)
-            if curr and os.path.basename(curr) == layer_name:
-                target_layer_path = curr
-                
         tunnel_config = None
-        if target_layer_path:
-            is_merger = False
-            subfolder = getattr(self, 'current_subfolder_type', 'designs')
-            if "merger" in target_layer_path.lower() or subfolder == "merger":
-                merger_jsons = [f for f in os.listdir(target_layer_path) if f.endswith('.json')]
-                for mj in merger_jsons:
-                    try:
-                        with open(os.path.join(target_layer_path, mj), 'r', encoding='utf-8') as f:
-                            m_data = json.load(f)
-                        if "merger_points" in m_data:
-                            is_merger = True
-                            for pt in m_data.get("merger_points", []):
-                                cfgs = [pt.get("primary_json_path")] + [l.get("json_path") for l in pt.get("layers", [])]
-                                for cfg in cfgs:
-                                    if cfg and os.path.exists(cfg):
-                                        with open(cfg, 'r', encoding='utf-8') as fcfg:
-                                            cfg_data = json.load(fcfg)
-                                        t_conf = cfg_data.get("design", {}).get("tunnel")
-                                        if not t_conf:
-                                            zc = cfg_data.get("design", {}).get("zero_line_config")
-                                            if zc:
-                                                t_conf = {"id": "fallback_tunnel", "arc_points": zc.get("arc_points", [])}
-                                        if t_conf and str(t_conf.get("tunnel_id", t_conf.get("id", "Unknown"))) == str(tunnel_id):
-                                            tunnel_config = t_conf
-                                            break
-                                if tunnel_config:
-                                    break
-                    except Exception:
-                        pass
-                        
-            if not tunnel_config and not is_merger:
-                from json_manager import DesignConstructionManager
-                target_master_data = DesignConstructionManager.load_master(target_layer_path)
-                t_conf = target_master_data.get("design", {}).get("tunnel")
-                if not t_conf:
-                    zc = target_master_data.get("design", {}).get("zero_line_config")
-                    if zc:
-                        t_conf = {"id": "fallback_tunnel", "arc_points": zc.get("arc_points", [])}
-                if t_conf and str(t_conf.get("tunnel_id", t_conf.get("id", "Unknown"))) == str(tunnel_id):
-                    tunnel_config = t_conf
+        if target_layer_path and os.path.exists(target_layer_path):
+            master_data = DesignConstructionManager.load_master(target_layer_path)
+            t_conf = master_data.get("design", {}).get("tunnel")
+            
+            if tunnel_id == "fallback_tunnel":
+                zc = master_data.get("design", {}).get("zero_line_config")
+                if zc:
+                    t_conf = {"id": "fallback_tunnel", "arc_points": zc.get("arc_points", [])}
+            elif not t_conf:
+                zc = master_data.get("design", {}).get("zero_line_config")
+                if zc:
+                    t_conf = {"id": "fallback_tunnel", "arc_points": zc.get("arc_points", [])}
+
+            if t_conf and str(t_conf.get("tunnel_id", t_conf.get("id", "Unknown"))) == str(tunnel_id):
+                tunnel_config = t_conf
 
         print("\n--- Water Pipe Placement Debug ---")
         print(f"Selected Tunnel ID: {tunnel_id}")
         print(f"Selected Layer: {layer_name}")
+        print(f"Source JSON Path: {DesignConstructionManager.get_master_path(target_layer_path) if target_layer_path else 'None'}")
         
         if not tunnel_config:
-            print("Placement Tunnel ID: None")
-            print("Placement Layer: None")
-            print("Water Pipe created for: FAILED - Tunnel not found")
+            print(f"Loaded Tunnel ID: None")
+            print(f"Loaded Arc Points: None")
+            print(f"Start/End KM & Chainage: {data.get('start_km', 0)}/{data.get('start_chainage', 0)} to {data.get('end_km', 0)}/{data.get('end_chainage', 0)}")
+            print("Generated Path Points: None")
+            print("Final Pipe Position: None")
+            print("Reason: FAILED - Tunnel not found in target layer")
             print("----------------------------------\n")
             return
             
-        print(f"Placement Tunnel ID: {tunnel_config.get('tunnel_id', tunnel_config.get('id', 'Unknown'))}")
-        print(f"Placement Layer: {layer_name}")
-        print(f"Water Pipe created for: {tunnel_id} in {layer_name}")
+        print(f"Loaded Tunnel ID: {tunnel_config.get('tunnel_id', tunnel_config.get('id', 'Unknown'))}")
+        print(f"Loaded Arc Points: {tunnel_config.get('arc_points', [])}")
+        print(f"Start/End KM & Chainage: {data.get('start_km', 0)}/{data.get('start_chainage', 0)} to {data.get('end_km', 0)}/{data.get('end_chainage', 0)}")
             
         arc_points_raw = tunnel_config.get("arc_points", [])
         if len(arc_points_raw) < 3:
-            print("Water Pipe created for: FAILED - Not enough arc points")
+            print("Generated Path Points: None")
+            print("Final Pipe Position: None")
+            print("Reason: FAILED - Not enough arc points")
             print("----------------------------------\n")
             return
             
@@ -25584,10 +25554,12 @@ class PointCloudViewer(ApplicationUI):
             if samps:
                 path_samples.append((ch, samps[0][1], samps[0][2], samps[0][3])) # ch, pos, perp, dir
                 
-        print(f"Tunnel path points count: {len(path_samples)}")
-        print("----------------------------------\n")
+        print(f"Generated Path Points: {len(path_samples)}")
         
         if len(path_samples) < 2:
+            print("Final Pipe Position: None")
+            print("Reason: FAILED - Not enough path points generated")
+            print("----------------------------------\n")
             return
             
         # Calculate tunnel circle once (using first sample)
@@ -25865,6 +25837,10 @@ class PointCloudViewer(ApplicationUI):
         if not hasattr(self, 'water_pipe_actors'):
             self.water_pipe_actors = []
         self.water_pipe_actors.extend(current_batch)
+        
+        if len(path_samples) > 0:
+            print(f"Final Pipe Position: Start={path_samples[0][1]}, End={path_samples[-1][1]}")
+            print("----------------------------------\n")
         
         self.vtk_widget.GetRenderWindow().Render()
         

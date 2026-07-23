@@ -21553,8 +21553,10 @@ class WaterPipeDialog(QDialog):
             idx = self.tunnel_combo.currentIndex()
             t_id = "Unknown"
             l_name = "Unknown"
+            source_folder = ""
             if idx >= 0 and idx < len(self.available_tunnels):
-                _, l_name, t_id = self.available_tunnels[idx]
+                t_obj, l_name, t_id = self.available_tunnels[idx]
+                source_folder = t_obj.get("source_layer_folder", "")
                 
             return {
                 "start_km": float(self.start_km_input.text() or 0.0),
@@ -21567,7 +21569,8 @@ class WaterPipeDialog(QDialog):
                 "pipe_diameter": float(self.diameter_input.text() or 500.0),
                 "pipe_color": "fire_red" if self.color_red_rb.isChecked() else "custom",
                 "tunnel_id": t_id,
-                "layer_name": l_name
+                "layer_name": l_name,
+                "source_layer_folder": source_folder
             }
         except ValueError:
             return None
