@@ -22901,6 +22901,16 @@ class TunnelWallDialog(QDialog):
         controls_layout.setContentsMargins(0, 0, 0, 0)
         self.controls_widget.setEnabled(False)
 
+        # ── Wall Position ──
+        pos_layout = QHBoxLayout()
+        pos_layout.addWidget(QLabel("Wall Position:"))
+        self.wall_pos_combo = QComboBox()
+        self.wall_pos_combo.addItems(["Start", "End"])
+        self.wall_pos_combo.setStyleSheet("padding: 4px; border: 1px solid #BBB; border-radius: 4px;")
+        pos_layout.addWidget(self.wall_pos_combo)
+        pos_layout.addStretch()
+        controls_layout.addLayout(pos_layout)
+
         # ── Wall Settings ──
         wall_settings_group = QGroupBox("Wall Settings")
         wall_settings_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CCC; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
@@ -23103,7 +23113,7 @@ class TunnelWallDialog(QDialog):
             data = {
                 "start_km": 0.0,
                 "start_chainage": 0.0,
-                "portal_side": "Start Portal",
+                "portal_side": self.wall_pos_combo.currentText(),
                 "wall_type": self.wall_type_combo.currentText(),
                 "thickness": self.wall_thickness_input.value(),
                 "wall_width": self.wall_width_input.value(),
