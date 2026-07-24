@@ -20133,28 +20133,35 @@ class TunnelInfoBoardDialog(QDialog):
         grid = QGridLayout()
         grid.setSpacing(10)
         
+        # Tunnel Selection
+        grid.addWidget(QLabel("Tunnel ID:"), 0, 0)
+        from PyQt5.QtWidgets import QComboBox
+        self.tunnel_combo = QComboBox()
+        grid.addWidget(self.tunnel_combo, 0, 1, 1, 3)
+        self.tunnel_combo.currentIndexChanged.connect(self._on_tunnel_selected)
+        
         # Placement
-        grid.addWidget(QLabel("Placement KM:"), 0, 0)
+        grid.addWidget(QLabel("Placement KM:"), 1, 0)
         self.km_input = QLineEdit()
-        grid.addWidget(self.km_input, 0, 1)
+        grid.addWidget(self.km_input, 1, 1)
 
-        grid.addWidget(QLabel("+"), 0, 2)
+        grid.addWidget(QLabel("+"), 1, 2)
         self.ch_input = QLineEdit()
-        grid.addWidget(self.ch_input, 0, 3)
+        grid.addWidget(self.ch_input, 1, 3)
     #### Mayur Wakhare 5-7-2026 Tunnel information board  
         # Information Fields
         from PyQt5.QtWidgets import QTextEdit
-        grid.addWidget(QLabel("Display Text:"), 1, 0, 1, 4)
+        grid.addWidget(QLabel("Display Text:"), 2, 0, 1, 4)
         self.text_input = QTextEdit()
         self.text_input.setPlainText("WELCOME\nDRIVE SAFELY")
         self.text_input.setMaximumHeight(60)
-        grid.addWidget(self.text_input, 2, 0, 1, 4)
+        grid.addWidget(self.text_input, 3, 0, 1, 4)
         
-        grid.addWidget(QLabel("Speed Limit:"), 3, 0, 1, 2)
+        grid.addWidget(QLabel("Speed Limit:"), 4, 0, 1, 2)
         self.speed_limit_input = QLineEdit()
         self.speed_limit_input.setText("80 km/h")
         self.speed_limit_input.setPlaceholderText("e.g. 40 km/h, 60 km/h, 80 km/h")
-        grid.addWidget(self.speed_limit_input, 3, 2, 1, 2)
+        grid.addWidget(self.speed_limit_input, 4, 2, 1, 2)
         
         layout.addLayout(grid)
         
@@ -20168,8 +20175,7 @@ class TunnelInfoBoardDialog(QDialog):
         self.summary_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.summary_label)
         #############################################################################################
-        
-        self.auto_populate()
+        self.available_tunnels = []
         
         buttons_layout = QHBoxLayout()
         self.ok_btn = QPushButton("OK")
@@ -20203,6 +20209,7 @@ class TunnelInfoBoardDialog(QDialog):
         self.text_input.textChanged.connect(self.invalidate_verification)
         self.speed_limit_input.textChanged.connect(self.invalidate_verification)
         ## Mayur Wakhare 6-7-2026 undo all tunnel info board 
+        self._populate_tunnels()
         self.update_undo_state()
 
     def update_undo_state(self):
@@ -20240,6 +20247,25 @@ class TunnelInfoBoardDialog(QDialog):
             if not text_val:
                 raise ValueError("Display Text is required.")
                 
+            idx = self.tunnel_combo.currentIndex()
+            if idx < 0 or idx >= len(getattr(self, 'available_tunnels', [])):
+                raise ValueError("No valid tunnel selected.")
+                
+            t_data, layer_name, tid = self.available_tunnels[idx]
+            
+            ts_km = float(t_data.get("start_km", 0.0))
+            ts_ch = float(t_data.get("start_chainage", 0.0))
+            te_km = float(t_data.get("end_km", 0.0))
+            te_ch = float(t_data.get("end_chainage", 0.0))
+            
+            t_start = ts_km * 1000 + ts_ch
+            t_end = te_km * 1000 + te_ch
+            
+            pos_abs = km * 1000 + ch
+            
+            if pos_abs < t_start or pos_abs > t_end:
+                raise ValueError(f"Placement must be within tunnel limits ({t_start} - {t_end}).")
+                
             self.verified = True
             self.ok_btn.setEnabled(True)
             self.summary_label.setText("✅ Placement Verified")
@@ -20249,30 +20275,104 @@ class TunnelInfoBoardDialog(QDialog):
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Verification Failed", str(e) if str(e) else "Please enter valid numeric values.")
 #################################################################################################################
-    def auto_populate(self):
-        tunnel_found = False
-        t_start_km = ""
-        t_start_ch = ""
+    def _populate_tunnels(self):
+        import os
+        import json
+        if not self.parent:
+            return
+            
+        active_layer_paths = list(getattr(self.parent, '_per_layer_actors', {}).keys())
+        layer_folder = getattr(self.parent, 'current_design_layer_path', None)
+        if layer_folder and os.path.exists(layer_folder) and layer_folder not in active_layer_paths:
+            active_layer_paths.append(layer_folder)
+            
+        subfolder = getattr(self.parent, 'current_subfolder_type', 'designs')
+        config_paths = []
         
-        if hasattr(self.parent, 'current_design_layer_path') and self.parent.current_design_layer_path:
-            import os
-            if os.path.exists(self.parent.current_design_layer_path):
-                try:
-                    from json_manager import DesignConstructionManager
-                    m_data = DesignConstructionManager.load_master(self.parent.current_design_layer_path)
-                    t_conf = m_data.get("design", {}).get("tunnel", {})
-                    if t_conf and "start_km" in t_conf:
-                        t_start_km = str(t_conf.get("start_km", ""))
-                        t_start_ch = str(t_conf.get("start_chainage", ""))
-                        tunnel_found = True
-                except Exception:
-                    pass
+        for p in active_layer_paths:
+            if not p or not isinstance(p, str) or not os.path.exists(p):
+                continue
+            is_merger = False
+            if "merger" in p.lower() or subfolder == "merger":
+                merger_jsons = [f for f in os.listdir(p) if f.endswith('.json')]
+                for mj in merger_jsons:
+                    try:
+                        with open(os.path.join(p, mj), 'r', encoding='utf-8') as f:
+                            merger_data = json.load(f)
+                        if "merger_points" in merger_data:
+                            is_merger = True
+                            for pt in merger_data.get("merger_points", []):
+                                def add_cfg(json_file_path):
+                                    if json_file_path:
+                                        d_path = os.path.dirname(json_file_path)
+                                        cfg = os.path.join(d_path, 'design_construction_config.json')
+                                        if os.path.exists(cfg) and cfg not in config_paths:
+                                            config_paths.append(cfg)
+                                add_cfg(pt.get("primary_json_path"))
+                                for lyr in pt.get("layers", []):
+                                    add_cfg(lyr.get("json_path"))
+                    except Exception:
+                        pass
+            if not is_merger:
+                cfg = os.path.join(p, 'design_construction_config.json')
+                if os.path.exists(cfg) and cfg not in config_paths:
+                    config_paths.append(cfg)
+                    
+        found_tunnels = []
+        for cp in config_paths:
+            try:
+                with open(cp, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                tunnel_obj = data.get('design', {}).get('tunnel')
+                if not tunnel_obj:
+                    zero_config = data.get('design', {}).get('zero_line_config')
+                    if zero_config:
+                        tunnel_obj = {
+                            'id': 'fallback_tunnel',
+                            'start_km': zero_config.get('point1', {}).get('from_km', 0),
+                            'start_chainage': zero_config.get('point1', {}).get('from_chainage', 0),
+                            'end_km': zero_config.get('point2', {}).get('to_km', 0),
+                            'end_chainage': zero_config.get('point2', {}).get('to_chainage', 0)
+                        }
+                if tunnel_obj and isinstance(tunnel_obj, dict):
+                    tunnel_obj['source_layer_folder'] = os.path.dirname(cp)
+                    found_tunnels.append(tunnel_obj)
+            except Exception:
+                pass
+                
+        unique_tunnels = {}
+        for t in found_tunnels:
+            tid = t.get('tunnel_id', t.get('id', 'Unknown'))
+            layer_folder = t.get('source_layer_folder', '')
+            layer_name = os.path.basename(layer_folder) if layer_folder else 'Unknown'
+            key = (layer_name, tid)
+            if key not in unique_tunnels:
+                unique_tunnels[key] = (t, layer_name, tid)
+                
+        self.available_tunnels = list(unique_tunnels.values())
+        
+        self.tunnel_combo.blockSignals(True)
+        self.tunnel_combo.clear()
+        for t, layer_name, tid in self.available_tunnels:
+            display_text = f"{tid} ({layer_name})"
+            self.tunnel_combo.addItem(display_text)
+        self.tunnel_combo.blockSignals(False)
+        
+        if self.available_tunnels:
+            self._on_tunnel_selected(0)
 
-        if tunnel_found:
-            def clean_str(val):
-                return val[:-2] if val.endswith(".0") else val
-            self.km_input.setText(clean_str(t_start_km))
-            self.ch_input.setText(clean_str(t_start_ch))
+    def _on_tunnel_selected(self, index):
+        if index < 0 or index >= len(self.available_tunnels):
+            return
+        t, layer_name, tid = self.available_tunnels[index]
+        
+        def clean_str(val):
+            val = str(val)
+            return val[:-2] if val.endswith(".0") else val
+            
+        self.km_input.setText(clean_str(t.get('start_km', '0')))
+        self.ch_input.setText(clean_str(t.get('start_chainage', '0')))
+        self.invalidate_verification()
 
     def get_data(self):
         ######### Mayur Wakhare 5-7-2026 tunnel verify button information board   
@@ -20280,12 +20380,23 @@ class TunnelInfoBoardDialog(QDialog):
             return None
             ##############################################################
         try:
+            idx = self.tunnel_combo.currentIndex()
+            t_id = "Unknown"
+            l_name = "Unknown"
+            source_folder = ""
+            if idx >= 0 and idx < len(getattr(self, 'available_tunnels', [])):
+                t_obj, l_name, t_id = self.available_tunnels[idx]
+                source_folder = t_obj.get("source_layer_folder", "")
+                
             return {
                 "km": float(self.km_input.text() or 0.0),
             ####### Mayur 5-7-2026 Tunnel information board   
                 "chainage": float(self.ch_input.text() or 0.0),
                 "display_text": self.text_input.toPlainText().strip(),
-                "speed_limit": self.speed_limit_input.text().strip()
+                "speed_limit": self.speed_limit_input.text().strip(),
+                "tunnel_id": t_id,
+                "layer_name": l_name,
+                "source_layer_folder": source_folder
                 ##################################################################
             }
         except ValueError:

@@ -22861,22 +22861,27 @@ class PointCloudViewer(ApplicationUI):
     #### Mayur Wakhare 4-7-2026 Tunnel Signage Board
     def open_tunnel_info_board_dialog(self):
         """Open the Tunnel Information Board dialog."""
-        layer_folder = getattr(self, 'current_design_layer_path', None)
-        import os
-        from PyQt5.QtWidgets import QMessageBox
-        if not layer_folder or not os.path.exists(layer_folder):
-            QMessageBox.warning(self, "No Active Tunnel", "No active tunnel found. Please create or select a tunnel design first.")
-            return
-
         from dialogs import TunnelInfoBoardDialog
-        from PyQt5.QtWidgets import QDialog
+        from PyQt5.QtWidgets import QDialog, QMessageBox
+        
+        # Determine if we have ANY tunnels loaded (dialog will populate its own list)
+        if not hasattr(self, 'tunnel_designs') or not self.tunnel_designs:
+             # Fallback simple check, but do NOT rely on current_design_layer_path for the logic
+             layer_folder = getattr(self, 'current_design_layer_path', None)
+             import os
+             if not layer_folder or not os.path.exists(layer_folder):
+                 QMessageBox.warning(self, "No Active Tunnel", "No active tunnel found. Please create or select a tunnel design first.")
+                 return
+
         dialog = TunnelInfoBoardDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             if data:
+                layer_folder = data.get("source_layer_folder")
+                print(f"[PIPELINE DEBUG] open_tunnel_info_board_dialog -> _place_tunnel_info_board with layer {layer_folder}")
                 self._place_tunnel_info_board(data)
-                self._sync_tunnel_info_boards_to_json()
-
+                # DO NOT call self._sync_tunnel_info_boards_to_json() here without target_layer_folder!
+                # It is already correctly called inside _place_tunnel_info_board.
     def open_speed_limit_board_dialog(self):
         """Open the Speed Limit Board dialog."""
         layer_folder = getattr(self, 'current_design_layer_path', None)
@@ -22951,11 +22956,14 @@ class PointCloudViewer(ApplicationUI):
         import numpy as np
         import math
         import uuid as _uuid
-        abs_ch = data["km"] * 1000 + data["chainage"]
         
-        path_samples = self.get_curve_aware_path(abs_ch, abs_ch, step=1.0)
+        layer_folder = data.get("source_layer_folder")
+        t_id = data.get("tunnel_id", "Unknown")
+        abs_ch = data.get("km", 0) * 1000 + data.get("chainage", 0)
+        
+        path_samples = self.get_curve_aware_path(abs_ch, abs_ch, step=1.0, target_layer=layer_folder)
         if not path_samples:
-            path_samples = self.get_curve_aware_path(abs_ch - 0.5, abs_ch + 0.5, step=0.5)
+            path_samples = self.get_curve_aware_path(abs_ch - 0.5, abs_ch + 0.5, step=0.5, target_layer=layer_folder)
             if not path_samples:
                 from PyQt5.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Placement Error", f"Could not locate chainage {abs_ch} on the road geometry.")
@@ -22964,9 +22972,11 @@ class PointCloudViewer(ApplicationUI):
         _, P_base, perp_vec, dir_vec = path_samples[0]
         up_vec = np.array([0.0, 0.0, 1.0])
         
-        # --- Compute tunnel ceiling Z from arc_points (same method as exhaust fans) ---
+        # --- Compute tunnel ceiling Z from arc_points accurately ---
         ceiling_z = None
-        layer_folder = getattr(self, 'current_design_layer_path', None)
+        uc_local = 0.0
+        v_crown = 7.0 # Fallback height
+        
         if layer_folder:
             import os
             if os.path.exists(layer_folder):
@@ -22976,38 +22986,124 @@ class PointCloudViewer(ApplicationUI):
                     tunnel_config = master_data_tmp.get("design", {}).get("tunnel")
                     if tunnel_config:
                         arc_points_raw = tunnel_config.get("arc_points", [])
-                        if len(arc_points_raw) >= 3:
+                        
+                        # Find portal chainage
+                        start_km = tunnel_config.get("start_km", 0)
+                        start_ch = tunnel_config.get("start_chainage", 0)
+                        portal_abs_ch = start_km * 1000 + start_ch
+                        
+                        # Get centerline frame at the portal
+                        portal_samples = self.get_curve_aware_path(portal_abs_ch, portal_abs_ch, step=1.0, target_layer=layer_folder)
+                        if not portal_samples:
+                            portal_samples = self.get_curve_aware_path(portal_abs_ch - 0.5, portal_abs_ch + 0.5, step=0.5, target_layer=layer_folder)
+                        
+                        if len(arc_points_raw) >= 3 and portal_samples:
+                            _, P_portal, perp_portal, _ = portal_samples[0]
+                            
+                            # 1. Project 3D arc points into 2D local coordinates (u, v) relative to portal centerline
                             pts_local = []
                             for pt_raw in arc_points_raw[:3]:
-                                delta = np.array(pt_raw, dtype=float) - P_base
-                                pts_local.append((float(np.dot(delta, perp_vec)), float(np.dot(delta, up_vec))))
+                                delta = np.array(pt_raw, dtype=float) - P_portal
+                                pts_local.append((float(np.dot(delta, perp_portal)), float(np.dot(delta, up_vec))))
+                                
                             u1, v1 = pts_local[0]; u2, v2 = pts_local[1]; u3, v3 = pts_local[2]
+                            
+                            # 2. Fit a circle to these 3 local 2D points to find center (uc, vc) and radius R
                             A_mat = np.array([[2*u1, 2*v1, 1], [2*u2, 2*v2, 1], [2*u3, 2*v3, 1]], dtype=float)
                             B_vec_m = np.array([u1**2+v1**2, u2**2+v2**2, u3**2+v3**2], dtype=float)
-                            if abs(np.linalg.det(A_mat)) < 1e-12:
-                                R = max(abs(u3 - u1) / 2.0, 3.0)
-                                vc = 0.0
-                            else:
+                            if abs(np.linalg.det(A_mat)) > 1e-12:
                                 sol = np.linalg.solve(A_mat, B_vec_m)
-                                vc = sol[1]
-                                disc = sol[2] + sol[0]**2 + vc**2
+                                uc_local = sol[0]
+                                vc_local = sol[1]
+                                disc = sol[2] + sol[0]**2 + vc_local**2
                                 R = math.sqrt(disc) if disc > 0 else 5.0
-                            if R < 0.1: R = 3.0
-                            elif R > 500: R = 10.0
-                            # Ceiling Z = base Z + arc center vertical offset + radius
-                            ceiling_z = float(P_base[2] + vc + R)
-                except Exception:
+                                
+                                # 3. Crown height is center height + radius
+                                v_crown = vc_local + R
+                except Exception as e:
+                    print(f"Error computing true ceiling height: {e}")
                     pass
         
-        # Fallback if ceiling could not be computed
-        if ceiling_z is None:
-            ceiling_z = float(P_base[2] + 7.0)
+        # 4. At the user-specified chainage, find the 3D crown position using local centerline (P_base, perp_vec)
+        # Apply clearance (e.g. 0.25 m below roof)
+        clearance = 0.25
+        crown_world_pos = P_base + (uc_local * perp_vec) + (v_crown * up_vec)
+        world_pos = P_base + (uc_local * perp_vec) + ((v_crown - clearance) * up_vec)
+        ceiling_z = float(P_base[2] + v_crown)
         
-        # Position board center ~1.0 m below the ceiling
-        world_pos = P_base.copy()
-        world_pos[2] = ceiling_z - 1.0
+        print("\n===== BOARD POSITION DEBUG =====")
+        try:
+            print(f"Left Arc Point: {arc_points_raw[0] if len(arc_points_raw) > 0 else 'N/A'}")
+            print(f"Crown Arc Point: {arc_points_raw[1] if len(arc_points_raw) > 1 else 'N/A'}")
+            print(f"Right Arc Point: {arc_points_raw[2] if len(arc_points_raw) > 2 else 'N/A'}")
+        except:
+            pass
+        print(f"Calculated Roof Position (v_crown relative): {v_crown}")
+        print(f"Board Offset Used (clearance): {clearance}")
+        print(f"Board Position Before Transform: {world_pos.tolist() if isinstance(world_pos, np.ndarray) else world_pos}")
         
         actor = self._create_tunnel_info_board_actor(data, world_pos, perp_vec, dir_vec, ceiling_z=ceiling_z)
+        
+        matrix = actor.GetMatrix()
+        mat_list = [[matrix.GetElement(r, c) for c in range(4)] for r in range(4)]
+        user_matrix = actor.GetUserMatrix()
+        user_mat_list = [[user_matrix.GetElement(r, c) for c in range(4)] for r in range(4)] if user_matrix else "None"
+        
+        print(f"Board Position After Transform: [{mat_list[0][3]}, {mat_list[1][3]}, {mat_list[2][3]}]")
+        print(f"UserTransform Matrix: {mat_list}")
+        print(f"UserMatrix: {user_mat_list}")
+        
+        diff = crown_world_pos[2] - world_pos[2]
+        print(f"\nDifference between:")
+        print(f"Board Position Z : {world_pos[2]}")
+        print(f"-")
+        print(f"Crown Position Z : {crown_world_pos[2]}")
+        print(f"Difference       : {diff}")
+        
+        if diff > 0.35:
+            print("EXTRA OFFSET DETECTED: The difference is > 0.30 m!")
+            print("Checking if any other transform or matrix changed the actor's position.")
+        print("================================\n")
+        
+        # --- PORTAL WALL PLACEMENT DEBUG ---
+        t_id = data.get('tunnel_id', 'Unknown')
+        print("\n===== PORTAL WALL PLACEMENT DEBUG =====")
+        print(f"- Selected Tunnel ID: {t_id}")
+        print(f"- Selected Layer: {layer_folder}")
+        
+        wall_actor = None
+        if hasattr(self, 'tunnel_walls'):
+            for w in self.tunnel_walls:
+                if w.get('tunnel_id') == t_id and w.get('source_layer_folder') == layer_folder:
+                    wall_actor = w.get('actor')
+                    break
+        
+        print(f"- Portal wall actor found? {'YES' if wall_actor else 'NO'}")
+        
+        if wall_actor:
+            wall_bounds = wall_actor.GetBounds()
+            print(f"- Portal wall bounds: {wall_bounds}")
+            wall_center = [
+                (wall_bounds[0] + wall_bounds[1]) / 2.0,
+                (wall_bounds[2] + wall_bounds[3]) / 2.0,
+                (wall_bounds[4] + wall_bounds[5]) / 2.0
+            ]
+            print(f"- Portal wall center: {wall_center}")
+            dist_to_wall = np.linalg.norm(np.array(world_pos) - np.array(wall_center))
+            print(f"- Distance from board to portal wall: {dist_to_wall:.2f} m")
+        else:
+            print("- Portal wall bounds: N/A")
+            print("- Portal wall center: N/A")
+            print("- Distance from board to portal wall: N/A")
+            print("  -> Explanation: The wall actor for this tunnel_id and layer_folder is not stored in self.tunnel_walls or was never created.")
+            print("  -> It should be retrieved from self.tunnel_walls where it is stored by _place_tunnel_wall_from_arc_points.")
+            
+        print(f"- Board world position: {world_pos}")
+        matrix = actor.GetMatrix()
+        mat_list = [matrix.GetElement(r, c) for r in range(4) for c in range(4)]
+        print(f"- Board transform matrix: {mat_list}")
+        print("- Is board using wall actor or tunnel path? Tunnel Path (Using P_base and path_samples)")
+        print("=======================================\n")
         
         if not hasattr(self, 'tunnel_signage_actors'):
             self.tunnel_signage_actors = []
@@ -23015,8 +23111,33 @@ class PointCloudViewer(ApplicationUI):
         if not hasattr(self, 'tunnel_info_board_batches'):
             self.tunnel_info_board_batches = []
           ###########################################################################################  
-        self.tunnel_signage_actors.append(actor)
+          
+        print("\n===== ACTOR PIPELINE DEBUG =====")
+        print("1. Is create_tunnel_information_board() called? YES")
+        print(f"2. Is a vtkActor created? {'YES' if actor else 'NO'} ({type(actor)})")
+        
+        actors_before = self.renderer.GetActors().GetNumberOfItems()
+        print(f"5. Renderer actor count before AddActor: {actors_before}")
+        
+        print("3. Is renderer.AddActor(board_actor) called? YES")
         self.renderer.AddActor(actor)
+        
+        actors_after = self.renderer.GetActors().GetNumberOfItems()
+        print(f"4. Which renderer instance is used? Memory Addr: {hex(id(self.renderer))}")
+        print(f"   Renderer string: {str(self.renderer).split(chr(10))[0]}")
+        print(f"5. Renderer actor count after AddActor: {actors_after}")
+        print(f"6. Is the actor immediately removed or replaced? Count difference: {actors_after - actors_before}")
+        
+        self.tunnel_signage_actors.append(actor)
+        print(f"7. Is the actor stored in self.tunnel_signage_actors? YES, count is now {len(self.tunnel_signage_actors)}")
+        
+        is_active = (self.renderer.GetRenderWindow() == self.vtk_widget.GetRenderWindow())
+        print(f"8. Is the actor added to the ACTIVE renderer? {'YES' if is_active else 'NO'}")
+        
+        # Check if the tunnel layers have different renderers
+        print(f"9. Is the actor added to another layer/renderer? Using global self.renderer.")
+        print("================================\n")
+        
         self.vtk_widget.GetRenderWindow().Render()
         ###  Mayur Wakhare 6-7-2026 Tunnel info board json
         board_entry = {
@@ -23033,10 +23154,11 @@ class PointCloudViewer(ApplicationUI):
             "dir_vec": dir_vec.tolist(),
             "scale": [1.0, 1.0, 1.0],
             "ceiling_z": ceiling_z,
-            "actor": actor
+            "actor": actor,
+            "layer_folder": layer_folder
         }
         self.tunnel_info_board_batches.append([board_entry])
-        self._sync_tunnel_info_boards_to_json()
+        self._sync_tunnel_info_boards_to_json(target_layer_folder=layer_folder)
         ####################################################################################################
         
         if hasattr(self, 'output_list'):
@@ -24832,28 +24954,50 @@ class PointCloudViewer(ApplicationUI):
 ################################################################################################################################################
 
 ######## Tunnel Information Board JSON Persistence
-    def _sync_tunnel_info_boards_to_json(self):
+    def _sync_tunnel_info_boards_to_json(self, target_layer_folder=None):
         """Save all current tunnel information boards to the master JSON file."""
-        print("[JSON] Saving Tunnel Information Board...")
-        layer_folder = getattr(self, 'current_design_layer_path', None)
+        print("\n===== TUNNEL INFORMATION BOARD SAVE TRACE =====")
+        print("Variables at save time:")
+        print(f" - self.current_project_directory: {getattr(self, 'current_project_directory', 'None')}")
+        print(f" - self.current_json_path: {getattr(self, 'current_json_path', 'None')}")
+        print(f" - self.current_layer: {getattr(self, 'current_layer', 'None')}")
+        print(f" - target_layer_folder (passed from dialog): {target_layer_folder}")
+        
+        # Determine the layer folder to use
+        layer_folder = target_layer_folder
+        if not layer_folder:
+            print(" - ERROR: target_layer_folder not provided! Aborting JSON save to prevent cross-tunnel pollution.")
+            return
+            
         import os
         if not layer_folder or not os.path.exists(layer_folder):
+            print(f"[JSON] ERROR: Invalid layer folder for saving: {layer_folder}")
+            print("===============================================\n")
             return
             
         from json_manager import DesignConstructionManager
         json_path = DesignConstructionManager.get_master_path(layer_folder)
-        print("-" * 39)
-        print("Asset Type: Tunnel Information Board")
-        print(f"Current Project Directory:\n{layer_folder}")
-        print(f"Current JSON Path:\n{json_path}")
-        print("-" * 39)
-
+        
+        print("Expected Flow:")
+        print(f" selected tunnel -> {layer_folder}")
+        print(f"        ↓")
+        print(f" {json_path}")
+        print(f"        ↓")
+        print(f" save")
+        print("===============================================\n")
+        
+        print("[JSON] Saving Tunnel Information Board...")
         master_data = DesignConstructionManager.load_master(layer_folder)
         
         boards_data = []
         if hasattr(self, 'tunnel_info_board_batches'):
             for batch in self.tunnel_info_board_batches:
                 for board in batch:
+                    # Filter by layer_folder so we don't save d1 boards into d2 json
+                    board_layer = board.get("layer_folder")
+                    if board_layer and board_layer != layer_folder:
+                        continue
+                        
                     board_json = {
                         "id": board.get("id"),
                         "config": board.get("config"),
@@ -27345,10 +27489,23 @@ class PointCloudViewer(ApplicationUI):
         # PRIMARY PATH: use curved_path_samples (curve-accurate)
         # ------------------------------------------------------------------
         try:
+            import os
             samples_to_use = None
-            if target_layer and hasattr(self, 'layer_path_samples') and target_layer in self.layer_path_samples:
-                samples_to_use = self.layer_path_samples[target_layer]
-            elif hasattr(self, 'master_curved_path_samples') and self.master_curved_path_samples:
+            if target_layer and hasattr(self, 'layer_path_samples'):
+                norm_target = os.path.normcase(os.path.normpath(target_layer))
+                print(f"[get_curve_aware_path] Looking for target_layer: {target_layer} (norm: {norm_target})")
+                print(f"[get_curve_aware_path] Available keys: {list(self.layer_path_samples.keys())}")
+                for k, v in self.layer_path_samples.items():
+                    norm_k = os.path.normcase(os.path.normpath(k))
+                    print(f"   - comparing with key: {k} (norm: {norm_k})")
+                    # Match if they are exactly the same, or if one ends with the other (to handle absolute vs relative paths)
+                    if norm_k == norm_target or norm_k.endswith(os.sep + norm_target) or norm_target.endswith(os.sep + norm_k):
+                        print(f"[get_curve_aware_path] MATCH FOUND!")
+                        samples_to_use = v
+                        break
+            
+            if not samples_to_use and hasattr(self, 'master_curved_path_samples') and self.master_curved_path_samples:
+                print(f"Warning: Falling back to master_curved_path_samples for target layer {target_layer}")
                 samples_to_use = self.master_curved_path_samples
                 
             if not samples_to_use:
