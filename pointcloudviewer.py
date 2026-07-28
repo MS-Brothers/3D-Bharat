@@ -36447,6 +36447,12 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             self.message_text.append(f"Error loading underpass CCTVs: {str(e)}")
 
+        try:
+            if self._load_underpass_walls_from_json(layer_path):
+                loaded_any = True
+        except Exception as e:
+            self.message_text.append(f"Error loading underpass walls: {str(e)}")
+
 #####################################################################################################
         print("-" * 32)
         print("Project JSON Loaded\n")
@@ -36456,6 +36462,7 @@ class PointCloudViewer(ApplicationUI):
         print(f"CCTV Cameras : {len(master_data.get('cctv_cameras', []))}")
         print(f"Underpass CCTVs : {len(master_data.get('underpass_cctvs', []))}")
         print(f"Tunnel Exhaust Fans : {len(master_data.get('tunnel_exhaust_fans', []))}")
+        print(f"Underpass Walls : {len(master_data.get('underpass_walls', []))}")
 
         print(f"Emergency Telephone Boards : {len(master_data.get('emergency_telephone_boards', []))}")
         print(f"Tunnel Information Boards : {len(master_data.get('tunnel_information_boards', []))}")
@@ -45807,160 +45814,215 @@ class PointCloudViewer(ApplicationUI):
         self.vtk_widget.GetRenderWindow().Render()
         return actor
      ### Mayur 28-7-2026 Underpass Wall   
+    ############################################################################
+    # MAYUR 28-07-2026: OPEN UNDERPASS WALL DIALOG METHOD
+    ############################################################################
     def open_underpass_wall_dialog(self):
         """Open the Underpass Wall dialog."""
-        from PyQt5.QtWidgets import QDialog, QMessageBox
+        from PyQt5.QtWidgets import QDialog
         import json
-        import math
-        import os
-        import random
         
         dialog = UnderpassWallDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             data = dialog.get_data()
             if data:
                 if hasattr(self, 'output_list'):
-                    self.output_list.addItem(f"✓ Underpass Wall Data generated")
+                    self.output_list.addItem(f"✓ Underpass Wall Data: {json.dumps(data)}")
+                print(f"Underpass Wall Data collected: {data}")
+                self._place_underpass_wall_geometry(data)
+
+    def _place_underpass_wall_geometry(self, data, is_loading=False):
+        import math
+        import os
+        import json
+        import copy
+        import vtk
+        from PyQt5.QtWidgets import QMessageBox
+        
+        print("\n[DEBUG-1] OK button executed, starting _place_underpass_wall_geometry")
+
+        up_info = data.get("underpass_data")
+        if not up_info:
+            print("[DEBUG] No up_info found, aborting.")
+            return
+
+        dims = up_info.get("dimensions", {})
+        up_length = float(dims.get("length", 20.0))
+        up_width = float(dims.get("width", 10.0))
+        up_height = float(dims.get("height", 6.0))
+        
+        hw_thickness = float(data.get("hw_thickness", 1.5))
+        pos = data.get("position", "Start")
+
+        print(f"[DEBUG-3] Dimensions - Width: {up_width}, Height: {up_height}, Thickness: {hw_thickness}")
+
+        wc = up_info.get("world_coordinates", [0.0, 0.0, 0.0])
+        tangent = up_info.get("tangent", [1.0, 0.0, 0.0])
+        
+        # Local Y axis vector in world space
+        # tangent is Local X
+        tx, ty = tangent[0], tangent[1]
+        local_y = [-ty, tx, 0]
+        
+        angle_rad = math.atan2(ty, tx)
+        angle_deg = math.degrees(angle_rad)
+
+        positions_to_build = []
+        if pos in ["Start", "Both"]:
+            # Outer face at -up_length/2. Inner face at -up_length/2 + hw_thickness
+            delta_y = -up_length/2.0 + hw_thickness/2.0
+            positions_to_build.append(("Start", delta_y))
+        
+        if pos in ["End", "Both"]:
+            # Outer face at +up_length/2. Inner face at +up_length/2 - hw_thickness
+            delta_y = up_length/2.0 - hw_thickness/2.0
+            positions_to_build.append(("End", delta_y))
+
+        walls_created = []
+
+        if not hasattr(self, 'vtk_widget') or not self.vtk_widget:
+            print("[DEBUG] No vtk_widget found.")
+            return
+
+        renderer = self.vtk_widget.GetRenderWindow().GetRenderers().GetFirstRenderer()
+        if not renderer:
+            print("[DEBUG] No renderer found.")
+            return
+
+        for p_name, dy in positions_to_build:
+            hw_wc = [
+                wc[0] + dy * local_y[0],
+                wc[1] + dy * local_y[1],
+                wc[2]
+            ]
+            
+            portal_center = [
+                wc[0] + (dy - hw_thickness/2.0 if p_name == "Start" else dy + hw_thickness/2.0) * local_y[0],
+                wc[1] + (dy - hw_thickness/2.0 if p_name == "Start" else dy + hw_thickness/2.0) * local_y[1],
+                wc[2]
+            ]
+            portal_normal = local_y if p_name == "End" else [-local_y[0], -local_y[1], -local_y[2]]
+            
+            print(f"[DEBUG-4] Computed world position (center of HW): {hw_wc}")
+            print(f"[DEBUG-5] Portal Center: {portal_center}, Normal: {portal_normal}")
+            print(f"[DEBUG-6] Transform - Translation: {hw_wc}, Rotation Z: {angle_deg}")
+
+            # 12. Temporarily create the Head Wall as a bright red vtkCubeSource
+            hw_source = vtk.vtkCubeSource()
+            hw_source.SetXLength(up_width)
+            hw_source.SetYLength(hw_thickness)
+            hw_source.SetZLength(up_height)
+            hw_source.SetCenter(0, 0, 0)
+            
+            transform = vtk.vtkTransform()
+            transform.Translate(hw_wc[0], hw_wc[1], hw_wc[2])
+            transform.RotateZ(angle_deg)
+            
+            transform_filter = vtk.vtkTransformPolyDataFilter()
+            transform_filter.SetTransform(transform)
+            transform_filter.SetInputConnection(hw_source.GetOutputPort())
+            transform_filter.Update()
+            
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputConnection(transform_filter.GetOutputPort())
+            
+            actor = vtk.vtkActor()
+            actor.SetMapper(mapper)
+            actor.GetProperty().SetColor(1.0, 0.0, 0.0) # Bright red
+            actor.GetProperty().SetOpacity(0.8)
+            
+            print(f"[DEBUG-2] Head Wall actor created: {actor}")
+            
+            renderer.AddActor(actor)
+            print("[DEBUG-7] renderer.AddActor(head_wall_actor) called.")
+            
+            bounds = actor.GetBounds()
+            print(f"[DEBUG-9] Actor Visibility: {actor.GetVisibility()}, Opacity: {actor.GetProperty().GetOpacity()}, Color: {actor.GetProperty().GetColor()}")
+            print(f"[DEBUG-10] Actor Bounds after transform: X({bounds[0]:.2f}, {bounds[1]:.2f}) Y({bounds[2]:.2f}, {bounds[3]:.2f}) Z({bounds[4]:.2f}, {bounds[5]:.2f})")
+            print(f"[DEBUG-11] Check: If bounds are outside your clipping range, or below Z=0, it might be hidden.")
+
+            # Track actor
+            if hasattr(self, 'reference_actors'):
+                self.reference_actors.append(actor)
                 
-                up_info = data.get("underpass_data", {})
-                if not up_info: return
+            walls_created.append({
+                "position_type": p_name,
+                "hw_data": data
+            })
+
+        self.vtk_widget.GetRenderWindow().Render()
+        print("[DEBUG-8] Render() called after adding the actor.")
+
+        if not is_loading:
+            try:
+                from json_manager import DesignConstructionManager
+                layer_folder = None
                 
-                # We will generate walls and save them in the same JSON as underpass objects
-                layer_folder = data.get("source_layer_folder")
-                if not layer_folder or not os.path.exists(layer_folder):
-                    QMessageBox.warning(self, "Error", "Source layer folder not found.")
-                    return
+                active_path = getattr(self, 'current_design_layer_path', None)
+                if active_path and os.path.exists(active_path):
+                    layer_folder = active_path
+                else:
+                    ws_name = getattr(self, 'current_worksheet_name', '')
+                    subfolder = getattr(self, 'current_subfolder_type', 'designs')
+                    layer_name = data.get("layer_name")
+                    if ws_name and layer_name and hasattr(self, 'WORKSHEETS_BASE_DIR'):
+                        layer_folder = os.path.join(self.WORKSHEETS_BASE_DIR, ws_name, subfolder, layer_name)
                 
-                config_path = os.path.join(layer_folder, "design_construction_config.json")
-                if not os.path.exists(config_path): return
-                
-                with open(config_path, "r", encoding="utf-8") as f:
-                    cfg_data = json.load(f)
-                
-                if "under_passes" not in cfg_data:
-                    cfg_data["under_passes"] = []
-                elif isinstance(cfg_data["under_passes"], dict):
-                    cfg_data["under_passes"] = list(cfg_data["under_passes"].values())
-                
-                # Base underpass parameters
-                C = up_info.get("position", {})
-                C = [C.get("x",0), C.get("y",0), C.get("z",0)]
-                T = up_info.get("tangent", [1, 0, 0])
-                L = up_info.get("length", 20.0)
-                W = up_info.get("width", 10.0)
-                H = up_info.get("height", 6.0)
-                
-                tx, ty = T[0], T[1]
-                mag_T = math.sqrt(tx*tx + ty*ty)
-                if mag_T == 0: tx, ty, mag_T = 1, 0, 1
-                T = [tx/mag_T, ty/mag_T, 0]
-                N = [-T[1], T[0], 0]
-                
-                new_walls = []
-                base_up_id = up_info.get("id", "UP")
-                
-                def make_solid_underpass(id_suffix, center, tangent, width, length, height):
-                    # Solid block using underpass geometry (wall_thickness = width/2, slab/bottom = height/2)
-                    wall_id = f"{base_up_id}_{id_suffix}_{random.randint(100, 999)}"
-                    wall_obj = {
-                        "id": wall_id,
-                        "is_wall": True,
-                        "worksheet": up_info.get("worksheet", ""),
-                        "design_layer": up_info.get("design_layer", ""),
-                        "length": length,
-                        "width": width,
-                        "height": height,
-                        "wall_thickness": width / 2.0,
-                        "slab_thickness": height / 2.0,
-                        "bottom_thickness": height / 2.0,
-                        "km": up_info.get("km", 0),
-                        "chainage": up_info.get("chainage", "0+000"),
-                        "chainage_abs": up_info.get("chainage_abs", 0),
-                        "depth_from_road_surface": up_info.get("depth_from_road_surface", 0),
-                        "road_surface_z": up_info.get("road_surface_z", 0),
-                        "position": {"x": center[0], "y": center[1], "z": center[2]},
-                        "tangent": tangent
-                    }
-                    return wall_obj
-                
-                hw_t = data["hw_thickness"]
-                hw_l = data["hw_length"]
-                ww_l = data["ww_length"]
-                ww_t = data["ww_thickness"]
-                ww_h = data["ww_height"]
-                flare = math.radians(data["ww_flare_angle"])
-                
-                portals = []
-                if data["start_portal"]: portals.append(-1) # -Y direction in local
-                if data["end_portal"]: portals.append(1)    # +Y direction in local
-                
-                for p_dir in portals:
-                    p_name = "Start" if p_dir == -1 else "End"
+                if layer_folder and os.path.exists(layer_folder):
+                    master_data = DesignConstructionManager.load_master(layer_folder)
                     
-                    # 1. Head Wall
-                    c_hw = [
-                        C[0] + N[0] * p_dir * (L/2 + hw_t/2),
-                        C[1] + N[1] * p_dir * (L/2 + hw_t/2),
-                        C[2]
-                    ]
-                    # Head Wall acts as an underpass spanning width (X) and thickness (Y)
-                    hw_obj = make_solid_underpass(f"HW_{p_name}", c_hw, T, hw_l, hw_t, H)
-                    new_walls.append(hw_obj)
+                    if "underpass_walls" not in master_data:
+                        master_data["underpass_walls"] = []
+                        
+                    master_data["underpass_walls"].append(data)
                     
-                    # 2. Wing Walls
-                    sides = []
-                    if data["side_left"]: sides.append(-1)
-                    if data["side_right"]: sides.append(1)
-                    
-                    for s_dir in sides:
-                        s_name = "Left" if s_dir == -1 else "Right"
-                        # Attachment point
-                        attach_pt = [
-                            C[0] + N[0] * (p_dir * L/2) + T[0] * (s_dir * W/2),
-                            C[1] + N[1] * (p_dir * L/2) + T[1] * (s_dir * W/2),
-                            C[2]
-                        ]
+                    DesignConstructionManager.save_master(layer_folder, master_data)
+                    # Use a non-blocking debug print instead of a blocking messagebox if debugging
+                    print(f"Success: Head Wall '{pos}' placed successfully.")
+                else:
+                    print("Warning: Could not determine layer folder to save Head Wall data.")
+            except Exception as e:
+                print(f"Error saving Head Wall: {e}")
+
+    def _load_underpass_walls_from_json(self, layer_path):
+        print("[JSON] Loading Underpass Walls...")
+        from json_manager import DesignConstructionManager
+        master_data = DesignConstructionManager.load_master(layer_path)
+        walls_data = master_data.get("underpass_walls", [])
+        
+        print(f"[JSON] Found {len(walls_data)} underpass_walls in {DesignConstructionManager.get_master_path(layer_path)}")
+        
+        if not walls_data:
+            return False
+            
+        loaded_any = False
+        for w_data in walls_data:
+            up_id = w_data.get("underpass_id")
+            # Find the underpass dynamically to get its latest data in case it was updated
+            up_info = None
+            if "under_passes" in master_data:
+                for up in master_data["under_passes"]:
+                    if str(up.get("id")) == str(up_id):
+                        up_info = up
+                        break
+            
+            if not up_info and "reference_assets" in master_data and "under_pass" in master_data["reference_assets"]:
+                for up in master_data["reference_assets"]["under_pass"]:
+                    if str(up.get("id")) == str(up_id):
+                        up_info = up
+                        break
                         
-                        # Flare Direction (outward)
-                        # Portal normal faces p_dir * N
-                        # Flaring left/right means rotating away from normal towards s_dir * T
-                        portal_out = [N[0] * p_dir, N[1] * p_dir, 0]
-                        flare_axis = [T[0] * s_dir, T[1] * s_dir, 0]
-                        
-                        ww_dir = [
-                            portal_out[0] * math.cos(flare) + flare_axis[0] * math.sin(flare),
-                            portal_out[1] * math.cos(flare) + flare_axis[1] * math.sin(flare),
-                            0
-                        ]
-                        
-                        # Center of wing wall
-                        c_ww = [
-                            attach_pt[0] + ww_dir[0] * (ww_l / 2),
-                            attach_pt[1] + ww_dir[1] * (ww_l / 2),
-                            C[2] - (H/2) + (ww_h/2)
-                        ]
-                        
-                        # Tangent of wing wall is orthogonal to ww_dir
-                        ww_tangent = [-ww_dir[1], ww_dir[0], 0]
-                        
-                        ww_obj = make_solid_underpass(f"WW_{p_name}_{s_name}", c_ww, ww_tangent, ww_t, ww_l, ww_h)
-                        new_walls.append(ww_obj)
+            if up_info:
+                # Update the nested data with the fresh up_info
+                w_data["underpass_data"] = up_info
+                self._place_underpass_wall_geometry(w_data, is_loading=True)
+                print(f"[LOAD] Underpass Wall restored for {up_id}")
+                loaded_any = True
                 
-                cfg_data["under_passes"].extend(new_walls)
-                
-                with open(config_path, "w", encoding="utf-8") as f:
-                    json.dump(cfg_data, f, indent=4)
-                
-                # Visualize the newly added walls
-                for wall in new_walls:
-                    if hasattr(self, 'visualize_under_pass'):
-                        self.visualize_under_pass(wall)
-                
-                if hasattr(self.vtk_widget, 'GetRenderWindow'):
-                    self.vtk_widget.GetRenderWindow().Render()
-                
-                QMessageBox.information(self, "Success", f"Created {len(new_walls)} wall(s) and saved to config.")
-######################################################################################################
+        if loaded_any and hasattr(self, 'vtk_widget') and self.vtk_widget:
+            self.vtk_widget.GetRenderWindow().Render()
+        return loaded_any
+
     ## Mayur 21-7-2026 tunnel wall
     def open_tunnel_wall_dialog(self):
         """Open the Tunnel Wall dialog."""
