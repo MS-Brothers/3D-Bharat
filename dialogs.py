@@ -23378,3 +23378,285 @@ class TunnelWallDialog(QDialog):
         except Exception:
             return None
         ######################################################################################
+### Mayur 28-7-2026
+class UnderpassWallDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.setWindowTitle("Underpass Wall")
+        self.setMinimumWidth(450)
+        self.verified = False
+        self.underpass_data = {}
+
+        self.setStyleSheet("""
+            QDialog { background-color: #f5f5f5; font-family: 'Segoe UI', Arial, sans-serif; }
+            QLabel { font-size: 13px; color: #333; font-weight: bold;}
+            QLineEdit, QComboBox, QDoubleSpinBox { padding: 6px; border: 1px solid #ccc; border-radius: 4px; background-color: white; }
+            QPushButton { padding: 8px; border-radius: 6px; font-weight: bold; font-size: 13px; }
+            QGroupBox { font-weight: bold; border: 1px solid #CCC; border-radius: 6px; margin-top: 10px; padding-top: 10px; color: #1565C0; }
+        """)
+
+        from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QWidget, QGridLayout, QCheckBox, QDoubleSpinBox, QGroupBox
+        from PyQt5.QtCore import Qt
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Underpass Wall")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1565C0;")
+        layout.addWidget(title)
+
+        # Underpass Selection
+        up_sel_layout = QVBoxLayout()
+        up_sel_layout.addWidget(QLabel("Underpass ID"))
+        row_layout = QHBoxLayout()
+        self.underpass_combo = QComboBox()
+        row_layout.addWidget(self.underpass_combo)
+        self.verify_btn = QPushButton("Verify")
+        self.verify_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 6px; font-weight: bold; border-radius: 4px;")
+        self.verify_btn.clicked.connect(self.verify_underpass)
+        row_layout.addWidget(self.verify_btn)
+        up_sel_layout.addLayout(row_layout)
+        layout.addLayout(up_sel_layout)
+
+        self.controls_widget = QWidget()
+        controls_layout = QVBoxLayout(self.controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        self.controls_widget.setEnabled(False)
+
+        # Head Wall
+        head_wall_group = QGroupBox("Head Wall")
+        hw_layout = QGridLayout(head_wall_group)
+        
+        hw_layout.addWidget(QLabel("Length (Auto = Underpass Width)"), 0, 0)
+        self.hw_length_input = QDoubleSpinBox()
+        self.hw_length_input.setRange(0.1, 1000.0)
+        self.hw_length_input.setSingleStep(0.5)
+        self.hw_length_input.setEnabled(False)
+        hw_layout.addWidget(self.hw_length_input, 1, 0)
+
+        hw_layout.addWidget(QLabel("Thickness (m)"), 0, 1)
+        self.hw_thickness_input = QDoubleSpinBox()
+        self.hw_thickness_input.setRange(0.1, 5.0)
+        self.hw_thickness_input.setSingleStep(0.1)
+        self.hw_thickness_input.setValue(1.50)
+        self.hw_thickness_input.valueChanged.connect(self.update_wing_wall_height)
+        hw_layout.addWidget(self.hw_thickness_input, 1, 1)
+
+        controls_layout.addWidget(head_wall_group)
+
+        # Wing Wall
+        wing_wall_group = QGroupBox("Wing Wall")
+        ww_layout = QGridLayout(wing_wall_group)
+        
+        ww_layout.addWidget(QLabel("Length (m)"), 0, 0)
+        self.length_input = QDoubleSpinBox()
+        self.length_input.setRange(0.1, 100.0)
+        self.length_input.setSingleStep(0.5)
+        self.length_input.setValue(6.0)
+        ww_layout.addWidget(self.length_input, 1, 0)
+
+        ww_layout.addWidget(QLabel("Thickness (m)"), 0, 1)
+        self.thickness_input = QDoubleSpinBox()
+        self.thickness_input.setRange(0.1, 5.0)
+        self.thickness_input.setSingleStep(0.1)
+        self.thickness_input.setValue(0.70)
+        ww_layout.addWidget(self.thickness_input, 1, 1)
+
+        self.auto_height_cb = QCheckBox("Auto Height")
+        self.auto_height_cb.setChecked(True)
+        self.auto_height_cb.toggled.connect(self.on_auto_height_toggled)
+        ww_layout.addWidget(self.auto_height_cb, 2, 0, 1, 2)
+        
+        ww_layout.addWidget(QLabel("Height (m)"), 3, 0)
+        self.height_input = QDoubleSpinBox()
+        self.height_input.setRange(0.1, 50.0)
+        self.height_input.setSingleStep(0.5)
+        self.height_input.setEnabled(False)
+        ww_layout.addWidget(self.height_input, 4, 0)
+
+        ww_layout.addWidget(QLabel("Flare Angle (°)"), 3, 1)
+        self.flare_angle_input = QDoubleSpinBox()
+        self.flare_angle_input.setRange(0, 90)
+        self.flare_angle_input.setSingleStep(1)
+        self.flare_angle_input.setValue(45)
+        ww_layout.addWidget(self.flare_angle_input, 4, 1)
+        controls_layout.addWidget(wing_wall_group)
+
+        # Side & Position in a horizontal layout
+        side_pos_layout = QHBoxLayout()
+
+        # Side
+        side_group = QGroupBox("Side")
+        side_layout = QVBoxLayout(side_group)
+        self.left_cb = QCheckBox("Left")
+        self.left_cb.setChecked(True)
+        self.right_cb = QCheckBox("Right")
+        self.right_cb.setChecked(True)
+        side_layout.addWidget(self.left_cb)
+        side_layout.addWidget(self.right_cb)
+        side_pos_layout.addWidget(side_group)
+
+        # Position
+        pos_group = QGroupBox("Position")
+        pos_layout = QVBoxLayout(pos_group)
+        self.start_portal_cb = QCheckBox("Start Portal")
+        self.start_portal_cb.setChecked(True)
+        self.end_portal_cb = QCheckBox("End Portal")
+        self.end_portal_cb.setChecked(True)
+        pos_layout.addWidget(self.start_portal_cb)
+        pos_layout.addWidget(self.end_portal_cb)
+        side_pos_layout.addWidget(pos_group)
+
+        controls_layout.addLayout(side_pos_layout)
+
+        layout.addWidget(self.controls_widget)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setStyleSheet("background-color: #4CAF50; color: white; border-radius: 4px; padding: 6px 20px;")
+        self.ok_btn.setEnabled(False)
+        self.ok_btn.clicked.connect(self.accept)
+        
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet("background-color: #F44336; color: white; border-radius: 4px; padding: 6px 20px;")
+        self.cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.ok_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        btn_layout.addStretch()
+        
+        layout.addLayout(btn_layout)
+        
+        self.populate_underpass_ids()
+
+    def populate_underpass_ids(self):
+        import os
+        import json
+        self.underpass_data = {}
+        found_underpasses = []
+        base_dir = getattr(self.parent, 'WORKSHEETS_BASE_DIR', '')
+        ws_name = getattr(self.parent, 'current_worksheet_name', '')
+        
+        if base_dir and ws_name:
+            designs_dir = os.path.join(base_dir, ws_name, "designs")
+            if os.path.exists(designs_dir):
+                for layer_folder in os.listdir(designs_dir):
+                    layer_path = os.path.join(designs_dir, layer_folder)
+                    if os.path.isdir(layer_path) and not layer_folder.endswith('_merged'):
+                        config_file = os.path.join(layer_path, "design_construction_config.json")
+                        if os.path.exists(config_file):
+                            try:
+                                with open(config_file, "r", encoding="utf-8") as f:
+                                    data = json.load(f)
+                                
+                                ups = data.get("under_passes")
+                                if isinstance(ups, dict):
+                                    if "id" in ups or "length" in ups:
+                                        ups = [ups]
+                                    else:
+                                        ups = list(ups.values())
+                                elif not isinstance(ups, list):
+                                    ups = []
+                                
+                                if not ups:
+                                    ref_ups = data.get("reference_assets", {}).get("under_pass")
+                                    if isinstance(ref_ups, dict):
+                                        if "id" in ref_ups or "length" in ref_ups:
+                                            ups = [ref_ups]
+                                        else:
+                                            ups = list(ref_ups.values())
+                                    elif isinstance(ref_ups, list):
+                                        ups = ref_ups
+                                
+                                if ups:
+                                    # store source layer info
+                                    for up in ups:
+                                        if isinstance(up, dict):
+                                            # Avoid adding walls as base underpasses if they have a special marker
+                                            if not up.get("is_wall", False):
+                                                up['source_layer_folder'] = layer_path
+                                                up['layer_name'] = layer_folder
+                                                found_underpasses.append(up)
+                            except Exception:
+                                pass
+
+        self.underpass_combo.clear()
+        if found_underpasses:
+            for up in found_underpasses:
+                if isinstance(up, dict):
+                    up_id = up.get("id", up.get("underpass_id", "Unknown"))
+                    self.underpass_data[str(up_id)] = up
+                    self.underpass_combo.addItem(str(up_id))
+        else:
+            self.underpass_combo.addItem("No Underpass Available")
+            self.underpass_combo.setEnabled(False)
+
+    def verify_underpass(self):
+        from PyQt5.QtWidgets import QMessageBox
+        idx = self.underpass_combo.currentIndex()
+        if idx >= 0 and self.underpass_combo.currentText() != "No Underpass Available":
+            up_id = self.underpass_combo.currentText()
+            up_info = self.underpass_data.get(up_id)
+            if up_info:
+                width = float(up_info.get("width", 10.0))
+                height = float(up_info.get("height", 6.0))
+                
+                self.hw_length_input.setValue(width)
+                
+                self.current_up_height = height
+                self.update_wing_wall_height()
+                
+                self.verified = True
+                self.controls_widget.setEnabled(True)
+                self.ok_btn.setEnabled(True)
+                self.verify_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 6px; font-weight: bold; border-radius: 4px;")
+                self.verify_btn.setText("Verified ✓")
+                QMessageBox.information(self, "Verified", "Underpass geometry loaded successfully.")
+            else:
+                QMessageBox.warning(self, "Error", "Selected underpass data not found.")
+        else:
+            QMessageBox.warning(self, "Invalid Selection", "Please select a valid Underpass.")
+
+    def on_auto_height_toggled(self, checked):
+        if checked:
+            self.height_input.setEnabled(False)
+            self.update_wing_wall_height()
+        else:
+            if self.verified:
+                self.height_input.setEnabled(True)
+
+    def update_wing_wall_height(self):
+        if hasattr(self, 'current_up_height') and self.auto_height_cb.isChecked():
+            hw_thick = self.hw_thickness_input.value()
+            self.height_input.setValue(self.current_up_height + hw_thick)
+
+    def get_data(self):
+        if not self.verified:
+            return None
+            
+        up_id = self.underpass_combo.currentText()
+        up_info = self.underpass_data.get(up_id, {})
+        
+        return {
+            "underpass_id": up_id,
+            "layer_name": up_info.get("layer_name", "Unknown"),
+            "source_layer_folder": up_info.get("source_layer_folder", ""),
+            "underpass_data": up_info,
+            "hw_length": self.hw_length_input.value(),
+            "hw_thickness": self.hw_thickness_input.value(),
+            "ww_length": self.length_input.value(),
+            "ww_thickness": self.thickness_input.value(),
+            "ww_auto_height": self.auto_height_cb.isChecked(),
+            "ww_height": self.height_input.value(),
+            "ww_flare_angle": self.flare_angle_input.value(),
+            "side_left": self.left_cb.isChecked(),
+            "side_right": self.right_cb.isChecked(),
+            "start_portal": self.start_portal_cb.isChecked(),
+            "end_portal": self.end_portal_cb.isChecked()
+        }
+###############################################################################################

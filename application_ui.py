@@ -8358,7 +8358,8 @@ Tunnel Camera View button:
                             "cctv camera": "open_cctv_camera_dialog",
                             "tunnel exhaust fan": "open_tunnel_exhaust_fan_dialog",
                             "water pipe": "open_water_pipe_dialog",
-                            "tunnel wall": "open_tunnel_wall_dialog"
+                            "tunnel wall": "open_tunnel_wall_dialog",
+                            "underpass wall": "open_underpass_wall_dialog"
                             ########################################
                         }
 

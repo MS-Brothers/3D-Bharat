@@ -39,7 +39,7 @@ from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, Mate
                     StreetLightDialog, SignalPoleDialog, LaneMarkingDialog, PoleAssetDialog, BuddyDialog, BuddiesWorksheetsDialog, OneDirectionStreetLightDialog, 
                     TwoDirectionStreetLightDialog, FourDirectionStreetLightDialog, OneDirectionSignalPoleDialog, TwoDirectionSignalPoleDialog, FourDirectionSignalPoleDialog, 
                     ##### Mayur Wakhare 1-7-2026 Tunnel Light
-                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog,UnderPassDialog,UnderPassPreviewDialog,UnderpassCCTVDialog,UnderpassLightDialog,TunnelWallDialog)
+                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog,UnderPassDialog,UnderPassPreviewDialog,UnderpassCCTVDialog,UnderpassLightDialog,TunnelWallDialog,UnderpassWallDialog)
                     ###########################################################
 from measurement_widget import MeasurementWidget
 from digging_point import DiggingPointInput
@@ -45806,6 +45806,161 @@ class PointCloudViewer(ApplicationUI):
         renderer.AddActor(actor)
         self.vtk_widget.GetRenderWindow().Render()
         return actor
+     ### Mayur 28-7-2026 Underpass Wall   
+    def open_underpass_wall_dialog(self):
+        """Open the Underpass Wall dialog."""
+        from PyQt5.QtWidgets import QDialog, QMessageBox
+        import json
+        import math
+        import os
+        import random
+        
+        dialog = UnderpassWallDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            if data:
+                if hasattr(self, 'output_list'):
+                    self.output_list.addItem(f"✓ Underpass Wall Data generated")
+                
+                up_info = data.get("underpass_data", {})
+                if not up_info: return
+                
+                # We will generate walls and save them in the same JSON as underpass objects
+                layer_folder = data.get("source_layer_folder")
+                if not layer_folder or not os.path.exists(layer_folder):
+                    QMessageBox.warning(self, "Error", "Source layer folder not found.")
+                    return
+                
+                config_path = os.path.join(layer_folder, "design_construction_config.json")
+                if not os.path.exists(config_path): return
+                
+                with open(config_path, "r", encoding="utf-8") as f:
+                    cfg_data = json.load(f)
+                
+                if "under_passes" not in cfg_data:
+                    cfg_data["under_passes"] = []
+                elif isinstance(cfg_data["under_passes"], dict):
+                    cfg_data["under_passes"] = list(cfg_data["under_passes"].values())
+                
+                # Base underpass parameters
+                C = up_info.get("position", {})
+                C = [C.get("x",0), C.get("y",0), C.get("z",0)]
+                T = up_info.get("tangent", [1, 0, 0])
+                L = up_info.get("length", 20.0)
+                W = up_info.get("width", 10.0)
+                H = up_info.get("height", 6.0)
+                
+                tx, ty = T[0], T[1]
+                mag_T = math.sqrt(tx*tx + ty*ty)
+                if mag_T == 0: tx, ty, mag_T = 1, 0, 1
+                T = [tx/mag_T, ty/mag_T, 0]
+                N = [-T[1], T[0], 0]
+                
+                new_walls = []
+                base_up_id = up_info.get("id", "UP")
+                
+                def make_solid_underpass(id_suffix, center, tangent, width, length, height):
+                    # Solid block using underpass geometry (wall_thickness = width/2, slab/bottom = height/2)
+                    wall_id = f"{base_up_id}_{id_suffix}_{random.randint(100, 999)}"
+                    wall_obj = {
+                        "id": wall_id,
+                        "is_wall": True,
+                        "worksheet": up_info.get("worksheet", ""),
+                        "design_layer": up_info.get("design_layer", ""),
+                        "length": length,
+                        "width": width,
+                        "height": height,
+                        "wall_thickness": width / 2.0,
+                        "slab_thickness": height / 2.0,
+                        "bottom_thickness": height / 2.0,
+                        "km": up_info.get("km", 0),
+                        "chainage": up_info.get("chainage", "0+000"),
+                        "chainage_abs": up_info.get("chainage_abs", 0),
+                        "depth_from_road_surface": up_info.get("depth_from_road_surface", 0),
+                        "road_surface_z": up_info.get("road_surface_z", 0),
+                        "position": {"x": center[0], "y": center[1], "z": center[2]},
+                        "tangent": tangent
+                    }
+                    return wall_obj
+                
+                hw_t = data["hw_thickness"]
+                hw_l = data["hw_length"]
+                ww_l = data["ww_length"]
+                ww_t = data["ww_thickness"]
+                ww_h = data["ww_height"]
+                flare = math.radians(data["ww_flare_angle"])
+                
+                portals = []
+                if data["start_portal"]: portals.append(-1) # -Y direction in local
+                if data["end_portal"]: portals.append(1)    # +Y direction in local
+                
+                for p_dir in portals:
+                    p_name = "Start" if p_dir == -1 else "End"
+                    
+                    # 1. Head Wall
+                    c_hw = [
+                        C[0] + N[0] * p_dir * (L/2 + hw_t/2),
+                        C[1] + N[1] * p_dir * (L/2 + hw_t/2),
+                        C[2]
+                    ]
+                    # Head Wall acts as an underpass spanning width (X) and thickness (Y)
+                    hw_obj = make_solid_underpass(f"HW_{p_name}", c_hw, T, hw_l, hw_t, H)
+                    new_walls.append(hw_obj)
+                    
+                    # 2. Wing Walls
+                    sides = []
+                    if data["side_left"]: sides.append(-1)
+                    if data["side_right"]: sides.append(1)
+                    
+                    for s_dir in sides:
+                        s_name = "Left" if s_dir == -1 else "Right"
+                        # Attachment point
+                        attach_pt = [
+                            C[0] + N[0] * (p_dir * L/2) + T[0] * (s_dir * W/2),
+                            C[1] + N[1] * (p_dir * L/2) + T[1] * (s_dir * W/2),
+                            C[2]
+                        ]
+                        
+                        # Flare Direction (outward)
+                        # Portal normal faces p_dir * N
+                        # Flaring left/right means rotating away from normal towards s_dir * T
+                        portal_out = [N[0] * p_dir, N[1] * p_dir, 0]
+                        flare_axis = [T[0] * s_dir, T[1] * s_dir, 0]
+                        
+                        ww_dir = [
+                            portal_out[0] * math.cos(flare) + flare_axis[0] * math.sin(flare),
+                            portal_out[1] * math.cos(flare) + flare_axis[1] * math.sin(flare),
+                            0
+                        ]
+                        
+                        # Center of wing wall
+                        c_ww = [
+                            attach_pt[0] + ww_dir[0] * (ww_l / 2),
+                            attach_pt[1] + ww_dir[1] * (ww_l / 2),
+                            C[2] - (H/2) + (ww_h/2)
+                        ]
+                        
+                        # Tangent of wing wall is orthogonal to ww_dir
+                        ww_tangent = [-ww_dir[1], ww_dir[0], 0]
+                        
+                        ww_obj = make_solid_underpass(f"WW_{p_name}_{s_name}", c_ww, ww_tangent, ww_t, ww_l, ww_h)
+                        new_walls.append(ww_obj)
+                
+                cfg_data["under_passes"].extend(new_walls)
+                
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg_data, f, indent=4)
+                
+                # Visualize the newly added walls
+                for wall in new_walls:
+                    if hasattr(self, 'visualize_under_pass'):
+                        self.visualize_under_pass(wall)
+                
+                if hasattr(self.vtk_widget, 'GetRenderWindow'):
+                    self.vtk_widget.GetRenderWindow().Render()
+                
+                QMessageBox.information(self, "Success", f"Created {len(new_walls)} wall(s) and saved to config.")
+######################################################################################################
     ## Mayur 21-7-2026 tunnel wall
     def open_tunnel_wall_dialog(self):
         """Open the Tunnel Wall dialog."""
