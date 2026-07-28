@@ -12338,16 +12338,25 @@ class PointCloudViewer(ApplicationUI):
                         self.current_artist.set_data(xs, ys)
                 else:
                     if self.current_artist is not None:
-                        self.current_artist.remove()
+                        try:
+                            self.current_artist.remove()
+                        except ValueError:
+                            pass
                         self.current_artist = None
                 
                 self.canvas.draw()
                 self.figure.tight_layout()
         elif self.all_graph_lines:
             lt, points, artist, ann = self.all_graph_lines.pop()
-            artist.remove()
+            try:
+                artist.remove()
+            except ValueError:
+                pass
             if ann:  # Only remove annotation if it exists
-                ann.remove()
+                try:
+                    ann.remove()
+                except ValueError:
+                    pass
             self.line_types[lt]['artists'].pop()
             self.line_types[lt]['polylines'].pop()
             self.redo_stack.append((lt, points))
@@ -18992,6 +19001,10 @@ class PointCloudViewer(ApplicationUI):
                 top_z = zero_z + top_y_dense[i]
                 bot_z = zero_z + bottom_y_dense[i]
                 
+                # FIX: Prevent degenerate 0-area quads for 0-thickness materials (like M2)
+                if abs(top_z - bot_z) < 0.001:
+                    bot_z -= 0.005
+                
                 # Fetch Absolute Reference Zs to interpolate width correctly globally
                 if cons_path is not None and len(cons_path['chainage']) > 0:
 #Mayur Wakhare 09-06-2026 : Update Code
@@ -19179,6 +19192,11 @@ class PointCloudViewer(ApplicationUI):
             print(f"DEBUG: Material actor created M{material_index+1}")
             print(f"  - Actor ID: {id(actor)}")
             print(f"  - Mapper Input ID: {id(mapper.GetInputDataObject(0, 0))}")
+            print(f"  - PolyData Point Count: {poly_data.GetNumberOfPoints()}")
+            print(f"  - PolyData Cell Count: {poly_data.GetNumberOfCells()}")
+            print(f"  - Renderer.AddActor called: True")
+            print(f"  - Visibility: {actor.GetVisibility()}")
+            print(f"  - Final Render call: True")
 
             self.vtk_widget.GetRenderWindow().Render()
 
