@@ -29,7 +29,7 @@ from vtkmodules.vtkCommonColor import vtkNamedColors
 from digging_point import DiggingPointInput
 from API import WorksheetAPI
 # Mayur Wakhare 06-06-2026 : Go to the dialogs module and bring the ShareWithBuddiesDialog, ExpandingRoadDialog, and UnderPassDialog objects into my current file so I can use them directly. ############
-from dialogs import ShareWithBuddiesDialog, ExpandingRoadDialog
+from dialogs import ShareWithBuddiesDialog, ExpandingRoadDialog, CenterLineDialog
 
 import vtk
 import math as _math
@@ -1053,6 +1053,72 @@ class ApplicationUI(QMainWindow):
         self.under_pass_btn.setFixedWidth(100)
         self.under_pass_btn.clicked.connect(self.handle_under_pass_clicked)
         menu_bar_dd_layout.addWidget(self.under_pass_btn)
+
+########## Mayur Wakhare 31-07-2026 : Added Tunnel button on Menu bar ############
+        self.tunnel_btn = QPushButton("Menu_Tunnel ▶")
+        self.tunnel_btn.setFixedHeight(40)
+        self.tunnel_btn.setFixedWidth(120)
+        self.tunnel_btn.setCheckable(True)
+        menu_bar_dd_layout.addWidget(self.tunnel_btn)
+
+        # Sub-dropdown: Menu Tunnel Options
+        self.menu_tunnel_sub_dropdown = QWidget()
+        self.menu_tunnel_sub_dropdown.setWindowFlags(Qt.Popup)
+        menu_tunnel_sub_layout = QVBoxLayout(self.menu_tunnel_sub_dropdown)
+        menu_tunnel_sub_layout.setContentsMargins(4, 4, 4, 4)
+        menu_tunnel_sub_layout.setSpacing(2)
+
+        self.menu_tunnel_center_line_btn = QPushButton("Center Line")
+        self.menu_tunnel_center_line_btn.setFixedHeight(40)
+        self.menu_tunnel_center_line_btn.setFixedWidth(140)
+        
+        def handle_center_line_click():
+            # 1. Immediately hide the menus
+            if hasattr(self, 'menu_tunnel_sub_dropdown'):
+                self.menu_tunnel_sub_dropdown.hide()
+            if hasattr(self, 'tunnel_btn'):
+                self.tunnel_btn.setChecked(False)
+            if hasattr(self, 'menu_bar_button'):
+                self.menu_bar_button.setChecked(False)
+                if self.menu_bar_button.property("dropdown"):
+                    self.menu_bar_button.property("dropdown").hide()
+
+            worksheet_open = bool(getattr(self, "current_worksheet_name", None))
+            design_active = (str(getattr(self, "active_layer_highlight_subfolder", "")).lower() == "designs")
+            
+            if not worksheet_open or not design_active:
+                QMessageBox.warning(self, "Action Unavailable", "Center Line is available only when a Worksheet is open and a Design Layer is active.")
+                return
+            
+            def on_center_line_picked(p1, p2):
+                def show_dialog():
+                    dialog = CenterLineDialog(p1, p2, parent=self)
+                    if dialog.exec_() == QDialog.Accepted:
+                        count = dialog.cp_spinbox.value()
+                        self.center_line_angles = dialog.get_angles()
+                        self.center_line_turns = dialog.get_turns()
+                        if hasattr(self, 'preview_center_line_control_points'):
+                            self.preview_center_line_control_points(p1, p2, count, self.center_line_angles, self.center_line_turns)
+                # Delay the dialog slightly so VTK receives the mouse release event, preventing the camera spin
+                QTimer.singleShot(100, show_dialog)
+                
+            if hasattr(self, 'start_center_line_picking'):
+                self.start_center_line_picking(on_center_line_picked)
+
+        self.menu_tunnel_center_line_btn.clicked.connect(handle_center_line_click)
+        menu_tunnel_sub_layout.addWidget(self.menu_tunnel_center_line_btn)
+
+        def toggle_menu_tunnel_sub():
+            if self.tunnel_btn.isChecked():
+                pos = self.tunnel_btn.mapToGlobal(QPoint(self.tunnel_btn.width(), 0))
+                self.menu_tunnel_sub_dropdown.move(pos)
+                self.menu_tunnel_sub_dropdown.show()
+            else:
+                self.menu_tunnel_sub_dropdown.hide()
+
+        self.tunnel_btn.clicked.connect(toggle_menu_tunnel_sub)
+
+######################################################################
         
         
         def toggle_menu_bar():
@@ -1074,7 +1140,12 @@ class ApplicationUI(QMainWindow):
                     self.tunnel_excavation_button.setChecked(False)
                 if hasattr(self, 'tunnel_sub_dropdown'):
                     self.tunnel_sub_dropdown.hide()
-
+                ### Mayur 31-7-2026 : Added Tunnel button on Menu bar
+                if hasattr(self, 'tunnel_btn'):
+                    self.tunnel_btn.setChecked(False)
+                if hasattr(self, 'menu_tunnel_sub_dropdown'):
+                    self.menu_tunnel_sub_dropdown.hide()
+                ##############################################
         self.menu_bar_button.clicked.connect(toggle_menu_bar)
         menu_bar_dropdown.installEventFilter(self)
 

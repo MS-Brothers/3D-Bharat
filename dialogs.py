@@ -23604,3 +23604,130 @@ class UnderpassWallDialog(QDialog):
             "hw_thickness": self.hw_thickness_input.value(),
             "position": pos
         }
+
+
+### Mayur 31-07-2026 : Bring the CenterLineDialog object into my current file so I can use it directly.
+class CenterLineDialog(QDialog):
+    def __init__(self, p1, p2, parent=None):
+        super().__init__(parent)
+        self.p1 = p1
+        self.p2 = p2
+        self.setWindowTitle("Center Line Configuration")
+        self.setModal(True)
+        self.setMinimumWidth(550)
+        
+        layout = QVBoxLayout(self)
+        
+        # Calculate length
+        import numpy as np
+        self.tunnel_length = np.linalg.norm(np.array(p2) - np.array(p1))
+        
+        # Length field (read-only)
+        length_layout = QHBoxLayout()
+        length_label = QLabel("Tunnel Length (m):")
+        self.length_input = QLineEdit()
+        self.length_input.setText(f"{self.tunnel_length:.3f}")
+        self.length_input.setReadOnly(True)
+        length_layout.addWidget(length_label)
+        length_layout.addWidget(self.length_input)
+        layout.addLayout(length_layout)
+        
+        # Control points field
+        cp_layout = QHBoxLayout()
+        cp_label = QLabel("Control Points:")
+        self.cp_spinbox = QSpinBox()
+        self.cp_spinbox.setRange(0, 999)
+        self.cp_spinbox.setValue(0)
+        
+        self.generate_btn = QPushButton("Generate")
+        self.generate_btn.clicked.connect(self.on_generate_clicked)
+        
+        cp_layout.addWidget(cp_label)
+        cp_layout.addWidget(self.cp_spinbox)
+        cp_layout.addWidget(self.generate_btn)
+        layout.addLayout(cp_layout)
+        
+        # Scroll area for CPs
+        from PyQt5.QtWidgets import QScrollArea, QWidget
+        from PyQt5.QtCore import Qt
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_content = QWidget()
+        self.cp_scroll_layout = QVBoxLayout(self.scroll_content)
+        self.cp_scroll_layout.setAlignment(Qt.AlignTop)
+        self.scroll_area.setWidget(self.scroll_content)
+        layout.addWidget(self.scroll_area)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.cancel_btn = QPushButton("Cancel")
+        self.ok_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.ok_btn)
+        button_layout.addWidget(self.cancel_btn)
+        layout.addLayout(button_layout)
+        
+    def on_generate_clicked(self):
+        value = self.cp_spinbox.value()
+        
+        # Clear existing CP entries in the dialog
+        while self.cp_scroll_layout.count():
+            item = self.cp_scroll_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+                
+        self.angle_spinboxes = []
+        self.turn_radios = []
+                
+        # Generate CP rows
+        interval = self.tunnel_length / value if value > 0 else 0
+        from PyQt5.QtWidgets import QDoubleSpinBox, QRadioButton
+        for i in range(value):
+            dist = interval * (i + 1)
+            row_layout = QHBoxLayout()
+            
+            cp_label = QLabel(f"CP{i+1}   {dist:.2f} m")
+            cp_label.setMinimumWidth(100)
+            
+            angle_label = QLabel("Angle: [")
+            angle_spinbox = QDoubleSpinBox()
+            angle_spinbox.setRange(-360.0, 360.0)
+            angle_spinbox.setSingleStep(1.0)
+            angle_spinbox.setValue(0.0)
+            angle_spinbox.setSuffix("° ")
+            angle_spinbox.setFixedWidth(80)
+            
+            self.angle_spinboxes.append(angle_spinbox)
+            bracket_close_label = QLabel("]")
+            
+            turn_label = QLabel("  Turn: ")
+            right_radio = QRadioButton("Right")
+            left_radio = QRadioButton("Left")
+            right_radio.setChecked(True)
+            self.turn_radios.append((right_radio, left_radio))
+            
+            row_layout.addWidget(cp_label)
+            row_layout.addStretch()
+            row_layout.addWidget(angle_label)
+            row_layout.addWidget(angle_spinbox)
+            row_layout.addWidget(bracket_close_label)
+            row_layout.addWidget(turn_label)
+            row_layout.addWidget(right_radio)
+            row_layout.addWidget(left_radio)
+            
+            row_widget = QWidget()
+            row_widget.setLayout(row_layout)
+            self.cp_scroll_layout.addWidget(row_widget)
+            
+    def get_angles(self):
+        if hasattr(self, 'angle_spinboxes'):
+            return [spinbox.value() for spinbox in self.angle_spinboxes]
+        return []
+        
+    def get_turns(self):
+        if hasattr(self, 'turn_radios'):
+            return ["Right" if right_radio.isChecked() else "Left" for right_radio, left_radio in self.turn_radios]
+        return []
+

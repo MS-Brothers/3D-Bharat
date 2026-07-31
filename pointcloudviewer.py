@@ -20077,11 +20077,128 @@ class PointCloudViewer(ApplicationUI):
         
         # Reset any previous measurements
         self.reset_action()
+### Mayur 31-7-2026 centre line
+    def start_center_line_picking(self, callback):
+        self.center_line_picking_active = True
+        self.center_line_points = []
+        self.center_line_complete_callback = callback
+        
+        # Clear previous markers and line if they exist
+        if hasattr(self, 'center_line_markers') and self.center_line_markers:
+            for marker in self.center_line_markers:
+                self.renderer.RemoveActor(marker)
+        self.center_line_markers = []
+        
+        if hasattr(self, 'center_line_actor') and self.center_line_actor:
+            self.renderer.RemoveActor(self.center_line_actor)
+            self.center_line_actor = None
+            
+        if hasattr(self, 'center_line_cp_actors') and self.center_line_cp_actors:
+            for actor in self.center_line_cp_actors:
+                self.renderer.RemoveActor(actor)
+        self.center_line_cp_actors = []
+            
+        self.vtk_widget.GetRenderWindow().Render()
 
+    def preview_center_line_control_points(self, p1, p2, count, angles=None, turns=None):
+        import numpy as np
+        import vtk
+        
+        if hasattr(self, 'center_line_cp_actors') and self.center_line_cp_actors:
+            for actor in self.center_line_cp_actors:
+                self.renderer.RemoveActor(actor)
+        self.center_line_cp_actors = []
+        
+        # Remove old center line
+        if hasattr(self, 'center_line_actor') and self.center_line_actor:
+            self.renderer.RemoveActor(self.center_line_actor)
+            self.center_line_actor = None
+            
+        if count < 1:
+            self.vtk_widget.GetRenderWindow().Render()
+            return
+            
+        p1 = np.array(p1)
+        p2 = np.array(p2)
+        
+        total_length = np.linalg.norm(p2 - p1)
+        if total_length == 0: return
+        interval = total_length / count
+        
+        current_dir = (p2 - p1) / total_length
+        current_pt = p1.copy()
+        
+        if angles is None: angles = [0.0] * count
+        if turns is None: turns = ["Right"] * count
+        
+        poly_points = [current_pt.copy()]
+        
+        for i in range(count):
+            next_pt = current_pt + current_dir * interval
+            poly_points.append(next_pt.copy())
+            
+            # Create sphere marker
+            sphere = vtk.vtkSphereSource()
+            sphere.SetRadius(0.07)
+            sphere.SetCenter(next_pt[0], next_pt[1], next_pt[2])
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputConnection(sphere.GetOutputPort())
+            actor = vtk.vtkActor()
+            actor.SetMapper(mapper)
+            actor.GetProperty().SetColor(0.0, 1.0, 1.0)  # Cyan
+            
+            self.renderer.AddActor(actor)
+            self.center_line_cp_actors.append(actor)
+            
+            # Create text label
+            text = vtk.vtkVectorText()
+            text.SetText(f"CP{i+1}")
+            text_mapper = vtk.vtkPolyDataMapper()
+            text_mapper.SetInputConnection(text.GetOutputPort())
+            text_actor = vtk.vtkFollower()
+            text_actor.SetMapper(text_mapper)
+            text_actor.SetScale(0.1, 0.1, 0.1)
+            text_actor.AddPosition(next_pt[0] + 0.15, next_pt[1] + 0.15, next_pt[2])
+            text_actor.GetProperty().SetColor(0.0, 1.0, 1.0)  # Cyan
+            
+            self.renderer.AddActor(text_actor)
+            text_actor.SetCamera(self.renderer.GetActiveCamera())
+            self.center_line_cp_actors.append(text_actor)
+            
+            # Rotate current_dir for next segment
+            angle = angles[i] if i < len(angles) else 0.0
+            turn = turns[i] if i < len(turns) else "Right"
+            
+            if angle != 0:
+                theta = np.radians(angle)
+                if turn == "Right":
+                    theta = -theta
+                
+                cos_t = np.cos(theta)
+                sin_t = np.sin(theta)
+                x_new = current_dir[0] * cos_t - current_dir[1] * sin_t
+                y_new = current_dir[0] * sin_t + current_dir[1] * cos_t
+                current_dir = np.array([x_new, y_new, current_dir[2]])
+                current_dir = current_dir / np.linalg.norm(current_dir)
+                
+            current_pt = next_pt
+            
+        # Draw new line
+        if hasattr(self, 'create_vtk_polyline'):
+            self.center_line_actor = self.create_vtk_polyline(poly_points, color=(1.0, 1.0, 0.0), line_width=2)
+            self.renderer.AddActor(self.center_line_actor)
+            
+        self.vtk_widget.GetRenderWindow().Render()
+#######################################################################
     # =======================================================================================================================================
     def on_click(self, obj, event):
-        if not self.measurement_active or not self.current_measurement or self.freeze_view or not self.plotting_active:
-            return
+        ## Mayur 31-7-2026 Centre Line
+        is_center_line_picking = getattr(self, 'center_line_picking_active', False)
+        
+        if not is_center_line_picking:
+            #############################
+            if not self.measurement_active or not self.current_measurement or self.freeze_view or not self.plotting_active:
+                return
 
         interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
         pos = interactor.GetEventPosition()
@@ -20110,7 +20227,32 @@ class PointCloudViewer(ApplicationUI):
         
         if clicked_point is None:
             return  # No point found
-
+####### Mayur 31-7 2026 centre line
+        if getattr(self, 'center_line_picking_active', False):
+            if not hasattr(self, 'center_line_points'):
+                self.center_line_points = []
+            
+            self.center_line_points.append(clicked_point)
+            
+            # Add a marker for visual feedback of the point
+            marker = self.add_sphere_marker(clicked_point, f"CL Point {len(self.center_line_points)}", color="yellow")
+            if not hasattr(self, 'center_line_markers'):
+                self.center_line_markers = []
+            if marker:
+                self.center_line_markers.append(marker)
+            
+            if len(self.center_line_points) == 2:
+                self.center_line_picking_active = False
+                # Draw a line between the two points
+                self.center_line_actor = self.create_vtk_polyline(self.center_line_points, color=(1.0, 1.0, 0.0), line_width=2)
+                self.renderer.AddActor(self.center_line_actor)
+                self.vtk_widget.GetRenderWindow().Render()
+                
+                # Trigger callback
+                if hasattr(self, 'center_line_complete_callback') and self.center_line_complete_callback:
+                    self.center_line_complete_callback(self.center_line_points[0], self.center_line_points[1])
+            return
+#############################################################################################
         if hasattr(self, 'current_measurement') and self.current_measurement == 'tunnel_arc':
             if not hasattr(self, 'tunnel_arc_points'):
                 self.tunnel_arc_points = []
