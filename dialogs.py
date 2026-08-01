@@ -23608,126 +23608,334 @@ class UnderpassWallDialog(QDialog):
 
 ### Mayur 31-07-2026 : Bring the CenterLineDialog object into my current file so I can use it directly.
 class CenterLineDialog(QDialog):
-    def __init__(self, p1, p2, parent=None):
+    def __init__(self, p1, p2, existing_config=None, parent=None):
         super().__init__(parent)
+        from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QGridLayout, 
+                                     QLabel, QLineEdit, QSpinBox, QPushButton, 
+                                     QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
+                                     QDoubleSpinBox, QComboBox, QAbstractItemView, QFrame)
+        from PyQt5.QtCore import Qt
+        import numpy as np
+
         self.p1 = p1
         self.p2 = p2
+        
+        design_layer_id = ""
+        if parent and hasattr(parent, 'active_layer_btn'):
+            design_layer_id = parent.active_layer_btn.text()
+            
         self.setWindowTitle("Center Line Configuration")
         self.setModal(True)
-        self.setMinimumWidth(550)
+        self.setMinimumWidth(900)
+        self.setMinimumHeight(600)
+        self.resize(1200, 850)
+        self.setStyleSheet("QDialog { background-color: #F3F4F6; }")
         
-        layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(15)
+        
+        # --- TITLE BOX ---
+        title_frame = QFrame()
+        title_frame.setStyleSheet("""
+            QFrame {
+                background-color: #D2E8FA;
+                border: 1px solid #1062B7;
+                border-radius: 6px;
+            }
+        """)
+        title_layout = QVBoxLayout(title_frame)
+        title_label = QLabel("CENTER LINE CONFIGURATION\n" + (design_layer_id if design_layer_id else ""))
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setStyleSheet("""
+            QLabel {
+                color: #0A4A9B;
+                font-size: 18px;
+                font-weight: bold;
+                border: none;
+                background: transparent;
+            }
+        """)
+        title_layout.addWidget(title_label)
+        main_layout.addWidget(title_frame)
         
         # Calculate length
-        import numpy as np
         self.tunnel_length = np.linalg.norm(np.array(p2) - np.array(p1))
         
-        # Length field (read-only)
-        length_layout = QHBoxLayout()
-        length_label = QLabel("Tunnel Length (m):")
-        self.length_input = QLineEdit()
-        self.length_input.setText(f"{self.tunnel_length:.3f}")
-        self.length_input.setReadOnly(True)
-        length_layout.addWidget(length_label)
-        length_layout.addWidget(self.length_input)
-        layout.addLayout(length_layout)
+        # Common Styles
+        group_box_style = """
+            QGroupBox {
+                font-weight: bold;
+                color: #0A4A9B;
+                border: 1.5px solid #1062B7;
+                border-radius: 6px;
+                margin-top: 15px;
+                padding-top: 15px;
+                background-color: #F8FBFE;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                left: 15px;
+            }
+        """
+        input_style = """
+            QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+                border: 1px solid #A0C0E0;
+                border-radius: 4px;
+                padding: 4px;
+                background-color: white;
+                color: #333333;
+                font-weight: bold;
+            }
+        """
+        readonly_style = """
+            QLineEdit[readOnly="true"] {
+                background-color: #E9ECEF;
+                color: #555555;
+            }
+        """
+        label_style = "QLabel { font-weight: bold; color: #333333; }"
         
-        # Control points field
-        cp_layout = QHBoxLayout()
-        cp_label = QLabel("Control Points:")
+        self.setStyleSheet(self.styleSheet() + group_box_style + input_style + readonly_style + label_style)
+        
+        # --- Section 1: Center Line Information ---
+        info_group = QGroupBox("Center Line Information")
+        info_layout = QGridLayout(info_group)
+        info_layout.setSpacing(12)
+        info_layout.setContentsMargins(15, 20, 15, 15)
+        
+        info_layout.addWidget(QLabel("Start Point (m):"), 0, 0)
+        sp_input = QLineEdit(f"{p1[0]:.3f}, {p1[1]:.3f}, {p1[2]:.3f}")
+        sp_input.setReadOnly(True)
+        info_layout.addWidget(sp_input, 0, 1)
+        
+        info_layout.addWidget(QLabel("End Point (m):"), 1, 0)
+        ep_input = QLineEdit(f"{p2[0]:.3f}, {p2[1]:.3f}, {p2[2]:.3f}")
+        ep_input.setReadOnly(True)
+        info_layout.addWidget(ep_input, 1, 1)
+        
+        info_layout.addWidget(QLabel("Tunnel Length (m):"), 0, 2)
+        len_input = QLineEdit(f"{self.tunnel_length:.3f}")
+        len_input.setReadOnly(True)
+        info_layout.addWidget(len_input, 0, 3)
+        
+        info_layout.addWidget(QLabel("Total Control Points:"), 1, 2)
         self.cp_spinbox = QSpinBox()
         self.cp_spinbox.setRange(0, 999)
         self.cp_spinbox.setValue(0)
+        info_layout.addWidget(self.cp_spinbox, 1, 3)
+        
+        main_layout.addWidget(info_group)
+        
+        # --- Section 2: Control Point Configuration ---
+        config_group = QGroupBox("Control Point Configuration")
+        config_layout = QVBoxLayout(config_group)
+        config_layout.setContentsMargins(15, 20, 15, 15)
+        
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels([
+            "Control Point", "Distance from Start (m)", 
+            "Horizontal Angle (°)", "Turn Direction", 
+            "Vertical Angle (°)", "Vertical Direction"
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.table.setStyleSheet("""
+            QTableWidget {
+                border: 1px solid #1062B7;
+                background-color: white;
+                gridline-color: #DDEEFE;
+            }
+            QHeaderView::section {
+                background-color: #D2E8FA;
+                color: #0A4A9B;
+                font-weight: bold;
+                border: 1px solid #A0C0E0;
+                padding: 4px;
+            }
+        """)
+        config_layout.addWidget(self.table)
+        main_layout.addWidget(config_group)
+        
+        # --- Buttons ---
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(15)
         
         self.generate_btn = QPushButton("Generate")
+        self.generate_btn.setMinimumWidth(120)
+        self.generate_btn.setMinimumHeight(35)
+        self.generate_btn.setStyleSheet("QPushButton { background-color: #1062B7; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 13px; } QPushButton:hover { background-color: #0A4A9B; }")
         self.generate_btn.clicked.connect(self.on_generate_clicked)
         
-        cp_layout.addWidget(cp_label)
-        cp_layout.addWidget(self.cp_spinbox)
-        cp_layout.addWidget(self.generate_btn)
-        layout.addLayout(cp_layout)
+        button_layout.addWidget(self.generate_btn)
+        button_layout.addStretch()
         
-        # Scroll area for CPs
-        from PyQt5.QtWidgets import QScrollArea, QWidget
-        from PyQt5.QtCore import Qt
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_content = QWidget()
-        self.cp_scroll_layout = QVBoxLayout(self.scroll_content)
-        self.cp_scroll_layout.setAlignment(Qt.AlignTop)
-        self.scroll_area.setWidget(self.scroll_content)
-        layout.addWidget(self.scroll_area)
-        
-        # Buttons
-        button_layout = QHBoxLayout()
-        self.ok_btn = QPushButton("OK")
         self.cancel_btn = QPushButton("Cancel")
-        self.ok_btn.clicked.connect(self.accept)
+        self.cancel_btn.setMinimumWidth(120)
+        self.cancel_btn.setMinimumHeight(35)
+        self.cancel_btn.setStyleSheet("QPushButton { background-color: #6C757D; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 13px; } QPushButton:hover { background-color: #5A6268; }")
         self.cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(self.ok_btn)
+        
+        self.ok_btn = QPushButton("Save")
+        self.ok_btn.setMinimumWidth(120)
+        self.ok_btn.setMinimumHeight(35)
+        self.ok_btn.setStyleSheet("QPushButton { background-color: #28A745; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 13px; } QPushButton:hover { background-color: #218838; }")
+        self.ok_btn.clicked.connect(self.accept)
+        
         button_layout.addWidget(self.cancel_btn)
-        layout.addLayout(button_layout)
+        button_layout.addWidget(self.ok_btn)
         
+        main_layout.addLayout(button_layout)
+        
+        # Logic
+        if existing_config:
+            self.cp_spinbox.setValue(existing_config.get('count', 0))
+            self.on_generate_clicked()
+            angles = existing_config.get('angles', [])
+            turns = existing_config.get('turns', [])
+            v_angles = existing_config.get('v_angles', [])
+            v_turns = existing_config.get('v_turns', [])
+            
+            for i in range(self.table.rowCount()):
+                if i < len(angles):
+                    spinbox = self.table.cellWidget(i, 2)
+                    if spinbox: spinbox.setValue(angles[i])
+                if i < len(turns):
+                    combo = self.table.cellWidget(i, 3)
+                    if combo: combo.setCurrentText(turns[i])
+                if i < len(v_angles):
+                    spinbox = self.table.cellWidget(i, 4)
+                    if spinbox: spinbox.setValue(v_angles[i])
+                if i < len(v_turns):
+                    combo = self.table.cellWidget(i, 5)
+                    if combo: combo.setCurrentText(v_turns[i])
+
     def on_generate_clicked(self):
-        value = self.cp_spinbox.value()
+        from PyQt5.QtWidgets import QTableWidgetItem, QDoubleSpinBox, QComboBox
+        from PyQt5.QtCore import Qt
         
-        # Clear existing CP entries in the dialog
-        while self.cp_scroll_layout.count():
-            item = self.cp_scroll_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-                
-        self.angle_spinboxes = []
-        self.turn_radios = []
-                
-        # Generate CP rows
+        value = self.cp_spinbox.value()
+        self.table.setRowCount(value)
+        
         interval = self.tunnel_length / value if value > 0 else 0
-        from PyQt5.QtWidgets import QDoubleSpinBox, QRadioButton
+        
         for i in range(value):
             dist = interval * (i + 1)
-            row_layout = QHBoxLayout()
             
-            cp_label = QLabel(f"CP{i+1}   {dist:.2f} m")
-            cp_label.setMinimumWidth(100)
+            cp_item = QTableWidgetItem(f"CP{i+1}")
+            cp_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(i, 0, cp_item)
             
-            angle_label = QLabel("Angle: [")
-            angle_spinbox = QDoubleSpinBox()
-            angle_spinbox.setRange(-360.0, 360.0)
-            angle_spinbox.setSingleStep(1.0)
-            angle_spinbox.setValue(0.0)
-            angle_spinbox.setSuffix("° ")
-            angle_spinbox.setFixedWidth(80)
+            dist_item = QTableWidgetItem(f"{dist:.2f}")
+            dist_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(i, 1, dist_item)
             
-            self.angle_spinboxes.append(angle_spinbox)
-            bracket_close_label = QLabel("]")
+            h_angle = QDoubleSpinBox()
+            h_angle.setRange(-360.0, 360.0)
+            h_angle.setSingleStep(1.0)
+            h_angle.setValue(0.0)
+            h_angle.setAlignment(Qt.AlignCenter)
+            self.table.setCellWidget(i, 2, h_angle)
             
-            turn_label = QLabel("  Turn: ")
-            right_radio = QRadioButton("Right")
-            left_radio = QRadioButton("Left")
-            right_radio.setChecked(True)
-            self.turn_radios.append((right_radio, left_radio))
+            h_turn = QComboBox()
+            h_turn.addItems(["Right", "Left"])
+            self.table.setCellWidget(i, 3, h_turn)
             
-            row_layout.addWidget(cp_label)
-            row_layout.addStretch()
-            row_layout.addWidget(angle_label)
-            row_layout.addWidget(angle_spinbox)
-            row_layout.addWidget(bracket_close_label)
-            row_layout.addWidget(turn_label)
-            row_layout.addWidget(right_radio)
-            row_layout.addWidget(left_radio)
+            v_angle = QDoubleSpinBox()
+            v_angle.setRange(-360.0, 360.0)
+            v_angle.setSingleStep(1.0)
+            v_angle.setValue(0.0)
+            v_angle.setAlignment(Qt.AlignCenter)
+            self.table.setCellWidget(i, 4, v_angle)
             
-            row_widget = QWidget()
-            row_widget.setLayout(row_layout)
-            self.cp_scroll_layout.addWidget(row_widget)
+            v_turn = QComboBox()
+            v_turn.addItems(["Up", "Down"])
+            v_turn.setCurrentText("Down")
+            self.table.setCellWidget(i, 5, v_turn)
             
     def get_angles(self):
-        if hasattr(self, 'angle_spinboxes'):
-            return [spinbox.value() for spinbox in self.angle_spinboxes]
-        return []
+        return [self.table.cellWidget(i, 2).value() for i in range(self.table.rowCount()) if self.table.cellWidget(i, 2)]
         
     def get_turns(self):
-        if hasattr(self, 'turn_radios'):
-            return ["Right" if right_radio.isChecked() else "Left" for right_radio, left_radio in self.turn_radios]
-        return []
+        return [self.table.cellWidget(i, 3).currentText() for i in range(self.table.rowCount()) if self.table.cellWidget(i, 3)]
+
+    def get_v_angles(self):
+        return [self.table.cellWidget(i, 4).value() for i in range(self.table.rowCount()) if self.table.cellWidget(i, 4)]
+
+    def get_v_turns(self):
+        return [self.table.cellWidget(i, 5).currentText() for i in range(self.table.rowCount()) if self.table.cellWidget(i, 5)]
+## Mayur 1-8-2026 : TBM Setup Dialog
+class TBMSetupDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("TBM Setup")
+        self.setMinimumWidth(300)
+
+        layout = QVBoxLayout(self)
+
+        form_layout = QFormLayout()
+        
+        self.length_input = QDoubleSpinBox()
+        self.length_input.setRange(0.0, 100000.0)
+        self.length_input.setDecimals(2)
+        self.length_input.setValue(0.0)
+        
+        self.breadth_input = QDoubleSpinBox()
+        self.breadth_input.setRange(0.0, 100000.0)
+        self.breadth_input.setDecimals(2)
+        self.breadth_input.setValue(0.0)
+
+        self.thickness_input = QDoubleSpinBox()
+        self.thickness_input.setRange(0.0, 100000.0)
+        self.thickness_input.setDecimals(2)
+        self.thickness_input.setValue(0.0)
+
+        self.offset_input = QDoubleSpinBox()
+        self.offset_input.setRange(0.0, 100000.0)
+        self.offset_input.setDecimals(2)
+        self.offset_input.setValue(10.0)
+
+        form_layout.addRow("Length (m):", self.length_input)
+        form_layout.addRow("Breadth (m):", self.breadth_input)
+        form_layout.addRow("Wall Thickness (m):", self.thickness_input)
+        form_layout.addRow("Offset from Starting Point (m):", self.offset_input)
+        
+        layout.addLayout(form_layout)
+
+        button_layout = QHBoxLayout()
+        self.ok_button = QPushButton("OK")
+        self.cancel_button = QPushButton("Cancel")
+        
+        button_layout.addWidget(self.ok_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+
+        self.ok_button.clicked.connect(self.validate_and_accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+        self.tbm_length = 0.0
+        self.tbm_breadth = 0.0
+        self.tbm_thickness = 0.0
+        self.tbm_offset = 10.0
+
+    def validate_and_accept(self):
+        length = self.length_input.value()
+        breadth = self.breadth_input.value()
+        thickness = self.thickness_input.value()
+        offset = self.offset_input.value()
+        
+        if length <= 0 or breadth <= 0 or thickness <= 0:
+            QMessageBox.warning(self, "Invalid Input", "Length, Breadth, and Wall Thickness must be greater than zero.")
+            return
+            
+        self.tbm_length = length
+        self.tbm_breadth = breadth
+        self.tbm_thickness = thickness
+        self.tbm_offset = offset
+        self.accept()
+
 

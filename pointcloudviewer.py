@@ -20100,7 +20100,7 @@ class PointCloudViewer(ApplicationUI):
             
         self.vtk_widget.GetRenderWindow().Render()
 
-    def preview_center_line_control_points(self, p1, p2, count, angles=None, turns=None):
+    def preview_center_line_control_points(self, p1, p2, count, angles=None, turns=None, v_angles=None, v_turns=None):
         import numpy as np
         import vtk
         
@@ -20130,6 +20130,8 @@ class PointCloudViewer(ApplicationUI):
         
         if angles is None: angles = [0.0] * count
         if turns is None: turns = ["Right"] * count
+        if v_angles is None: v_angles = [0.0] * count
+        if v_turns is None: v_turns = ["Down"] * count
         
         poly_points = [current_pt.copy()]
         
@@ -20139,13 +20141,13 @@ class PointCloudViewer(ApplicationUI):
             
             # Create sphere marker
             sphere = vtk.vtkSphereSource()
-            sphere.SetRadius(0.07)
+            sphere.SetRadius(0.4) # Significantly larger marker
             sphere.SetCenter(next_pt[0], next_pt[1], next_pt[2])
             mapper = vtk.vtkPolyDataMapper()
             mapper.SetInputConnection(sphere.GetOutputPort())
             actor = vtk.vtkActor()
             actor.SetMapper(mapper)
-            actor.GetProperty().SetColor(0.0, 1.0, 1.0)  # Cyan
+            actor.GetProperty().SetColor(0.0, 0.0, 0.0)  # Solid Black
             
             self.renderer.AddActor(actor)
             self.center_line_cp_actors.append(actor)
@@ -20168,18 +20170,42 @@ class PointCloudViewer(ApplicationUI):
             # Rotate current_dir for next segment
             angle = angles[i] if i < len(angles) else 0.0
             turn = turns[i] if i < len(turns) else "Right"
+            v_angle = v_angles[i] if i < len(v_angles) else 0.0
+            v_turn = v_turns[i] if i < len(v_turns) else "Down"
             
-            if angle != 0:
-                theta = np.radians(angle)
-                if turn == "Right":
-                    theta = -theta
+            if angle != 0 or v_angle != 0:
+                # 1. Apply Horizontal Rotation (Yaw) around Global Z (0,0,1)
+                if angle != 0:
+                    h_theta = angle
+                    if turn == "Right":
+                        h_theta = -h_theta
+                    t1 = vtk.vtkTransform()
+                    t1.RotateWXYZ(h_theta, 0, 0, 1)
+                    new_dir = t1.TransformDoubleVector(current_dir[0], current_dir[1], current_dir[2])
+                    current_dir = np.array(new_dir)
+                    current_dir = current_dir / np.linalg.norm(current_dir)
                 
-                cos_t = np.cos(theta)
-                sin_t = np.sin(theta)
-                x_new = current_dir[0] * cos_t - current_dir[1] * sin_t
-                y_new = current_dir[0] * sin_t + current_dir[1] * cos_t
-                current_dir = np.array([x_new, y_new, current_dir[2]])
-                current_dir = current_dir / np.linalg.norm(current_dir)
+                # 2. Apply Vertical Rotation (Pitch) around Local Right
+                if v_angle != 0:
+                    math = vtk.vtkMath()
+                    forward = current_dir.tolist()
+                    up_vec = [0.0, 0.0, 1.0]
+                    right_vec = [0.0, 0.0, 0.0]
+                    if abs(forward[2]) > 0.99:
+                        up_vec = [0.0, 1.0, 0.0]
+                    math.Cross(forward, up_vec, right_vec)
+                    math.Normalize(right_vec)
+                    
+                    v_theta = v_angle
+                    # Right-hand rule: positive rotation around Right vector points Up
+                    if v_turn == "Down":
+                        v_theta = -v_theta
+                    
+                    t2 = vtk.vtkTransform()
+                    t2.RotateWXYZ(v_theta, right_vec[0], right_vec[1], right_vec[2])
+                    new_dir = t2.TransformDoubleVector(current_dir[0], current_dir[1], current_dir[2])
+                    current_dir = np.array(new_dir)
+                    current_dir = current_dir / np.linalg.norm(current_dir)
                 
             current_pt = next_pt
             

@@ -29,7 +29,7 @@ from vtkmodules.vtkCommonColor import vtkNamedColors
 from digging_point import DiggingPointInput
 from API import WorksheetAPI
 # Mayur Wakhare 06-06-2026 : Go to the dialogs module and bring the ShareWithBuddiesDialog, ExpandingRoadDialog, and UnderPassDialog objects into my current file so I can use them directly. ############
-from dialogs import ShareWithBuddiesDialog, ExpandingRoadDialog, CenterLineDialog
+from dialogs import ShareWithBuddiesDialog, ExpandingRoadDialog, CenterLineDialog, TBMSetupDialog
 
 import vtk
 import math as _math
@@ -1089,24 +1089,194 @@ class ApplicationUI(QMainWindow):
             if not worksheet_open or not design_active:
                 QMessageBox.warning(self, "Action Unavailable", "Center Line is available only when a Worksheet is open and a Design Layer is active.")
                 return
-            
+           ### Mayur 1-8-2026 Center Line Implementation Start  
             def on_center_line_picked(p1, p2):
                 def show_dialog():
-                    dialog = CenterLineDialog(p1, p2, parent=self)
+                    existing_config = None
+                    if getattr(self, 'center_line_p1', None) is not None:
+                        existing_config = {
+                            'count': getattr(self, 'center_line_cp_count', 0),
+                            'angles': getattr(self, 'center_line_angles', []),
+                            'turns': getattr(self, 'center_line_turns', []),
+                            'v_angles': getattr(self, 'center_line_v_angles', []),
+                            'v_turns': getattr(self, 'center_line_v_turns', [])
+                        }
+                    dialog = CenterLineDialog(p1, p2, existing_config, parent=self)
                     if dialog.exec_() == QDialog.Accepted:
+                        self.center_line_p1 = p1
+                        self.center_line_p2 = p2
                         count = dialog.cp_spinbox.value()
+                        self.center_line_cp_count = count
                         self.center_line_angles = dialog.get_angles()
                         self.center_line_turns = dialog.get_turns()
+                        self.center_line_v_angles = dialog.get_v_angles()
+                        self.center_line_v_turns = dialog.get_v_turns()
                         if hasattr(self, 'preview_center_line_control_points'):
-                            self.preview_center_line_control_points(p1, p2, count, self.center_line_angles, self.center_line_turns)
+                            self.preview_center_line_control_points(p1, p2, count, self.center_line_angles, self.center_line_turns, self.center_line_v_angles, self.center_line_v_turns)
                 # Delay the dialog slightly so VTK receives the mouse release event, preventing the camera spin
                 QTimer.singleShot(100, show_dialog)
                 
-            if hasattr(self, 'start_center_line_picking'):
-                self.start_center_line_picking(on_center_line_picked)
+            if getattr(self, 'center_line_p1', None) is not None and getattr(self, 'center_line_p2', None) is not None:
+                on_center_line_picked(self.center_line_p1, self.center_line_p2)
+            else:
+                if hasattr(self, 'start_center_line_picking'):
+                    self.start_center_line_picking(on_center_line_picked)
 
         self.menu_tunnel_center_line_btn.clicked.connect(handle_center_line_click)
         menu_tunnel_sub_layout.addWidget(self.menu_tunnel_center_line_btn)
+        
+        self.menu_tunnel_clear_center_line_btn = QPushButton("Clear Center Line")
+        self.menu_tunnel_clear_center_line_btn.setFixedHeight(40)
+        self.menu_tunnel_clear_center_line_btn.setFixedWidth(140)
+        self.menu_tunnel_clear_center_line_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #FFFFFF;
+                border: 1px solid #4D4D4D;
+                border-radius: 8px;
+                padding: 10px;
+                text-align: left;
+                padding-left: 15px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border: 1px solid #666666;
+            }
+            QPushButton:pressed {
+                background-color: rgba(255, 255, 255, 0.05);
+            }
+        """)
+        def handle_clear_center_line():
+            self.center_line_p1 = None
+            self.center_line_p2 = None
+            self.center_line_cp_count = 0
+            self.center_line_angles = []
+            self.center_line_turns = []
+            self.center_line_v_angles = []
+            self.center_line_v_turns = []
+            if hasattr(self, 'preview_center_line_control_points'):
+                self.preview_center_line_control_points(None, None, 0)
+        self.menu_tunnel_clear_center_line_btn.clicked.connect(handle_clear_center_line)
+        menu_tunnel_sub_layout.addWidget(self.menu_tunnel_clear_center_line_btn)
+
+        self.menu_tunnel_tbm_setup_btn = QPushButton("TBM Setup")
+        self.menu_tunnel_tbm_setup_btn.setFixedHeight(40)
+        self.menu_tunnel_tbm_setup_btn.setFixedWidth(140)
+    ## Mayur 1-8-2026: Added Tunnel boring Machine on menu bar
+        def handle_tbm_setup_click():
+            # 1. Immediately hide the menus
+            if hasattr(self, 'menu_tunnel_sub_dropdown'):
+                self.menu_tunnel_sub_dropdown.hide()
+            if hasattr(self, 'tunnel_btn'):
+                self.tunnel_btn.setChecked(False)
+            if hasattr(self, 'menu_bar_button'):
+                self.menu_bar_button.setChecked(False)
+                if self.menu_bar_button.property("dropdown"):
+                    self.menu_bar_button.property("dropdown").hide()
+
+            worksheet_open = bool(getattr(self, "current_worksheet_name", None))
+            design_active = (str(getattr(self, "active_layer_highlight_subfolder", "")).lower() == "designs")
+            
+            if not worksheet_open or not design_active:
+                QMessageBox.warning(self, "Action Unavailable", "TBM Setup is available only when a Worksheet is open and a Design Layer is active.")
+                return
+
+            if not hasattr(self, 'center_line_points') or len(self.center_line_points) < 2:
+                QMessageBox.warning(self, "Action Unavailable", "Please define a Center Line first.")
+                return
+
+            dialog = TBMSetupDialog(self)
+            if dialog.exec_() == QDialog.Accepted:
+                self.tbm_setup_length = dialog.tbm_length
+                self.tbm_setup_breadth = dialog.tbm_breadth
+                self.tbm_setup_thickness = dialog.tbm_thickness
+                self.tbm_setup_offset = dialog.tbm_offset
+                
+                # Render the RCC Setup Block
+                import numpy as np
+                import vtk
+                
+                p1 = np.array(self.center_line_points[0])
+                p2 = np.array(self.center_line_points[1])
+                
+                dir_vec = p2 - p1
+                norm = np.linalg.norm(dir_vec)
+                if norm == 0:
+                    return
+                dir_vec = dir_vec / norm
+                
+                L = self.tbm_setup_length
+                B = self.tbm_setup_breadth
+                T = self.tbm_setup_thickness
+                
+                # To ensure the slab appears at the given offset behind the start point (opposite side) 
+                # and does not overlap it, the offset marks the beginning of the slab.
+                # Therefore, the geometric center of the slab is at offset + L/2 in the opposite direction.
+                offset_dist = self.tbm_setup_offset + (L / 2.0)
+                center_pos = p1 - dir_vec * offset_dist
+                
+                # Single solid slab
+                slab = vtk.vtkCubeSource()
+                slab.SetXLength(L)
+                slab.SetYLength(B)
+                slab.SetZLength(T)
+                # Position the slab so its top aligns with the center line (z=0)
+                slab.SetCenter(0, 0, -T/2)
+                slab.Update()
+                
+                # Setup transformation to align with center line
+                math = vtk.vtkMath()
+                forward = dir_vec.tolist()
+                right_vec = [0.0, 0.0, 0.0]
+                up_vec = [0.0, 0.0, 1.0] # assume vertical is mostly up
+                
+                # Avoid singularity if dir is exactly vertical
+                if abs(forward[2]) > 0.99:
+                    up_vec = [0.0, 1.0, 0.0]
+                    
+                math.Cross(forward, up_vec, right_vec)
+                math.Normalize(right_vec)
+                math.Cross(right_vec, forward, up_vec)
+                math.Normalize(up_vec)
+                
+                matrix = vtk.vtkMatrix4x4()
+                for i in range(3):
+                    matrix.SetElement(i, 0, forward[i])
+                    matrix.SetElement(i, 1, right_vec[i])
+                    matrix.SetElement(i, 2, up_vec[i])
+                    matrix.SetElement(i, 3, center_pos[i])
+                
+                transform = vtk.vtkTransform()
+                transform.SetMatrix(matrix)
+                
+                transform_filter = vtk.vtkTransformPolyDataFilter()
+                transform_filter.SetInputData(slab.GetOutput())
+                transform_filter.SetTransform(transform)
+                transform_filter.Update()
+                
+                mapper = vtk.vtkPolyDataMapper()
+                mapper.SetInputData(transform_filter.GetOutput())
+                
+                actor = vtk.vtkActor()
+                actor.SetMapper(mapper)
+                # Realistic silver/light grey concrete finish
+                prop = actor.GetProperty()
+                prop.SetColor(0.75, 0.75, 0.75) 
+                prop.SetAmbient(0.5)
+                prop.SetDiffuse(0.6)
+                prop.SetSpecular(0.3)
+                prop.SetSpecularPower(20.0)
+                prop.SetOpacity(1.0)
+                
+                if hasattr(self, 'tbm_setup_actor') and self.tbm_setup_actor:
+                    self.renderer.RemoveActor(self.tbm_setup_actor)
+                    
+                self.tbm_setup_actor = actor
+                self.renderer.AddActor(actor)
+                self.vtk_widget.GetRenderWindow().Render()
+
+        self.menu_tunnel_tbm_setup_btn.clicked.connect(handle_tbm_setup_click)
+        menu_tunnel_sub_layout.addWidget(self.menu_tunnel_tbm_setup_btn)
 
         def toggle_menu_tunnel_sub():
             if self.tunnel_btn.isChecked():
