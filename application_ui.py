@@ -1103,16 +1103,15 @@ class ApplicationUI(QMainWindow):
                         }
                     dialog = CenterLineDialog(p1, p2, existing_config, parent=self)
                     if dialog.exec_() == QDialog.Accepted:
-                        self.center_line_p1 = p1
-                        self.center_line_p2 = p2
-                        count = dialog.cp_spinbox.value()
-                        self.center_line_cp_count = count
-                        self.center_line_angles = dialog.get_angles()
-                        self.center_line_turns = dialog.get_turns()
-                        self.center_line_v_angles = dialog.get_v_angles()
-                        self.center_line_v_turns = dialog.get_v_turns()
-                        if hasattr(self, 'preview_center_line_control_points'):
-                            self.preview_center_line_control_points(p1, p2, count, self.center_line_angles, self.center_line_turns, self.center_line_v_angles, self.center_line_v_turns)
+                        if hasattr(self, 'generate_center_line_from_dialog'):
+                            self.generate_center_line_from_dialog(
+                                p1, p2, 
+                                dialog.cp_spinbox.value(), 
+                                dialog.get_angles(), 
+                                dialog.get_turns(), 
+                                dialog.get_v_angles(), 
+                                dialog.get_v_turns()
+                            )
                 # Delay the dialog slightly so VTK receives the mouse release event, preventing the camera spin
                 QTimer.singleShot(100, show_dialog)
                 
@@ -1195,93 +1194,13 @@ class ApplicationUI(QMainWindow):
 
             dialog = TBMSetupDialog(self)
             if dialog.exec_() == QDialog.Accepted:
-                self.tbm_setup_length = dialog.tbm_length
-                self.tbm_setup_breadth = dialog.tbm_breadth
-                self.tbm_setup_thickness = dialog.tbm_thickness
-                self.tbm_setup_offset = dialog.tbm_offset
-                
-                # Render the RCC Setup Block
-                import numpy as np
-                import vtk
-                
-                p1 = np.array(self.center_line_points[0])
-                p2 = np.array(self.center_line_points[1])
-                
-                dir_vec = p2 - p1
-                norm = np.linalg.norm(dir_vec)
-                if norm == 0:
-                    return
-                dir_vec = dir_vec / norm
-                
-                L = self.tbm_setup_length
-                B = self.tbm_setup_breadth
-                T = self.tbm_setup_thickness
-                
-                # To ensure the slab appears at the given offset behind the start point (opposite side) 
-                # and does not overlap it, the offset marks the beginning of the slab.
-                # Therefore, the geometric center of the slab is at offset + L/2 in the opposite direction.
-                offset_dist = self.tbm_setup_offset + (L / 2.0)
-                center_pos = p1 - dir_vec * offset_dist
-                
-                # Single solid slab
-                slab = vtk.vtkCubeSource()
-                slab.SetXLength(L)
-                slab.SetYLength(B)
-                slab.SetZLength(T)
-                # Position the slab so its top aligns with the center line (z=0)
-                slab.SetCenter(0, 0, -T/2)
-                slab.Update()
-                
-                # Setup transformation to align with center line
-                math = vtk.vtkMath()
-                forward = dir_vec.tolist()
-                right_vec = [0.0, 0.0, 0.0]
-                up_vec = [0.0, 0.0, 1.0] # assume vertical is mostly up
-                
-                # Avoid singularity if dir is exactly vertical
-                if abs(forward[2]) > 0.99:
-                    up_vec = [0.0, 1.0, 0.0]
-                    
-                math.Cross(forward, up_vec, right_vec)
-                math.Normalize(right_vec)
-                math.Cross(right_vec, forward, up_vec)
-                math.Normalize(up_vec)
-                
-                matrix = vtk.vtkMatrix4x4()
-                for i in range(3):
-                    matrix.SetElement(i, 0, forward[i])
-                    matrix.SetElement(i, 1, right_vec[i])
-                    matrix.SetElement(i, 2, up_vec[i])
-                    matrix.SetElement(i, 3, center_pos[i])
-                
-                transform = vtk.vtkTransform()
-                transform.SetMatrix(matrix)
-                
-                transform_filter = vtk.vtkTransformPolyDataFilter()
-                transform_filter.SetInputData(slab.GetOutput())
-                transform_filter.SetTransform(transform)
-                transform_filter.Update()
-                
-                mapper = vtk.vtkPolyDataMapper()
-                mapper.SetInputData(transform_filter.GetOutput())
-                
-                actor = vtk.vtkActor()
-                actor.SetMapper(mapper)
-                # Realistic silver/light grey concrete finish
-                prop = actor.GetProperty()
-                prop.SetColor(0.75, 0.75, 0.75) 
-                prop.SetAmbient(0.5)
-                prop.SetDiffuse(0.6)
-                prop.SetSpecular(0.3)
-                prop.SetSpecularPower(20.0)
-                prop.SetOpacity(1.0)
-                
-                if hasattr(self, 'tbm_setup_actor') and self.tbm_setup_actor:
-                    self.renderer.RemoveActor(self.tbm_setup_actor)
-                    
-                self.tbm_setup_actor = actor
-                self.renderer.AddActor(actor)
-                self.vtk_widget.GetRenderWindow().Render()
+                if hasattr(self, 'generate_tbm_setup'):
+                    self.generate_tbm_setup(
+                        dialog.tbm_length, 
+                        dialog.tbm_breadth, 
+                        dialog.tbm_thickness, 
+                        dialog.tbm_offset
+                    )
 
         self.menu_tunnel_tbm_setup_btn.clicked.connect(handle_tbm_setup_click)
         menu_tunnel_sub_layout.addWidget(self.menu_tunnel_tbm_setup_btn)
@@ -1309,8 +1228,8 @@ class ApplicationUI(QMainWindow):
                     
             dialog = TunnelExcavationDialog(self)
             if dialog.exec_() == QDialog.Accepted:
-                self.tunnel_excavation_diameter = dialog.tunnel_diameter
-                self.tunnel_excavation_wall_thickness = dialog.wall_thickness
+                if hasattr(self, 'generate_tunnel_excavation'):
+                    self.generate_tunnel_excavation(dialog.tunnel_diameter, dialog.wall_thickness)
 
         self.menu_tunnel_tunnel_excavation_btn.clicked.connect(handle_tunnel_excavation_click)
         menu_tunnel_sub_layout.addWidget(self.menu_tunnel_tunnel_excavation_btn)
