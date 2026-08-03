@@ -20077,6 +20077,30 @@ class PointCloudViewer(ApplicationUI):
         
         # Reset any previous measurements
         self.reset_action()
+### Mayur 3-8-2026 center line measurment
+    def draw_temp_center_line(self, p1, p2):
+        if hasattr(self, 'center_line_actor') and self.center_line_actor:
+            self.renderer.RemoveActor(self.center_line_actor)
+            self.center_line_actor = None
+            
+        if hasattr(self, 'center_line_markers') and self.center_line_markers:
+            for marker in self.center_line_markers:
+                self.renderer.RemoveActor(marker)
+        self.center_line_markers = []
+        
+        if hasattr(self, 'create_vtk_polyline'):
+            self.center_line_actor = self.create_vtk_polyline([p1, p2], color=(1.0, 1.0, 0.0), line_width=2)
+            self.renderer.AddActor(self.center_line_actor)
+            
+        if hasattr(self, 'create_vtk_sphere'):
+            marker1 = self.create_vtk_sphere(p1, radius=0.5, color=(1.0, 0.0, 0.0))
+            marker2 = self.create_vtk_sphere(p2, radius=0.5, color=(1.0, 0.0, 0.0))
+            self.renderer.AddActor(marker1)
+            self.renderer.AddActor(marker2)
+            self.center_line_markers.extend([marker1, marker2])
+            
+        self.vtk_widget.GetRenderWindow().Render()
+#################################################################
 ### Mayur 31-7-2026 centre line
     def start_center_line_picking(self, callback):
         self.center_line_picking_active = True

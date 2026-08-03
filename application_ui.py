@@ -1105,7 +1105,7 @@ class ApplicationUI(QMainWindow):
                     if dialog.exec_() == QDialog.Accepted:
                         if hasattr(self, 'generate_center_line_from_dialog'):
                             self.generate_center_line_from_dialog(
-                                p1, p2, 
+                                dialog.p1, dialog.p2, 
                                 dialog.cp_spinbox.value(), 
                                 dialog.get_angles(), 
                                 dialog.get_turns(), 

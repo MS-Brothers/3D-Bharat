@@ -23707,19 +23707,16 @@ class CenterLineDialog(QDialog):
         info_layout.setContentsMargins(15, 20, 15, 15)
         
         info_layout.addWidget(QLabel("Start Point (m):"), 0, 0)
-        sp_input = QLineEdit(f"{p1[0]:.3f}, {p1[1]:.3f}, {p1[2]:.3f}")
-        sp_input.setReadOnly(True)
-        info_layout.addWidget(sp_input, 0, 1)
+        self.sp_input = QLineEdit(f"{p1[0]:.3f}, {p1[1]:.3f}, {p1[2]:.3f}")
+        info_layout.addWidget(self.sp_input, 0, 1)
         
         info_layout.addWidget(QLabel("End Point (m):"), 1, 0)
-        ep_input = QLineEdit(f"{p2[0]:.3f}, {p2[1]:.3f}, {p2[2]:.3f}")
-        ep_input.setReadOnly(True)
-        info_layout.addWidget(ep_input, 1, 1)
+        self.ep_input = QLineEdit(f"{p2[0]:.3f}, {p2[1]:.3f}, {p2[2]:.3f}")
+        info_layout.addWidget(self.ep_input, 1, 1)
         
         info_layout.addWidget(QLabel("Tunnel Length (m):"), 0, 2)
-        len_input = QLineEdit(f"{self.tunnel_length:.3f}")
-        len_input.setReadOnly(True)
-        info_layout.addWidget(len_input, 0, 3)
+        self.len_input = QLineEdit(f"{self.tunnel_length:.3f}")
+        info_layout.addWidget(self.len_input, 0, 3)
         
         info_layout.addWidget(QLabel("Total Control Points:"), 1, 2)
         self.cp_spinbox = QSpinBox()
@@ -23791,6 +23788,11 @@ class CenterLineDialog(QDialog):
         
         main_layout.addLayout(button_layout)
         
+        # Connect signals for manual edits
+        self.sp_input.editingFinished.connect(self.on_sp_edited)
+        self.ep_input.editingFinished.connect(self.on_ep_edited)
+        self.len_input.editingFinished.connect(self.on_len_edited)
+        
         # Logic
         if existing_config:
             self.cp_spinbox.setValue(existing_config.get('count', 0))
@@ -23856,6 +23858,59 @@ class CenterLineDialog(QDialog):
             v_turn.addItems(["Up", "Down"])
             v_turn.setCurrentText("Down")
             self.table.setCellWidget(i, 5, v_turn)
+            
+    def update_length_and_draw(self):
+        import numpy as np
+        p1 = np.array(self.p1)
+        p2 = np.array(self.p2)
+        self.tunnel_length = np.linalg.norm(p2 - p1)
+        
+        self.len_input.blockSignals(True)
+        self.len_input.setText(f"{self.tunnel_length:.3f}")
+        self.len_input.blockSignals(False)
+        
+        if self.parent() and hasattr(self.parent(), 'draw_temp_center_line'):
+            self.parent().draw_temp_center_line(self.p1, self.p2)
+            
+    def on_sp_edited(self):
+        try:
+            parts = [float(x.strip()) for x in self.sp_input.text().split(',')]
+            if len(parts) == 3:
+                self.p1 = parts
+                self.update_length_and_draw()
+        except ValueError:
+            pass
+
+    def on_ep_edited(self):
+        try:
+            parts = [float(x.strip()) for x in self.ep_input.text().split(',')]
+            if len(parts) == 3:
+                self.p2 = parts
+                self.update_length_and_draw()
+        except ValueError:
+            pass
+
+    def on_len_edited(self):
+        try:
+            new_len = float(self.len_input.text().strip())
+            if new_len <= 0:
+                return
+            import numpy as np
+            p1 = np.array(self.p1)
+            p2 = np.array(self.p2)
+            dist = np.linalg.norm(p2 - p1)
+            if dist > 0:
+                direction = (p2 - p1) / dist
+                p2_new = p1 + direction * new_len
+                self.p2 = p2_new.tolist()
+                
+                self.ep_input.blockSignals(True)
+                self.ep_input.setText(f"{self.p2[0]:.3f}, {self.p2[1]:.3f}, {self.p2[2]:.3f}")
+                self.ep_input.blockSignals(False)
+                
+                self.update_length_and_draw()
+        except ValueError:
+            pass
             
     def get_angles(self):
         return [self.table.cellWidget(i, 2).value() for i in range(self.table.rowCount()) if self.table.cellWidget(i, 2)]
