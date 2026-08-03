@@ -23868,6 +23868,60 @@ class CenterLineDialog(QDialog):
 
     def get_v_turns(self):
         return [self.table.cellWidget(i, 5).currentText() for i in range(self.table.rowCount()) if self.table.cellWidget(i, 5)]
+
+### Mayur 3-8-2026: Added Tunnel Excavation Dialog
+class TunnelExcavationDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Tunnel Excavation")
+        self.setMinimumWidth(300)
+
+        layout = QVBoxLayout(self)
+
+        form_layout = QFormLayout()
+        
+        self.diameter_input = QDoubleSpinBox()
+        self.diameter_input.setRange(0.0, 100000.0)
+        self.diameter_input.setDecimals(2)
+        self.diameter_input.setValue(0.0)
+        
+        self.thickness_input = QDoubleSpinBox()
+        self.thickness_input.setRange(0.0, 100000.0)
+        self.thickness_input.setDecimals(2)
+        self.thickness_input.setValue(0.0)
+
+        form_layout.addRow("Tunnel Diameter (m):", self.diameter_input)
+        form_layout.addRow("Wall Thickness (m):", self.thickness_input)
+        
+        layout.addLayout(form_layout)
+
+        button_layout = QHBoxLayout()
+        self.ok_button = QPushButton("OK")
+        self.cancel_button = QPushButton("Cancel")
+        
+        button_layout.addWidget(self.ok_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+
+        self.ok_button.clicked.connect(self.validate_and_accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+        self.tunnel_diameter = 0.0
+        self.wall_thickness = 0.0
+
+    def validate_and_accept(self):
+        diameter = self.diameter_input.value()
+        thickness = self.thickness_input.value()
+        
+        if diameter <= 0 or thickness <= 0:
+            QMessageBox.warning(self, "Invalid Input", "Tunnel Diameter and Wall Thickness must be greater than zero.")
+            return
+            
+        self.tunnel_diameter = diameter
+        self.wall_thickness = thickness
+        self.accept()
+############################################################################
+
 ## Mayur 1-8-2026 : TBM Setup Dialog
 class TBMSetupDialog(QDialog):
     def __init__(self, parent=None):

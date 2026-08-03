@@ -29,7 +29,7 @@ from vtkmodules.vtkCommonColor import vtkNamedColors
 from digging_point import DiggingPointInput
 from API import WorksheetAPI
 # Mayur Wakhare 06-06-2026 : Go to the dialogs module and bring the ShareWithBuddiesDialog, ExpandingRoadDialog, and UnderPassDialog objects into my current file so I can use them directly. ############
-from dialogs import ShareWithBuddiesDialog, ExpandingRoadDialog, CenterLineDialog, TBMSetupDialog
+from dialogs import ShareWithBuddiesDialog, ExpandingRoadDialog, CenterLineDialog, TBMSetupDialog, TunnelExcavationDialog
 
 import vtk
 import math as _math
@@ -1131,7 +1131,7 @@ class ApplicationUI(QMainWindow):
         self.menu_tunnel_clear_center_line_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
-                color: #FFFFFF;
+                color: black;
                 border: 1px solid #4D4D4D;
                 border-radius: 8px;
                 padding: 10px;
@@ -1141,9 +1141,17 @@ class ApplicationUI(QMainWindow):
             QPushButton:hover {
                 background-color: rgba(255, 255, 255, 0.1);
                 border: 1px solid #666666;
+                color: black;
             }
             QPushButton:pressed {
                 background-color: rgba(255, 255, 255, 0.05);
+                color: black;
+            }
+            QPushButton:focus {
+                color: black;
+            }
+            QPushButton:disabled {
+                color: black;
             }
         """)
         def handle_clear_center_line():
@@ -1162,7 +1170,7 @@ class ApplicationUI(QMainWindow):
         self.menu_tunnel_tbm_setup_btn = QPushButton("TBM Setup")
         self.menu_tunnel_tbm_setup_btn.setFixedHeight(40)
         self.menu_tunnel_tbm_setup_btn.setFixedWidth(140)
-    ## Mayur 1-8-2026: Added Tunnel boring Machine on menu bar
+    ## Mayur 1-8-2026: Added Tunnel boring Machine on menu bar (tbm)
         def handle_tbm_setup_click():
             # 1. Immediately hide the menus
             if hasattr(self, 'menu_tunnel_sub_dropdown'):
@@ -1277,8 +1285,38 @@ class ApplicationUI(QMainWindow):
 
         self.menu_tunnel_tbm_setup_btn.clicked.connect(handle_tbm_setup_click)
         menu_tunnel_sub_layout.addWidget(self.menu_tunnel_tbm_setup_btn)
+    ### Mayur 3-8-2026: Added Tunnel Excavation Button on menu bar
+        self.menu_tunnel_tunnel_excavation_btn = QPushButton("Tunnel Excavation")
+        self.menu_tunnel_tunnel_excavation_btn.setFixedHeight(40)
+        self.menu_tunnel_tunnel_excavation_btn.setFixedWidth(140)
 
-        def toggle_menu_tunnel_sub():
+        def handle_tunnel_excavation_click():
+            if hasattr(self, 'menu_tunnel_sub_dropdown'):
+                self.menu_tunnel_sub_dropdown.hide()
+            if hasattr(self, 'tunnel_btn'):
+                self.tunnel_btn.setChecked(False)
+            if hasattr(self, 'menu_bar_button'):
+                self.menu_bar_button.setChecked(False)
+                if self.menu_bar_button.property("dropdown"):
+                    self.menu_bar_button.property("dropdown").hide()
+                    
+            worksheet_open = bool(getattr(self, "current_worksheet_name", None))
+            design_active = (str(getattr(self, "active_layer_highlight_subfolder", "")).lower() == "designs")
+            
+            if not worksheet_open or not design_active:
+                QMessageBox.warning(self, "Action Unavailable", "Tunnel Excavation is available only when a Worksheet is open and a Design Layer is active.")
+                return
+                    
+            dialog = TunnelExcavationDialog(self)
+            if dialog.exec_() == QDialog.Accepted:
+                self.tunnel_excavation_diameter = dialog.tunnel_diameter
+                self.tunnel_excavation_wall_thickness = dialog.wall_thickness
+
+        self.menu_tunnel_tunnel_excavation_btn.clicked.connect(handle_tunnel_excavation_click)
+        menu_tunnel_sub_layout.addWidget(self.menu_tunnel_tunnel_excavation_btn)
+        ##########################################################################
+
+        def toggle_menu_tunnel_sub():  # Tunnel button dropdown
             if self.tunnel_btn.isChecked():
                 pos = self.tunnel_btn.mapToGlobal(QPoint(self.tunnel_btn.width(), 0))
                 self.menu_tunnel_sub_dropdown.move(pos)
