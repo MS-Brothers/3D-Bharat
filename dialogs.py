@@ -23872,6 +23872,18 @@ class CenterLineDialog(QDialog):
         if self.parent() and hasattr(self.parent(), 'draw_temp_center_line'):
             self.parent().draw_temp_center_line(self.p1, self.p2)
             
+        self.update_control_points_distance()
+
+    def update_control_points_distance(self):
+        value = self.cp_spinbox.value()
+        if value > 0 and self.table.rowCount() == value:
+            interval = self.tunnel_length / value
+            for i in range(value):
+                dist = interval * (i + 1)
+                dist_item = self.table.item(i, 1)
+                if dist_item:
+                    dist_item.setText(f"{dist:.2f}")
+
     def on_sp_edited(self):
         try:
             parts = [float(x.strip()) for x in self.sp_input.text().split(',')]
@@ -23945,8 +23957,14 @@ class TunnelExcavationDialog(QDialog):
         self.thickness_input.setDecimals(2)
         self.thickness_input.setValue(0.0)
 
+        self.height_input = QDoubleSpinBox()
+        self.height_input.setRange(0.0, 100000.0)
+        self.height_input.setDecimals(2)
+        self.height_input.setValue(0.0)
+
         form_layout.addRow("Tunnel Diameter (m):", self.diameter_input)
         form_layout.addRow("Wall Thickness (m):", self.thickness_input)
+        form_layout.addRow("Wall Height (m):", self.height_input)
         
         layout.addLayout(form_layout)
 
@@ -23963,19 +23981,106 @@ class TunnelExcavationDialog(QDialog):
 
         self.tunnel_diameter = 0.0
         self.wall_thickness = 0.0
+        self.wall_height = 0.0
 
     def validate_and_accept(self):
         diameter = self.diameter_input.value()
         thickness = self.thickness_input.value()
+        height = self.height_input.value()
         
-        if diameter <= 0 or thickness <= 0:
-            QMessageBox.warning(self, "Invalid Input", "Tunnel Diameter and Wall Thickness must be greater than zero.")
+        if diameter <= 0 or thickness <= 0 or height <= 0:
+            QMessageBox.warning(self, "Invalid Input", "Tunnel Diameter, Wall Thickness, and Wall Height must be greater than zero.")
             return
             
         self.tunnel_diameter = diameter
         self.wall_thickness = thickness
+        self.wall_height = height
         self.accept()
 ############################################################################
+
+class TBMExcavationDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("TBM Excavation")
+        self.setMinimumWidth(300)
+
+        layout = QVBoxLayout(self)
+
+        form_layout = QFormLayout()
+        
+        self.diameter_input = QDoubleSpinBox()
+        self.diameter_input.setRange(0.0, 100000.0)
+        self.diameter_input.setDecimals(2)
+        self.diameter_input.setValue(0.0)
+        
+        self.thickness_input = QDoubleSpinBox()
+        self.thickness_input.setRange(0.0, 100000.0)
+        self.thickness_input.setDecimals(2)
+        self.thickness_input.setValue(0.0)
+
+        self.curve_height_input = QDoubleSpinBox()
+        self.curve_height_input.setRange(0.0, 100000.0)
+        self.curve_height_input.setDecimals(2)
+        self.curve_height_input.setValue(0.0)
+
+        self.chord_length_input = QLineEdit()
+        self.chord_length_input.setReadOnly(True)
+        self.chord_length_input.setText("0.000")
+
+        form_layout.addRow("Tunnel Diameter (m):", self.diameter_input)
+        form_layout.addRow("Wall Thickness (m):", self.thickness_input)
+        form_layout.addRow("Curve Wall Height (m):", self.curve_height_input)
+        form_layout.addRow("Chord Length (m):", self.chord_length_input)
+        
+        layout.addLayout(form_layout)
+
+        self.diameter_input.valueChanged.connect(self.update_chord_length)
+        self.curve_height_input.valueChanged.connect(self.update_chord_length)
+
+        button_layout = QHBoxLayout()
+        self.ok_button = QPushButton("OK")
+        self.cancel_button = QPushButton("Cancel")
+        
+        button_layout.addWidget(self.ok_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+
+        self.ok_button.clicked.connect(self.validate_and_accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+        self.tunnel_diameter = 0.0
+        self.wall_thickness = 0.0
+        self.curve_wall_height = 0.0
+
+    def update_chord_length(self):
+        import math
+        diameter = self.diameter_input.value()
+        curve_height = self.curve_height_input.value()
+        
+        R = diameter / 2.0
+        H = curve_height
+        
+        if R > 0:
+            val = max(0, R**2 - (R - H)**2)
+            chord = 2.0 * math.sqrt(val)
+            self.chord_length_input.setText(f"{chord:.3f}")
+        else:
+            self.chord_length_input.setText("0.000")
+
+    def validate_and_accept(self):
+        diameter = self.diameter_input.value()
+        thickness = self.thickness_input.value()
+        curve_height = self.curve_height_input.value()
+        
+        if diameter <= 0 or thickness <= 0 or curve_height <= 0:
+            QMessageBox.warning(self, "Invalid Input", "All fields must be greater than zero.")
+            return
+            
+        self.tunnel_diameter = diameter
+        self.wall_thickness = thickness
+        self.curve_wall_height = curve_height
+        self.accept()
+################################################################
 
 ## Mayur 1-8-2026 : TBM Setup Dialog
 class TBMSetupDialog(QDialog):

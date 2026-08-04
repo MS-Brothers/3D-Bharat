@@ -20100,6 +20100,22 @@ class PointCloudViewer(ApplicationUI):
             self.center_line_markers.extend([marker1, marker2])
             
         self.vtk_widget.GetRenderWindow().Render()
+###### Mayur 4-8-2026
+    def toggle_center_line_picking(self, state):
+        import vtk
+        from PyQt5.QtCore import Qt
+        if state == Qt.Checked:
+            self.current_measurement = 'center_line_projection'
+            self.measurement_active = True
+            self.plotting_active = True
+            self.center_line_picked_count = 0
+            self.message_text.append(" Center Line Projection mode activated. Click on the point cloud to measure its height above/below the Zero Line.")
+        else:
+            if getattr(self, 'current_measurement', None) == 'center_line_projection':
+                self.current_measurement = None
+                self.measurement_active = False
+            self.message_text.append(" Center Line Projection mode deactivated.")
+###############################################################################
 #################################################################
 ### Mayur 31-7-2026 centre line
     def start_center_line_picking(self, callback):
@@ -20302,6 +20318,63 @@ class PointCloudViewer(ApplicationUI):
                 if hasattr(self, 'center_line_complete_callback') and self.center_line_complete_callback:
                     self.center_line_complete_callback(self.center_line_points[0], self.center_line_points[1])
             return
+
+        if getattr(self, 'current_measurement', None) == 'center_line_projection':
+            self.message_text.append("DEBUG: Processing click for center_line_projection")
+            if not getattr(self, 'zero_line_set', False) or not hasattr(self, 'zero_start_point'):
+                self.message_text.append(" Error: Zero Line must be defined first!")
+                return
+            
+            p1 = np.array(self.zero_start_point, dtype=float)
+            p2 = np.array(self.zero_end_point, dtype=float)
+            P = np.array(clicked_point, dtype=float)
+            
+            line_vec = p2 - p1
+            line_len_sq = np.dot(line_vec, line_vec)
+            self.message_text.append(f"DEBUG: p1={p1}, p2={p2}, len_sq={line_len_sq}")
+            if line_len_sq > 0:
+                t = np.dot(P - p1, line_vec) / line_len_sq
+                Q = p1 + t * line_vec
+                
+                # Height offset from Zero line
+                height_diff = P[2] - Q[2]
+                
+                self.message_text.append(f" Point Picked! Vertical offset from Zero Line: {height_diff:+.3f}m")
+                
+                # Render large red marker on point cloud
+                marker = self.add_sphere_marker(P, f"Z: {height_diff:+.3f}m", color="red")
+                if marker:
+                    self.message_text.append("DEBUG: 3D Marker added successfully.")
+                self.vtk_widget.GetRenderWindow().Render()
+                
+                # Plot on Road Construction Graph at start chainage (X=0)
+                if hasattr(self, 'ax'):
+                    graph_x = 0.0
+                    
+                    self.ax.plot(graph_x, height_diff, 'ro', markersize=12, label='Picked Pt')
+                    self.ax.annotate(f"{height_diff:+.2f}m", (graph_x, height_diff), 
+                                     xytext=(10, 10), textcoords="offset points", 
+                                     fontsize=10, color='red', weight='bold')
+                    
+                    self.ax.plot([graph_x, graph_x], [0, height_diff], 'r--', alpha=0.7)
+                    
+                    # Ensure zero line is drawn
+                    if not hasattr(self, 'zero_graph_line') or not self.zero_graph_line:
+                        self.zero_graph_line, = self.ax.plot([-10000, 10000], [0, 0], color='purple', linewidth=2)
+                    
+                    # Auto-scale
+                    xlim = self.ax.get_xlim()
+                    ylim = self.ax.get_ylim()
+                    
+                    new_xlim = (min(xlim[0], graph_x - 5), max(xlim[1], graph_x + 5))
+                    new_ylim = (min(ylim[0], min(0, height_diff) - 1.5), max(ylim[1], max(0, height_diff) + 1.5))
+                    
+                    self.ax.set_xlim(new_xlim)
+                    self.ax.set_ylim(new_ylim)
+                    
+                    self.canvas.draw_idle()
+            return
+
 #############################################################################################
         if hasattr(self, 'current_measurement') and self.current_measurement == 'tunnel_arc':
             if not hasattr(self, 'tunnel_arc_points'):
@@ -46900,6 +46973,7 @@ class PointCloudViewer(ApplicationUI):
     def generate_center_line_from_dialog(self, p1, p2, count, angles, turns, v_angles, v_turns):
         self.center_line_p1 = p1
         self.center_line_p2 = p2
+        self.center_line_points = [p1, p2]
         self.center_line_cp_count = count
         self.center_line_angles = angles
         self.center_line_turns = turns
@@ -46988,10 +47062,273 @@ class PointCloudViewer(ApplicationUI):
         self.tbm_setup_actor = actor
         self.renderer.AddActor(actor)
         self.vtk_widget.GetRenderWindow().Render()
+## Mayur 4-8-2026 tbm tunnel
+    def generate_tbm_excavation(self, diameter, wall_thickness, curve_wall_height):
+        self.tbm_excavation_diameter = diameter
+        self.tbm_excavation_wall_thickness = wall_thickness
+        self.tbm_excavation_curve_wall_height = curve_wall_height
+        
+        if not hasattr(self, 'center_line_points') or len(self.center_line_points) < 2:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Action Unavailable", "Please define a Center Line first.")
+            return
+            
+        import numpy as np
+        import vtk
+        
+        p1 = np.array(self.center_line_points[0])
+        p2 = np.array(self.center_line_points[1])
+        count = getattr(self, 'center_line_cp_count', 0)
+        angles = getattr(self, 'center_line_angles', [])
+        turns = getattr(self, 'center_line_turns', [])
+        v_angles = getattr(self, 'center_line_v_angles', [])
+        v_turns = getattr(self, 'center_line_v_turns', [])
+        
+        total_length = np.linalg.norm(p2 - p1)
+        if total_length == 0: return
+        
+        loop_count = count if count > 0 else 1
+        interval = total_length / count if count > 0 else total_length
+        
+        current_dir = (p2 - p1) / total_length
+        current_pt = p1.copy()
+        
+        radius = self.tbm_excavation_diameter / 2.0
+        wall_thickness = self.tbm_excavation_wall_thickness
+        curve_height = self.tbm_excavation_curve_wall_height
+        
+        math = vtk.vtkMath()
+        
+        def get_right_up(fwd_vec):
+            f = fwd_vec.tolist()
+            u = [0.0, 0.0, 1.0]
+            r = [0.0, 0.0, 0.0]
+            if abs(f[2]) > 0.99:
+                u = [0.0, 1.0, 0.0]
+            math.Cross(f, u, r)
+            math.Normalize(r)
+            math.Cross(r, f, u)
+            math.Normalize(u)
+            return np.array(r), np.array(u)
+        
+        frames = []
+        r_vec, u_vec = get_right_up(current_dir)
+        frames.append((current_pt.copy(), current_dir.copy(), r_vec, u_vec))
+        
+        for i in range(loop_count):
+            next_pt = current_pt + current_dir * interval
+            incoming_dir = current_dir.copy()
+            
+            angle = angles[i] if i < len(angles) else 0.0
+            turn = turns[i] if i < len(turns) else "Right"
+            v_angle = v_angles[i] if i < len(v_angles) else 0.0
+            v_turn = v_turns[i] if i < len(v_turns) else "Down"
+            
+            if angle != 0 or v_angle != 0:
+                if angle != 0:
+                    h_theta = angle if turn != "Right" else -angle
+                    t1 = vtk.vtkTransform()
+                    t1.RotateWXYZ(h_theta, 0, 0, 1)
+                    new_dir = t1.TransformDoubleVector(current_dir[0], current_dir[1], current_dir[2])
+                    current_dir = np.array(new_dir)
+                    current_dir = current_dir / np.linalg.norm(current_dir)
+                    
+                if v_angle != 0:
+                    f = current_dir.tolist()
+                    u = [0.0, 0.0, 1.0]
+                    r = [0.0, 0.0, 0.0]
+                    if abs(f[2]) > 0.99: u = [0.0, 1.0, 0.0]
+                    math.Cross(f, u, r)
+                    math.Normalize(r)
+                    
+                    v_theta = v_angle if v_turn != "Down" else -v_angle
+                    t2 = vtk.vtkTransform()
+                    t2.RotateWXYZ(v_theta, r[0], r[1], r[2])
+                    new_dir = t2.TransformDoubleVector(current_dir[0], current_dir[1], current_dir[2])
+                    current_dir = np.array(new_dir)
+                    current_dir = current_dir / np.linalg.norm(current_dir)
+                    
+            current_pt = next_pt
+            r_vec, u_vec = get_right_up(incoming_dir)
+            frames.append((current_pt.copy(), incoming_dir.copy(), r_vec, u_vec))
+            
+        R = radius
+        T = wall_thickness
+        H = curve_height
+        
+        y_in = -R + H
+        if y_in < -R + 1e-4: y_in = -R + 1e-4
+        if y_in > R - 1e-4: y_in = R - 1e-4
+            
+        x_in = np.sqrt(max(0, R**2 - y_in**2))
+        theta_in = np.arctan2(y_in, x_in) 
+        
+        y_out = y_in - T
+        x_out = np.sqrt(max(0, (R+T)**2 - y_out**2))
+        theta_out = np.arctan2(y_out, x_out)
+        
+        eps = min(1e-4, x_in * 0.1) if x_in > 0 else 1e-4
+        if eps <= 0: eps = 1e-4
+        
+        offset_y = -y_in
+        
+        profile_2d = []
+        num_arch = 36
+        
+        # Inner surface (Right to Left via Top)
+        profile_2d.append([eps, y_in + offset_y])
+        angles_in = np.linspace(theta_in, np.pi - theta_in, num_arch)
+        for ang in angles_in:
+            profile_2d.append([R * np.cos(ang), R * np.sin(ang) + offset_y])
+        profile_2d.append([-eps, y_in + offset_y])
+        
+        # Jump to outer surface
+        profile_2d.append([-eps, y_out + offset_y])
+        
+        # Outer surface (Left to Right via Top)
+        angles_out = np.linspace(np.pi - theta_out, theta_out, num_arch)
+        for ang in angles_out:
+            profile_2d.append([(R + T) * np.cos(ang), (R + T) * np.sin(ang) + offset_y])
+        profile_2d.append([eps, y_out + offset_y])
+        
+        # Build 3D Surface
+        vtk_pts = vtk.vtkPoints()
+        for frame in frames:
+            c, f, r, u = frame
+            for px, py in profile_2d:
+                pt = c + px * r + py * u
+                vtk_pts.InsertNextPoint(pt[0], pt[1], pt[2])
+                
+        cells = vtk.vtkCellArray()
+        M = len(profile_2d)
+        N = len(frames)
+        for i in range(N - 1):
+            for j in range(M):
+                j_next = (j + 1) % M
+                pt0 = i * M + j
+                pt1 = (i + 1) * M + j
+                pt2 = (i + 1) * M + j_next
+                pt3 = i * M + j_next
+                
+                quad = vtk.vtkQuad()
+                quad.GetPointIds().SetId(0, pt0)
+                quad.GetPointIds().SetId(1, pt1)
+                quad.GetPointIds().SetId(2, pt2)
+                quad.GetPointIds().SetId(3, pt3)
+                cells.InsertNextCell(quad)
+                
+        # Caps removed to create open-ended tunnel
+                
+        polyData = vtk.vtkPolyData()
+        polyData.SetPoints(vtk_pts)
+        polyData.SetPolys(cells)
+        
+        triFilter = vtk.vtkTriangleFilter()
+        triFilter.SetInputData(polyData)
+        triFilter.Update()
+        
+        normals = vtk.vtkPolyDataNormals()
+        normals.SetInputConnection(triFilter.GetOutputPort())
+        normals.ComputePointNormalsOn()
+        normals.ComputeCellNormalsOff()
+        normals.SetFeatureAngle(60.0)
+        normals.Update()
+        
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(normals.GetOutputPort())
+        
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        prop = actor.GetProperty()
+        prop.SetColor(0.75, 0.75, 0.75) 
+        prop.SetAmbient(0.3)
+        prop.SetDiffuse(0.7)
+        prop.SetSpecular(0.2)
+        prop.SetSpecularPower(20.0)
+        prop.SetInterpolationToGouraud()
+        
+        if hasattr(self, 'tbm_excavation_actors') and self.tbm_excavation_actors:
+            for a in self.tbm_excavation_actors:
+                self.renderer.RemoveActor(a)
+                
+        self.tbm_excavation_actors = [actor]
+        self.renderer.AddActor(actor)
+        self.vtk_widget.GetRenderWindow().Render()
+        
+        # --- Point Cloud Excavation ---
+        if hasattr(self, 'point_cloud') and self.point_cloud is not None:
+            if N >= 2:
+                if hasattr(self, 'update_progress'):
+                    self.update_progress(10, "Excavating point cloud...")
+                
+                pc_points = np.asarray(self.point_cloud.points)
+                if len(pc_points) > 0:
+                    is_inside = np.zeros(len(pc_points), dtype=bool)
+                    
+                    for j in range(N - 1):
+                        A = frames[j][0]
+                        B = frames[j+1][0]
+                        AB = B - A
+                        L2 = np.dot(AB, AB)
+                        
+                        r_v = frames[j][2]
+                        u_v = frames[j][3]
+                        
+                        if L2 == 0:
+                            V = pc_points - A
+                            valid_long = np.zeros(len(pc_points), dtype=bool)
+                        else:
+                            AP = pc_points - A
+                            t = np.sum(AP * AB, axis=1) / L2
+                            
+                            t_clipped = np.clip(t, 0.0, 1.0)
+                            proj = A + np.outer(t_clipped, AB)
+                            V = pc_points - proj
+                            
+                            f_v = AB / np.sqrt(L2)
+                            loc_Z = np.sum(V * f_v, axis=1)
+                            
+                            valid_long = np.ones(len(pc_points), dtype=bool)
+                            if j == 0:
+                                valid_long &= (loc_Z >= 0.0)
+                            else:
+                                valid_long &= (loc_Z >= -radius)
+                                
+                            if j == (N - 2):
+                                valid_long &= (loc_Z <= 0.0)
+                            else:
+                                valid_long &= (loc_Z <= radius)
+                            
+                        loc_X = np.sum(V * r_v, axis=1)
+                        loc_Y = np.sum(V * u_v, axis=1)
+                        
+                        loc_Y_geom = loc_Y - offset_y
+                        inside_circle = (loc_X**2 + loc_Y_geom**2) <= radius**2
+                        above_floor = loc_Y >= 0.0
+                        
+                        inside_segment = inside_circle & above_floor & valid_long
+                        is_inside = is_inside | inside_segment
+                        
+                    mask = ~is_inside
+                    indices_to_keep = np.where(mask)[0]
+                    excavated_pc = self.point_cloud.select_by_index(indices_to_keep)
+                    
+                    self.point_cloud = excavated_pc
+                    
+                    if hasattr(self, 'update_progress'):
+                        self.update_progress(50, "Rendering excavated tunnel...")
+                    
+                    if hasattr(self, 'display_point_cloud'):
+                        self.display_point_cloud(reset_camera=False)
+                    
+                    if hasattr(self, 'update_progress'):
+                        self.update_progress(100, "Ready")
 
-    def generate_tunnel_excavation(self, diameter, wall_thickness):
+## Mayur 4-8-2026 
+    def generate_tunnel_excavation(self, diameter, wall_thickness, wall_height):
         self.tunnel_excavation_diameter = diameter
         self.tunnel_excavation_wall_thickness = wall_thickness
+        self.tunnel_excavation_wall_height = wall_height
         
         if not hasattr(self, 'center_line_points') or len(self.center_line_points) < 2:
             from PyQt5.QtWidgets import QMessageBox
@@ -47080,24 +47417,25 @@ class PointCloudViewer(ApplicationUI):
         profile_2d = []
         R = radius
         T = wall_thickness
+        H = self.tunnel_excavation_wall_height
         num_arch = 18
         
         # Inner surface (Right to Left)
         profile_2d.append([R, 0.0])
-        profile_2d.append([R, R])
+        profile_2d.append([R, H])
         for i in range(1, num_arch):
             theta = (i / num_arch) * np.pi
-            profile_2d.append([R * np.cos(theta), R + R * np.sin(theta)])
-        profile_2d.append([-R, R])
+            profile_2d.append([R * np.cos(theta), H + R * np.sin(theta)])
+        profile_2d.append([-R, H])
         profile_2d.append([-R, 0.0])
         
         # Outer surface (Left to Right)
         profile_2d.append([-(R + T), 0.0])
-        profile_2d.append([-(R + T), R])
+        profile_2d.append([-(R + T), H])
         for i in range(1, num_arch):
             theta = np.pi - (i / num_arch) * np.pi
-            profile_2d.append([(R + T) * np.cos(theta), R + (R + T) * np.sin(theta)])
-        profile_2d.append([(R + T), R])
+            profile_2d.append([(R + T) * np.cos(theta), H + (R + T) * np.sin(theta)])
+        profile_2d.append([(R + T), H])
         profile_2d.append([(R + T), 0.0])
         
         # Build 3D Surface
@@ -47223,8 +47561,9 @@ class PointCloudViewer(ApplicationUI):
                         loc_X = np.sum(V * r_v, axis=1)
                         loc_Y = np.sum(V * u_v, axis=1)
                         
-                        inside_rect = (loc_Y >= 0.0) & (loc_Y <= radius) & (np.abs(loc_X) <= radius)
-                        inside_arch = (loc_Y > radius) & ((loc_X**2 + (loc_Y - radius)**2) <= radius**2)
+                        H = self.tunnel_excavation_wall_height
+                        inside_rect = (loc_Y >= 0.0) & (loc_Y <= H) & (np.abs(loc_X) <= radius)
+                        inside_arch = (loc_Y > H) & ((loc_X**2 + (loc_Y - H)**2) <= radius**2)
                         
                         inside_segment = (inside_rect | inside_arch) & valid_long
                         is_inside = is_inside | inside_segment
