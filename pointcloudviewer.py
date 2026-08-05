@@ -11385,6 +11385,23 @@ class PointCloudViewer(ApplicationUI):
                     self.message_text.append("Click two points on the point cloud to set zero line start and end.")
                     return
             
+            if line_type == 'center_line':
+                if not self.zero_line_set or self.zero_start_point is None or self.zero_end_point is None:
+                    self.message_text.append("Please set the Zero Line first before picking the Center Line point.")
+                    self.center_line.setChecked(False)
+                    return
+                self.measurement_active = True
+                self.set_measurement_type('center_line')
+                for actor in getattr(self, 'center_line_3d_actors', []):
+                    if actor: actor.SetVisibility(True)
+                for pt in getattr(self, 'center_line_graph_points', []):
+                    if pt: pt.set_visible(True)
+                for txt in getattr(self, 'center_line_graph_texts', []):
+                    if txt: txt.set_visible(True)
+                self.canvas.draw()
+                self.vtk_widget.GetRenderWindow().Render()
+                self.message_text.append("Center Line Mode: Click a point on the 3D point cloud.")
+                return
 
             # First, if there's an ongoing line of different type, finish it
             if self.active_line_type and self.active_line_type != line_type and self.current_points:
@@ -11437,6 +11454,20 @@ class PointCloudViewer(ApplicationUI):
                         self.scale_canvas.draw()
                 return
             
+            if line_type == 'center_line':
+                if getattr(self, 'current_measurement', None) == 'center_line':
+                    self.current_measurement = None
+                    self.measurement_active = False
+                for actor in getattr(self, 'center_line_3d_actors', []):
+                    if actor: actor.SetVisibility(False)
+                for pt in getattr(self, 'center_line_graph_points', []):
+                    if pt: pt.set_visible(False)
+                for txt in getattr(self, 'center_line_graph_texts', []):
+                    if txt: txt.set_visible(False)
+                self.canvas.draw()
+                self.vtk_widget.GetRenderWindow().Render()
+                return
+
             # For other line types when unchecked
             if self.active_line_type == line_type and self.current_points:
                 self.message_text.append(f"Finishing {line_type.replace('_', ' ').title()} before unchecking")
@@ -12997,6 +13028,7 @@ class PointCloudViewer(ApplicationUI):
         self.construction_dots_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'construction_dots'))
         # self.material_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'material'))
         self.deck_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'deck_line'))
+        self.center_line.stateChanged.connect(lambda state: self.on_checkbox_changed(state, 'center_line'))
         
         # Connect pencil button signals
         self.zero_pencil.clicked.connect(self.edit_zero_line)
@@ -13008,6 +13040,7 @@ class PointCloudViewer(ApplicationUI):
         self.surface_pencil.clicked.connect(lambda: self.start_editing_line('surface'))
         self.construction_pencil.clicked.connect(lambda: self.start_editing_line('construction'))
         self.road_pencil.clicked.connect(lambda: self.start_editing_line('road_surface'))
+        self.center_pencil.clicked.connect(lambda: self.center_line.setChecked(not self.center_line.isChecked()))
         
         # Connect slider and scrollbar signals
         self.volume_slider.valueChanged.connect(self.volume_changed)
@@ -20111,6 +20144,79 @@ class PointCloudViewer(ApplicationUI):
         if clicked_point is None:
             return  # No point found
 
+        if hasattr(self, 'current_measurement') and self.current_measurement == 'center_line':
+            try:
+                if not (hasattr(self, 'zero_start_point') and self.zero_start_point is not None and hasattr(self, 'zero_end_point') and self.zero_end_point is not None):
+                    self.message_text.append("Zero Line not fully set.")
+                    return
+                
+                p0 = np.array(self.zero_start_point, dtype=float)
+                p1 = np.array(self.zero_end_point, dtype=float)
+                dir_vec = p1[:2] - p0[:2]
+                dist_sq = float(np.dot(dir_vec, dir_vec))
+                
+                if dist_sq > 0:
+                    t = float(np.dot(clicked_point[:2] - p0[:2], dir_vec)) / dist_sq
+                    ref_z = float(p0[2] + t * (p1[2] - p0[2]))
+                    nearest_x = float(p0[0] + t * dir_vec[0])
+                    nearest_y = float(p0[1] + t * dir_vec[1])
+                    graph_x = t * float(getattr(self, 'total_distance', np.linalg.norm(p1 - p0)))
+                else:
+                    ref_z = float(p0[2])
+                    nearest_x, nearest_y = float(p0[0]), float(p0[1])
+                    graph_x = 0.0
+                    
+                delta_z = float(clicked_point[2] - ref_z)
+                
+                # --- DEBUG OUTPUT AS REQUESTED ---
+                self.message_text.append(f"Picked Point World Coordinates: ({clicked_point[0]:.3f}, {clicked_point[1]:.3f}, {clicked_point[2]:.3f})")
+                self.message_text.append(f"Nearest Point on Zero Line: ({nearest_x:.3f}, {nearest_y:.3f}, {ref_z:.3f})")
+                self.message_text.append(f"Raw Vertical Difference (ΔZ): {delta_z:.3f} m")
+                
+                label = f"{delta_z:+.2f} m"
+                self.message_text.append(f"Final Elevation plotted on the graph: {delta_z:.3f} m")
+                
+                if not hasattr(self, 'center_line_3d_actors'):
+                    self.center_line_3d_actors = []
+                if not hasattr(self, 'center_line_graph_points'):
+                    self.center_line_graph_points = []
+                if not hasattr(self, 'center_line_graph_texts'):
+                    self.center_line_graph_texts = []
+                    
+                actor = self.add_sphere_marker(clicked_point, label, radius=0.3, color="Red")
+                self.center_line_3d_actors.append(actor)
+                
+                graph_pt, = self.ax.plot(graph_x, delta_z, 'ro', markersize=10, zorder=5)
+                self.center_line_graph_points.append(graph_pt)
+                graph_txt = self.ax.annotate(label, (graph_x, delta_z), textcoords="offset points", xytext=(0,10), ha='center', color='red', weight='bold', zorder=5)
+                self.center_line_graph_texts.append(graph_txt)
+                
+                # IMPORTANT: Force-update the Y axis limits because autoscale_view may be disabled
+                current_ylim = self.ax.get_ylim()
+                min_y, max_y = current_ylim
+                padding = max(abs(delta_z) * 0.2, 2.0)
+                
+                needs_update = False
+                if delta_z > max_y:
+                    max_y = delta_z + padding
+                    needs_update = True
+                if delta_z < min_y:
+                    min_y = delta_z - padding
+                    needs_update = True
+                    
+                if needs_update:
+                    self.ax.set_ylim(min_y, max_y)
+                
+                self.canvas.draw()
+                
+                self.message_text.append(f" Center Line picked: Z diff from Zero Line = {delta_z:+.2f} m")
+                return
+            except Exception as e:
+                import traceback
+                self.message_text.append(f"Error in center_line: {str(e)}")
+                self.message_text.append(traceback.format_exc())
+                return
+
         if hasattr(self, 'current_measurement') and self.current_measurement == 'tunnel_arc':
             if not hasattr(self, 'tunnel_arc_points'):
                 self.tunnel_arc_points = []
@@ -20758,10 +20864,10 @@ class PointCloudViewer(ApplicationUI):
             if not interactor:
                 return
             
-            if not hasattr(self, '_left_click_observer'):
-                self._left_click_observer = interactor.AddObserver(
-                    "LeftButtonPressEvent", self.on_click
-                )
+            interactor.RemoveObservers("LeftButtonPressEvent")
+            self._left_click_observer = interactor.AddObserver(
+                "LeftButtonPressEvent", self.on_click
+            )
 
             interactor.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
                 

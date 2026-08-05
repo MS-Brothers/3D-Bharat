@@ -1053,6 +1053,7 @@ class ApplicationUI(QMainWindow):
         self.under_pass_btn.setFixedWidth(100)
         self.under_pass_btn.clicked.connect(self.handle_under_pass_clicked)
         menu_bar_dd_layout.addWidget(self.under_pass_btn)
+
         
         
         def toggle_menu_bar():
@@ -2973,7 +2974,7 @@ Tunnel Camera View button:
                 background-color: #8FBFEF;
             }
         """)
-        self.bottom_section.setMinimumHeight(400)
+        self.bottom_section.setMinimumHeight(500)
         bottom_layout = QVBoxLayout(self.bottom_section)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.setSpacing(0)
@@ -3320,6 +3321,44 @@ Tunnel Camera View button:
         """))
 
         line_layout.addWidget(self.road_surface_container)
+#### Mayur 5-8-2026 add check box for centre line on canvas
+        # Center Line
+        self.center_container, self.center_line, center_label, self.center_pencil = create_line_checkbox_with_pencil(
+            "Center Line",
+            "Shows the tunnel center line",
+            'center_line'
+        )
+        self.center_line.setStyleSheet("""
+            QCheckBox {
+                color: black;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+        self.center_container.setVisible(True)
+
+        self.center_line.stateChanged.connect(lambda state: center_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: yellow;
+            }
+        """ if state == Qt.Checked else """
+            QLabel {
+                background-color: transparent;
+                border: none;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 16px;
+                color: #000000;
+            }
+        """))
+
+        line_layout.addWidget(self.center_container)
+        ###############################################
 
         # Bridge-specific Zero Line
         self.bridge_zero_container, self.bridge_zero_line, bridge_zero_label, self.bridge_zero_pencil = create_line_checkbox_with_pencil(
@@ -3539,7 +3578,8 @@ Tunnel Camera View button:
         self.material_scroll_area.setWidget(self.material_scroll_content)
         
         # Add the scroll area to the main line_layout right after the button
-        line_layout.addWidget(self.material_scroll_area, 1)
+        self.material_scroll_area.setMinimumHeight(60)
+        line_layout.addWidget(self.material_scroll_area)
 
         # Removed stretch to allow scroll area to expand fully
 
@@ -3637,6 +3677,7 @@ Tunnel Camera View button:
         line_layout.addSpacing(8)
         line_layout.addWidget(self.threed_map_button)
         line_layout.addWidget(self.save_button)
+        line_layout.addStretch(1)
 
         # Graph Canvas
         self.figure = Figure(dpi=100)
