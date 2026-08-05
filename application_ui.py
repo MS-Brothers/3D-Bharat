@@ -3344,7 +3344,7 @@ Tunnel Camera View button:
                 padding: 0px;
                 font-weight: bold;
                 font-size: 16px;
-                color: yellow;
+                color: #000000;
             }
         """ if state == Qt.Checked else """
             QLabel {

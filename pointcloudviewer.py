@@ -141,10 +141,11 @@ class PointCloudViewer(ApplicationUI):
             'deck_line': (1.0, 0.5, 0.0, 0.4),    # Orange
             'projection_line': (0.5, 0.0, 0.5, 0.4), # Purple
             'material': (1.0, 1.0, 0.0, 0.4),     # Yellow
+            'center_line': (1.0, 0.5, 0.0, 0.4),  # Orange
         }
 
         # List of line types considered as "baselines" for plane mapping
-        self.baseline_types = ['surface', 'construction', 'road_surface', 'deck_line', 'projection_line', 'material']
+        self.baseline_types = ['surface', 'construction', 'road_surface', 'deck_line', 'projection_line', 'material', 'center_line']
 
         # Construction mode state
         self.construction_mode_active = False
@@ -154,6 +155,12 @@ class PointCloudViewer(ApplicationUI):
         self.merger_markers = []
         self.merger_labels = []
         self.merger_plane_actors = {}
+## Mayur 5-8-2026 ctrl+z
+        # Add undo shortcut
+        from PyQt5.QtWidgets import QShortcut
+        from PyQt5.QtGui import QKeySequence
+        self.undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self.undo_shortcut.activated.connect(self.undo_last_pick)
 
         # Drawing/edit mode state defaults.
         # These must exist before any double-click completion path runs.
@@ -11390,18 +11397,66 @@ class PointCloudViewer(ApplicationUI):
                     self.message_text.append("Please set the Zero Line first before picking the Center Line point.")
                     self.center_line.setChecked(False)
                     return
+                    ## Mayur 5-8-2026
+                # Also initialize center_line in line_types if not present
+                if not hasattr(self, 'line_types'):
+                    self.line_types = {}
+                if 'center_line' not in self.line_types:
+                    self.line_types['center_line'] = {'color': 'orange', 'polylines': [], 'artists': []}
+                ## Mayur 5-8-2026
+                # Check if Center Line already exists
+                if self.line_types['center_line'].get('polylines'):
+                    reply = QMessageBox.question(
+                        self,
+                        "Center Line Exists",
+                        "A Center Line already exists. Do you want to clear it and create a new one?\nClick 'No' to cancel.",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    if reply == QMessageBox.Yes:
+                        for artist in self.line_types['center_line'].get('artists', []):
+                            try: artist.remove()
+                            except: pass
+                        self.line_types['center_line']['artists'] = []
+                        self.line_types['center_line']['polylines'] = []
+                        if hasattr(self, 'road_lines_data') and 'center_line' in self.road_lines_data:
+                            self.road_lines_data['center_line']['polylines'] = []
+                            self.road_lines_data['center_line']['artists'] = []
+                        if hasattr(self, 'center_line_3d_actors'):
+                            for actor in self.center_line_3d_actors:
+                                if actor: actor.SetVisibility(False)
+                            self.center_line_3d_actors = []
+                        self.canvas.draw()
+                        if hasattr(self, 'vtk_widget'):
+                            self.vtk_widget.GetRenderWindow().Render()
+                    else:
+                        self.center_line.blockSignals(True)
+                        self.center_line.setChecked(False)
+                        self.center_line.blockSignals(False)
+                        return
+                ############################################################################
+                # First, if there's an ongoing line of different type, finish it
+                if self.active_line_type and self.active_line_type != 'center_line' and self.current_points:
+                    self.message_text.append(f"Finishing {self.active_line_type.replace('_', ' ').title()} before switching to Center Line")
+                    self.finish_current_polyline()
+                
+                self.active_line_type = 'center_line'
+                
+                # IMPORTANT: Enable VTK 3D point picking for the first point
+                ##############################################################
                 self.measurement_active = True
                 self.set_measurement_type('center_line')
-                for actor in getattr(self, 'center_line_3d_actors', []):
-                    if actor: actor.SetVisibility(True)
-                for pt in getattr(self, 'center_line_graph_points', []):
-                    if pt: pt.set_visible(True)
-                for txt in getattr(self, 'center_line_graph_texts', []):
-                    if txt: txt.set_visible(True)
-                self.canvas.draw()
-                self.vtk_widget.GetRenderWindow().Render()
-                self.message_text.append("Center Line Mode: Click a point on the 3D point cloud.")
+                
+                if self.cid_click is None:
+                    self.cid_click = self.canvas.mpl_connect('button_press_event', self.on_draw_click)
+                    self.cid_key = self.canvas.mpl_connect('key_press_event', self.on_key_press)
+                
+                self.current_points = []
+                self.current_artist = None
+                self.current_redo_points = []
+                self.message_text.append("Center Line Mode: Click first point on 3D point cloud, then continue drawing on the 2D graph.")
                 return
+                #########################################################################
 
             # First, if there's an ongoing line of different type, finish it
             if self.active_line_type and self.active_line_type != line_type and self.current_points:
@@ -11947,6 +12002,7 @@ class PointCloudViewer(ApplicationUI):
         self.start_new_curve()
 
 # =========================================================================================================================================================
+    ## Mayur 5-8-2026 upated code
     def start_new_curve(self):
         """Open dialog and start adding curve labels from current point onward"""
         dialog = CurveDialog(self)
@@ -11961,18 +12017,20 @@ class PointCloudViewer(ApplicationUI):
             QMessageBox.warning(self, "Invalid Angle", "Please enter an angle greater than 0.")
             return
 
-        # Get last surface point X
-        last_x = self.get_last_surface_x()
+        # Get last point X from active line
+        last_x = self.get_last_active_line_x()
         if last_x is None:
-            QMessageBox.critical(self, "Error", "Draw at least one point on Surface Line first.")
+            active_name = self.active_line_type.replace('_', ' ').title() if self.active_line_type else "a line"
+            QMessageBox.critical(self, "Error", f"Draw at least one point on {active_name} first.")
             return
         
         # =========================================================================================================================
-        # NEW: convert chainage  real 3D point (the actual clicked surface point)
-        # Find the surface point that has this chainage
+        # NEW: convert chainage real 3D point (the actual clicked point)
+        # Find the point that has this chainage
         found = False
-        for line_type in ['surface']:
-            for polyline in reversed(self.line_types[line_type]['polylines']):  # newest first
+        if self.active_line_type in self.line_types:
+            for polyline in reversed(self.line_types[self.active_line_type]['polylines']):  # newest first
+                #################################################################################
                 for dist, rel_z in reversed(polyline):
                     if abs(dist - last_x) < 0.5:  # small tolerance
                         t = dist / self.total_distance
@@ -11984,8 +12042,6 @@ class PointCloudViewer(ApplicationUI):
                         break
                 if found:
                     break
-            if found:
-                break
 
         if not found:
             # fallback  just use zero line height
@@ -12303,25 +12359,30 @@ class PointCloudViewer(ApplicationUI):
             self.curve_pick_id = None
 
 # ===========================================================================================================================================================
-    def get_last_surface_x(self):
+   ## Mayur 5-8-2026 centre line curve and elevation angle updated
+    def get_last_active_line_x(self):
         """
         Returns the X-coordinate (distance along zero line) of the most recent point
-        on the Surface Line (either from completed polylines or current drawing).
-        Returns None if no surface points exist.
+        on the active line (either from completed polylines or current drawing).
+        Returns None if no points exist.
         """
-        # Check completed surface polylines (in reverse order - last one first)
-        for polyline in reversed(self.line_types['surface']['polylines']):
-            if polyline:  # if not empty
-                return polyline[-1][0]  # return X of last point
+        if not self.active_line_type:
+            return None
 
-        # Check if currently drawing a surface line
-        if self.active_line_type == 'surface' and self.current_points:
+        # Check completed polylines (in reverse order - last one first)
+        if self.active_line_type in self.line_types:
+            for polyline in reversed(self.line_types[self.active_line_type]['polylines']):
+                if polyline:  # if not empty
+                    return polyline[-1][0]  # return X of last point
+
+        # Check if currently drawing
+        if self.current_points:
             if len(self.current_points) > 0:
                 return self.current_points[-1][0]
 
-        # No surface points found
+        # No points found
         return None
-
+#####################################################################################
 # ===========================================================================================================================================================
     def undo_graph(self):
         if self.active_line_type is None:
@@ -12571,7 +12632,7 @@ class PointCloudViewer(ApplicationUI):
 
             # Save the polyline to the current mode's data
             if self.current_mode == 'road' and self.active_line_type in ['construction', 'surface', 'road_surface',
-                                                                         'zero']:
+                                                                         'zero', 'center_line']:
                 if self.active_line_type not in self.road_lines_data:
                     self.road_lines_data[self.active_line_type] = {'polylines': [], 'artists': []}
                 self.road_lines_data[self.active_line_type]['polylines'].append(self.current_points.copy())
@@ -12610,7 +12671,15 @@ class PointCloudViewer(ApplicationUI):
             self.current_artist.remove()
             self.current_artist = None
         self.message_text.append(f"{self.active_line_type.replace('_', ' ').title()} completed")
-
+        ## Mayur 5-8-2026 
+        if self.active_line_type == 'center_line':
+            # Do NOT uncheck the Center Line button so Map on 3D and other tools can use it.
+            # Only stop the drawing/picking mode.
+            self.measurement_active = False
+            self.current_measurement = None
+            self.active_line_type = None
+          #############################################################################  
+            # Do not hide the 3D actors automatically, let the Map on 3D flow handle it.
 
 #     def finish_current_polyline(self):
 #         if self.active_line_type == 'construction_dots':
@@ -12760,7 +12829,62 @@ class PointCloudViewer(ApplicationUI):
         return text_obj
     
 # ===========================================================================================================================================================
+### Mayur 5-8-2026
+    def undo_last_pick(self):
+        """Undo the last picked point for the currently active line type."""
+        if getattr(self, 'active_line_type', None) not in ['center_line', 'surface', 'road_surface', 'construction']:
+            return
+            
+        if not hasattr(self, 'current_points') or not self.current_points:
+            if hasattr(self, 'message_text'):
+                self.message_text.append("Undo: No points to undo.")
+            return
+            
+        # Pop the last point from the logic
+        self.current_points.pop()
+        
+        # If it's a 3D point (e.g. Center Line first point)
+        if self.active_line_type == 'center_line' and len(self.current_points) == 0:
+            # We just removed the first point, remove 3D actor as well
+            if hasattr(self, 'center_line_3d_actors') and self.center_line_3d_actors:
+                actor = self.center_line_3d_actors.pop()
+                self.renderer.RemoveActor(actor)
+                if hasattr(self, 'measurement_actors') and actor in self.measurement_actors:
+                    idx = self.measurement_actors.index(actor)
+                    self.measurement_actors.pop(idx)
+                    # The text actor is usually added immediately after
+                    if idx < len(self.measurement_actors):
+                        text_actor = self.measurement_actors.pop(idx)
+                        self.renderer.RemoveActor(text_actor)
+                self.vtk_widget.GetRenderWindow().Render()
+                
+            # Reset 2D artist
+            if hasattr(self, 'current_artist') and self.current_artist:
+                self.current_artist.remove()
+                self.current_artist = None
+                if hasattr(self, 'canvas'):
+                    self.canvas.draw()
+            
+            # Allow picking in 3D again
+            self.measurement_active = True
+            if hasattr(self, 'message_text'):
+                self.message_text.append("Undo: Removed Center Line first point. Please pick again in 3D.")
+            return
 
+        # For 2D points (second point onwards, or other line types)
+        if hasattr(self, 'current_artist') and self.current_artist:
+            if len(self.current_points) == 0:
+                self.current_artist.remove()
+                self.current_artist = None
+            else:
+                xs = [p[0] for p in self.current_points]
+                ys = [p[1] for p in self.current_points]
+                self.current_artist.set_data(xs, ys)
+            if hasattr(self, 'canvas'):
+                self.canvas.draw()
+            if hasattr(self, 'message_text'):
+                self.message_text.append("Undo: Removed last 2D point.")
+#################################################################################################
     def on_draw_click(self, event):
         if event.inaxes != self.ax or self.active_line_type is None:
             return
@@ -12771,11 +12895,11 @@ class PointCloudViewer(ApplicationUI):
 
         # ================================================================
         # HUMAN ERROR CORRECTION: Snap chainage (x) to nearest 10 m
-        # Only for: surface, construction, road_surface
+        # Only for: surface, construction, road_surface, center_line
         # Example: 19.3  20, 11.7  10, 14.9  10, 15.1  20
         # ================================================================
         snapped_x = x
-        if self.active_line_type in ['surface', 'construction', 'road_surface']:
+        if self.active_line_type in ['surface', 'construction', 'road_surface', 'center_line']:
             snap_interval = 10.0
             snapped_x = round(x / snap_interval) * snap_interval
             
@@ -12833,9 +12957,13 @@ class PointCloudViewer(ApplicationUI):
             return
 
        # ======================================================================
-        # Normal polyline drawing (surface, construction, road_surface, etc.)
+        # Normal polyline drawing (surface, construction, road_surface, center_line, etc.)
        # ======================================================================
         if len(self.current_points) == 0:
+            if self.active_line_type == 'center_line':
+                self.message_text.append("Center Line must start from the 3D point cloud. Please click a point in the 3D view first.")
+                return
+                
             if self.active_line_type == 'road_surface' and self.elevation_angle_active:
                 signed_angle = self.elevation_angle_value if self.elevation_angle_direction == 'upward' else -self.elevation_angle_value
                 self.current_points.append((x, y, signed_angle))
@@ -12844,7 +12972,7 @@ class PointCloudViewer(ApplicationUI):
             else:
                 self.current_points.append((x, y))
         else:
-            if self.active_line_type == 'road_surface' and self.elevation_angle_active:
+            if self.active_line_type in ['road_surface', 'center_line'] and self.elevation_angle_active:
                 prev_point = self.current_points[-1]
                 x_prev = prev_point[0]
                 y_prev = prev_point[1]
@@ -12880,13 +13008,13 @@ class PointCloudViewer(ApplicationUI):
             self.current_artist.set_data(xs, ys)
             self.current_artist.set_color(color)
 
-        # Special: curve label for surface line
-        if self.active_line_type == 'surface' and self.curve_active:
+        # Special: curve label for surface line and center line
+        if self.active_line_type in ['surface', 'center_line'] and self.curve_active:
             latest_x = self.current_points[-1][0]
             self.add_curve_label_at_x(latest_x)
         
         # Special: update elevation angle label position
-        if self.active_line_type == 'road_surface' and self.elevation_angle_active and len(self.current_points) > 1:
+        if self.active_line_type in ['road_surface', 'center_line'] and self.elevation_angle_active and len(self.current_points) > 1:
             latest_x = self.current_points[-1][0]
             latest_y = self.current_points[-1][1]
             if self.elevation_angle_label is not None:
@@ -14098,8 +14226,10 @@ class PointCloudViewer(ApplicationUI):
             
             label_y = self.ax.get_ylim()[1] - 0.5  # Near top
 
-            # --- If we are drawing road surface and already have points, mark the last point as having the angle ---
-            if self.active_line_type == 'road_surface' and len(self.current_points) > 0:
+         ## Mayur 5-8-2026
+            # --- If we are drawing road surface or center line and already have points, mark the last point as having the angle ---
+            if self.active_line_type in ['road_surface', 'center_line'] and len(self.current_points) > 0:
+                ####################################################################################
                 last_x, last_y = self.current_points[-1][0], self.current_points[-1][1]
                 signed_angle = self.elevation_angle_value if self.elevation_angle_direction == 'upward' else -self.elevation_angle_value
                 # Replace the last point with (x, y, angle)
@@ -14343,6 +14473,7 @@ class PointCloudViewer(ApplicationUI):
             'road_surface': self.road_surface_line,
             'deck_line': self.deck_line,
             'projection_line': self.projection_line,
+            'center_line': self.center_line,
         }
 
         checked_types = [ltype for ltype, cb in baseline_checkboxes.items() if cb.isChecked()]
@@ -19361,6 +19492,7 @@ class PointCloudViewer(ApplicationUI):
         actor.GetProperty().SetColor(self.colors.GetColor3d(color))  # Use specified color
         actor.point_index = len(self.measurement_points) - 1  # Store reference
 
+        actor.PickableOff()
         self.renderer.AddActor(actor)
         self.measurement_actors.append(actor)
 
@@ -19377,6 +19509,7 @@ class PointCloudViewer(ApplicationUI):
             text_actor.SetScale(0.1, 0.1, 0.1)
             text_actor.AddPosition(point[0] + 0.15, point[1] + 0.15, point[2])
             text_actor.GetProperty().SetColor(self.colors.GetColor3d("Green"))
+            text_actor.PickableOff()
 
             self.renderer.AddActor(text_actor)
             text_actor.SetCamera(self.renderer.GetActiveCamera())
@@ -20021,8 +20154,28 @@ class PointCloudViewer(ApplicationUI):
         Handle key press events - works with both VTK and matplotlib
         For matplotlib events, obj will be the event, event will be None
         For VTK events, obj will be the interactor, event will be the event
+
         """
-        key = obj.GetKeySym()
+        ## Mayur 5-8-2026
+        if hasattr(obj, 'GetKeySym'):
+            key = obj.GetKeySym()
+        elif hasattr(obj, 'key'):
+            key = obj.key
+            # Matplotlib returns strings like 'up', 'down', 'escape', ' '
+            if key == ' ':
+                key = 'space'
+            elif key and len(key) > 1:
+                key = key.capitalize() # 'escape' -> 'Escape', 'up' -> 'Up'
+        else:
+            return
+            
+        if not key:
+            return
+            
+        # Map 'Escape' to 'escape' for existing logic if needed, but existing logic expects 'escape'
+        if key == 'Escape':
+            key = 'escape'
+#######################################################################################
         ### Mayur Wakhare 1-7-2026
         if getattr(self, '_robot_active', False) and key in ('Up', 'Down', 'Left', 'Right'):
             return
@@ -20145,29 +20298,74 @@ class PointCloudViewer(ApplicationUI):
             return  # No point found
 
         if hasattr(self, 'current_measurement') and self.current_measurement == 'center_line':
+            if len(self.current_points) > 0:
+                self.message_text.append("First point already picked. Please click on the 2D graph to continue drawing the Center Line.")
+                return
+
             try:
                 if not (hasattr(self, 'zero_start_point') and self.zero_start_point is not None and hasattr(self, 'zero_end_point') and self.zero_end_point is not None):
                     self.message_text.append("Zero Line not fully set.")
                     return
+             ## Mayur 5-8-2026   
+                pts_3d = self.get_road_baseline_points_3d()
+                best_dist = float('inf')
                 
-                p0 = np.array(self.zero_start_point, dtype=float)
-                p1 = np.array(self.zero_end_point, dtype=float)
-                dir_vec = p1[:2] - p0[:2]
-                dist_sq = float(np.dot(dir_vec, dir_vec))
-                
-                if dist_sq > 0:
-                    t = float(np.dot(clicked_point[:2] - p0[:2], dir_vec)) / dist_sq
-                    ref_z = float(p0[2] + t * (p1[2] - p0[2]))
-                    nearest_x = float(p0[0] + t * dir_vec[0])
-                    nearest_y = float(p0[1] + t * dir_vec[1])
-                    graph_x = t * float(getattr(self, 'total_distance', np.linalg.norm(p1 - p0)))
+                if pts_3d and len(pts_3d) > 1:
+                    for i in range(len(pts_3d) - 1):
+                        ch0, x0, y0, z0 = pts_3d[i]
+                        ch1, x1, y1, z1 = pts_3d[i+1]
+                        
+                        p_start = np.array([x0, y0, z0])
+                        p_end = np.array([x1, y1, z1])
+                        dir_vec = p_end[:2] - p_start[:2]
+                        dist_sq = float(np.dot(dir_vec, dir_vec))
+                        
+                        if dist_sq > 0:
+                            t = float(np.dot(clicked_point[:2] - p_start[:2], dir_vec)) / dist_sq
+                            t = max(0.0, min(1.0, t)) # Clamp to segment
+                            proj_pt_2d = p_start[:2] + t * dir_vec
+                            dist_to_proj = np.linalg.norm(clicked_point[:2] - proj_pt_2d)
+                            
+                            if dist_to_proj < best_dist:
+                                best_dist = dist_to_proj
+                                best_ch = ch0 + t * (ch1 - ch0)
+                                ref_z = float(p_start[2] + t * (p_end[2] - p_start[2]))
+                                nearest_x = float(proj_pt_2d[0])
+                                nearest_y = float(proj_pt_2d[1])
+                                graph_x = best_ch - getattr(self, 'zero_start_chainage', 0.0)
+                        else:
+                            dist_to_proj = np.linalg.norm(clicked_point[:2] - p_start[:2])
+                            if dist_to_proj < best_dist:
+                                best_dist = dist_to_proj
+                                best_ch = ch0
+                                ref_z = float(p_start[2])
+                                nearest_x, nearest_y = float(p_start[0]), float(p_start[1])
+                                graph_x = best_ch - getattr(self, 'zero_start_chainage', 0.0)
                 else:
-                    ref_z = float(p0[2])
-                    nearest_x, nearest_y = float(p0[0]), float(p0[1])
-                    graph_x = 0.0
+                    p0 = np.array(self.zero_start_point, dtype=float)
+                    p1 = np.array(self.zero_end_point, dtype=float)
+                    dir_vec = p1[:2] - p0[:2]
+                    dist_sq = float(np.dot(dir_vec, dir_vec))
+                    
+                    if dist_sq > 0:
+                        t = float(np.dot(clicked_point[:2] - p0[:2], dir_vec)) / dist_sq
+                        t = max(0.0, min(1.0, t)) # Clamp to segment
+                        ref_z = float(p0[2] + t * (p1[2] - p0[2]))
+                        nearest_x = float(p0[0] + t * dir_vec[0])
+                        nearest_y = float(p0[1] + t * dir_vec[1])
+                        # Get real chainage if available, else approximate
+                        if getattr(self, 'zero_start_chainage', None) is not None:
+                            best_ch = self.zero_start_chainage + t * float(getattr(self, 'total_distance', np.linalg.norm(p1 - p0)))
+                            graph_x = best_ch - self.zero_start_chainage
+                        else:
+                            graph_x = t * float(getattr(self, 'total_distance', np.linalg.norm(p1 - p0)))
+                    else:
+                        ref_z = float(p0[2])
+                        nearest_x, nearest_y = float(p0[0]), float(p0[1])
+                        graph_x = 0.0
                     
                 delta_z = float(clicked_point[2] - ref_z)
-                
+              ######################################################################################  
                 # --- DEBUG OUTPUT AS REQUESTED ---
                 self.message_text.append(f"Picked Point World Coordinates: ({clicked_point[0]:.3f}, {clicked_point[1]:.3f}, {clicked_point[2]:.3f})")
                 self.message_text.append(f"Nearest Point on Zero Line: ({nearest_x:.3f}, {nearest_y:.3f}, {ref_z:.3f})")
@@ -20178,18 +20376,18 @@ class PointCloudViewer(ApplicationUI):
                 
                 if not hasattr(self, 'center_line_3d_actors'):
                     self.center_line_3d_actors = []
-                if not hasattr(self, 'center_line_graph_points'):
-                    self.center_line_graph_points = []
-                if not hasattr(self, 'center_line_graph_texts'):
-                    self.center_line_graph_texts = []
                     
-                actor = self.add_sphere_marker(clicked_point, label, radius=0.3, color="Red")
+                actor = self.add_sphere_marker(clicked_point, label, radius=0.3, color="orange")
                 self.center_line_3d_actors.append(actor)
                 
-                graph_pt, = self.ax.plot(graph_x, delta_z, 'ro', markersize=10, zorder=5)
-                self.center_line_graph_points.append(graph_pt)
-                graph_txt = self.ax.annotate(label, (graph_x, delta_z), textcoords="offset points", xytext=(0,10), ha='center', color='red', weight='bold', zorder=5)
-                self.center_line_graph_texts.append(graph_txt)
+                # Start the polyline
+                self.current_points.append((graph_x, delta_z))
+                
+                # Initialize the current artist
+                color = self.line_types.get('center_line', {}).get('color', 'orange')
+                self.current_artist, = self.ax.plot(
+                    [graph_x], [delta_z], color=color, linewidth=2, marker='o', markersize=5
+                )
                 
                 # IMPORTANT: Force-update the Y axis limits because autoscale_view may be disabled
                 current_ylim = self.ax.get_ylim()
@@ -20209,7 +20407,7 @@ class PointCloudViewer(ApplicationUI):
                 
                 self.canvas.draw()
                 
-                self.message_text.append(f" Center Line picked: Z diff from Zero Line = {delta_z:+.2f} m")
+                self.message_text.append(f" Center Line picked: Z diff from Zero Line = {delta_z:+.2f} m. Now click on the 2D graph to draw the rest of the profile.")
                 return
             except Exception as e:
                 import traceback

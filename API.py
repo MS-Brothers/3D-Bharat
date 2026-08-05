@@ -58,13 +58,21 @@ class WorksheetAPI:
             "mobile_no": mobile_no,
             "password": password,
             "login_type": login_type,
-            "app_token": app_token
         }
+        if app_token:
+            payload["app_token"] = app_token
         try:
+            headers = {
+                "Accept": "*/*",
+                "Content-Type": "application/json",
+                "User-Agent": "PostmanRuntime/7.44.0",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
             response = requests.post(
                 url,
-                json=payload,
-                headers={'Content-Type': 'application/json'},
+                data=json.dumps(payload),
+                headers=headers,
                 timeout=20
             )
             
@@ -89,10 +97,13 @@ class WorksheetAPI:
                     "details": response.text
                 }
             else:
+                details = response.text.strip()
+                if not details:
+                    details = f"HTTP {response.status_code} returned an empty body"
                 return {
                     "success": False,
                     "message": f"Login failed ({response.status_code})",
-                    "details": response.text
+                    "details": details
                 }
         except Exception as e:
             return {
