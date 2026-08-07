@@ -583,29 +583,29 @@ class WorksheetAPI:
                 "message": f"Get buddies error: {str(e)}"
             }
 
-    @staticmethod
-    def create_worksheet(payload):
-        """
-        Create worksheet (mode 1 / mode 2) via server endpoint.
-        Payload should include the required fields, e.g.:
-          {"mode":1, "user_id":1, "worksheet_name":"...", "file_id":123}
-        or mode 2 payload.
+    # @staticmethod
+    # def create_worksheet(payload):
+    #     """
+    #     Create worksheet (mode 1 / mode 2) via server endpoint.
+    #     Payload should include the required fields, e.g.:
+    #       {"mode":1, "user_id":1, "worksheet_name":"...", "file_id":123}
+    #     or mode 2 payload.
 
-        Returns a dict: {"success": bool, "status_code": int, "data": dict, "text": str}
-        """
-        url = f"{WorksheetAPI.BASE_URL}/3dtrial/create-worksheet"
-        try:
-            resp = requests.post(url, json=payload, headers={'Content-Type': 'application/json'}, timeout=20)
-            text = resp.text
-            try:
-                data = resp.json()
-            except Exception:
-                data = {}
+    #     Returns a dict: {"success": bool, "status_code": int, "data": dict, "text": str}
+    #     """
+    #     url = f"{WorksheetAPI.BASE_URL}/3dtrial/create-worksheet"
+    #     try:
+    #         resp = requests.post(url, json=payload, headers={'Content-Type': 'application/json'}, timeout=20)
+    #         text = resp.text
+    #         try:
+    #             data = resp.json()
+    #         except Exception:
+    #             data = {}
 
-            ok = resp.status_code in (200, 201)
-            return {"success": ok, "status_code": resp.status_code, "data": data, "text": text}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
+    #         ok = resp.status_code in (200, 201)
+    #         return {"success": ok, "status_code": resp.status_code, "data": data, "text": text}
+    #     except Exception as e:
+    #         return {"success": False, "message": str(e)}
 
     @staticmethod
     def update_worksheet_layer(user_id, mode, layer_id, worksheet_id, layer_json_data):

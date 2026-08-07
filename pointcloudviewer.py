@@ -39,7 +39,7 @@ from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, Mate
                     StreetLightDialog, SignalPoleDialog, LaneMarkingDialog, PoleAssetDialog, BuddyDialog, BuddiesWorksheetsDialog, OneDirectionStreetLightDialog, 
                     TwoDirectionStreetLightDialog, FourDirectionStreetLightDialog, OneDirectionSignalPoleDialog, TwoDirectionSignalPoleDialog, FourDirectionSignalPoleDialog, 
                     ##### Mayur Wakhare 1-7-2026 Tunnel Light
-                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog,UnderPassDialog,UnderPassPreviewDialog,UnderpassCCTVDialog,UnderpassLightDialog,TunnelWallDialog,UnderpassWallDialog)
+                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog,UnderPassDialog,UnderPassPreviewDialog,UnderpassCCTVDialog,UnderpassLightDialog,TunnelWallDialog,UnderpassWallDialog, MenuTunnelConfigurationDialog, TunnelTypeSelectionDialog)
                     ###########################################################
 from measurement_widget import MeasurementWidget
 from digging_point import DiggingPointInput
@@ -45487,7 +45487,29 @@ class PointCloudViewer(ApplicationUI):
             ]
         }
     
+## Mayur 6-8-2026
+    def handle_tunnel_clicked(self):
+        """Open the Tunnel configuration dialog."""
+        type_dialog = TunnelTypeSelectionDialog(self)
+        if type_dialog.exec_() == QDialog.Accepted:
+            if type_dialog.selected_type == "TBM":
+                if not getattr(self, "current_worksheet_name", None):
+                    QMessageBox.warning(self, "No Worksheet", "Please open a worksheet first.")
+                    return
+                    
+                layer_folder = getattr(self, 'current_design_layer_path', None)
+                if not layer_folder or not os.path.exists(layer_folder):
+                    QMessageBox.warning(self, "No Design Layer", "Please load a design layer first.")
+                    return
 
+                dialog = MenuTunnelConfigurationDialog(self)
+                if dialog.exec_() == QDialog.Accepted:
+                    self.menu_tunnel_values = dialog.tunnel_values
+                    print(f"Menu Tunnel values: {self.menu_tunnel_values}")
+                    # Do not implement any tunnel rendering yet
+            elif type_dialog.selected_type == "DrillBlast":
+                QMessageBox.information(self, "Coming Soon", "Coming Soon")
+####################################################################################################
     ###### Mayur Wakhare 05-06-2026 : Added "Under pass" button on Menu bar ############
     def handle_under_pass_clicked(self):
         """Open the Under Pass configuration dialog."""

@@ -1053,8 +1053,13 @@ class ApplicationUI(QMainWindow):
         self.under_pass_btn.setFixedWidth(100)
         self.under_pass_btn.clicked.connect(self.handle_under_pass_clicked)
         menu_bar_dd_layout.addWidget(self.under_pass_btn)
-
-        
+### Mayur 06-08-2026
+        self.tunnel_btn = QPushButton("Menu_Tunnel")
+        self.tunnel_btn.setFixedHeight(40)
+        self.tunnel_btn.setFixedWidth(100)
+        self.tunnel_btn.clicked.connect(self.handle_tunnel_clicked)
+        menu_bar_dd_layout.addWidget(self.tunnel_btn)
+ ################################################################       
         
         def toggle_menu_bar():
             if self.menu_bar_button.isChecked():

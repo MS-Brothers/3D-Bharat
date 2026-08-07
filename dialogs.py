@@ -2007,138 +2007,138 @@ class DesignNewDialog(QDialog):
                                 "Please enter a different name.")
             return  # Do NOT accept — user must change name
 
-        # If all good, call Mode 2 API to create design layer on server, then accept
-        try:
-            from API import WorksheetAPI
-            import json as _json
+        # # If all good, call Mode 2 API to create design layer on server, then accept
+        # try:
+        #     from API import WorksheetAPI
+        #     import json as _json
 
-            parent = getattr(self, 'parent', None)
-            user_id = None
-            worksheet_id = None
-            if parent:
-                user_id = getattr(parent, 'current_user_id', None) or getattr(parent, 'current_user', None) or getattr(parent, 'api_user_id', None)
-                worksheet_id = getattr(parent, 'current_worksheet_id', None) or (getattr(parent, 'current_worksheet_data', {}) or {}).get('id') or getattr(parent, 'created_worksheet_id', None)
+        #     parent = getattr(self, 'parent', None)
+        #     user_id = None
+        #     worksheet_id = None
+        #     if parent:
+        #         user_id = getattr(parent, 'current_user_id', None) or getattr(parent, 'current_user', None) or getattr(parent, 'api_user_id', None)
+        #         worksheet_id = getattr(parent, 'current_worksheet_id', None) or (getattr(parent, 'current_worksheet_data', {}) or {}).get('id') or getattr(parent, 'created_worksheet_id', None)
 
-            dimension = "3D" if self.radio_3d.isChecked() else "2D"
-            reference_type = "Road" if self.cb_road.isChecked() else None
-            project_name = getattr(parent, 'current_project_name', "None") if parent else "None"
-            worksheet_name = getattr(parent, 'current_worksheet_name', "Unknown") if parent else "Unknown"
+        #     dimension = "3D" if self.radio_3d.isChecked() else "2D"
+        #     reference_type = "Road" if self.cb_road.isChecked() else None
+        #     project_name = getattr(parent, 'current_project_name', "None") if parent else "None"
+        #     worksheet_name = getattr(parent, 'current_worksheet_name', "Unknown") if parent else "Unknown"
             
-            point_cloud_file = ""
-            if parent and hasattr(parent, 'current_worksheet_data') and isinstance(parent.current_worksheet_data, dict):
-                config = parent.current_worksheet_data.get("worksheet_config_data", {})
-                if isinstance(config, str):
-                    try:
-                        import json as _j
-                        config = _j.loads(config)
-                    except:
-                        config = {}
-                point_cloud_file = config.get("point_cloud_file", "")
+        #     point_cloud_file = ""
+        #     if parent and hasattr(parent, 'current_worksheet_data') and isinstance(parent.current_worksheet_data, dict):
+        #         config = parent.current_worksheet_data.get("worksheet_config_data", {})
+        #         if isinstance(config, str):
+        #             try:
+        #                 import json as _j
+        #                 config = _j.loads(config)
+        #             except:
+        #                 config = {}
+        #         point_cloud_file = config.get("point_cloud_file", "")
 
-            layer_config_data = {
-                "layer_name": layer_name,
-                "dimension": dimension,
-                "reference_type": reference_type or "Road",
-                "reference_line": "",
-                "master_layer": bool(self.cb_master.isChecked()), # ========= Aniket added 02-05-2026
-                "project_name": project_name,
-                "worksheet_name": worksheet_name,
-                "point_cloud_file": point_cloud_file,
-                "created_by": getattr(parent, 'current_user_full_name', getattr(parent, 'current_user', "Unknown")) if parent else "Unknown",
-                "created_at": datetime.now().isoformat()
-            }
+        #     layer_config_data = {
+        #         "layer_name": layer_name,
+        #         "dimension": dimension,
+        #         "reference_type": reference_type or "Road",
+        #         "reference_line": "",
+        #         "master_layer": bool(self.cb_master.isChecked()), # ========= Aniket added 02-05-2026
+        #         "project_name": project_name,
+        #         "worksheet_name": worksheet_name,
+        #         "point_cloud_file": point_cloud_file,
+        #         "created_by": getattr(parent, 'current_user_full_name', getattr(parent, 'current_user', "Unknown")) if parent else "Unknown",
+        #         "created_at": datetime.now().isoformat()
+        #     }
 
-            payload = {
-                "mode": 2,
-                "user_id": int(user_id) if user_id is not None and str(user_id).isdigit() else user_id,
-                "worksheet_id": str(worksheet_id) if worksheet_id is not None else worksheet_id,
-                "layer_name": layer_name,
-                "construction_type": 1,
-                "is_2d": 1,
-                "type_2d": 1,
-                "is_3d": 0,
-                "type_3d": 0,
-                "file_path": "",
-                "layer_config_data": layer_config_data,
-                "layer_json_data": {}
-            }
+        #     payload = {
+        #         "mode": 2,
+        #         "user_id": int(user_id) if user_id is not None and str(user_id).isdigit() else user_id,
+        #         "worksheet_id": str(worksheet_id) if worksheet_id is not None else worksheet_id,
+        #         "layer_name": layer_name,
+        #         "construction_type": 1,
+        #         "is_2d": 1,
+        #         "type_2d": 1,
+        #         "is_3d": 0,
+        #         "type_3d": 0,
+        #         "file_path": "",
+        #         "layer_config_data": layer_config_data,
+        #         "layer_json_data": {}
+        #     }
 
-            # Debug: print payload to stdout
-            try:
-                print('\n=== MODE 2 PAYLOAD ===')
-                print(_json.dumps(payload, indent=2, default=str))
-            except Exception:
-                print('MODE2 PAYLOAD:', payload)
+        #     # Debug: print payload to stdout
+        #     try:
+        #         print('\n=== MODE 2 PAYLOAD ===')
+        #         print(_json.dumps(payload, indent=2, default=str))
+        #     except Exception:
+        #         print('MODE2 PAYLOAD:', payload)
 
-            # Append payload to UI message area if available
-            if parent and hasattr(parent, 'message_text'):
-                try:
-                    parent.message_text.append('MODE2 PAYLOAD: ' + _json.dumps(payload, ensure_ascii=False))
-                except Exception:
-                    try:
-                        parent.message_text.append('MODE2 PAYLOAD: ' + str(payload))
-                    except:
-                        pass
+        #     # Append payload to UI message area if available
+        #     if parent and hasattr(parent, 'message_text'):
+        #         try:
+        #             parent.message_text.append('MODE2 PAYLOAD: ' + _json.dumps(payload, ensure_ascii=False))
+        #         except Exception:
+        #             try:
+        #                 parent.message_text.append('MODE2 PAYLOAD: ' + str(payload))
+        #             except:
+        #                 pass
 
-            resp = WorksheetAPI.create_worksheet(payload)
+        #     resp = WorksheetAPI.create_worksheet(payload)
 
-            # Debug: print full response to stdout
-            try:
-                print('\n=== MODE 2 RESPONSE ===')
-                print(_json.dumps(resp, indent=2, default=str))
-            except Exception:
-                print('MODE2 RESPONSE:', resp)
+        #     # Debug: print full response to stdout
+        #     try:
+        #         print('\n=== MODE 2 RESPONSE ===')
+        #         print(_json.dumps(resp, indent=2, default=str))
+        #     except Exception:
+        #         print('MODE2 RESPONSE:', resp)
 
-            # Log into parent message area if available
-            if parent and hasattr(parent, 'message_text'):
-                try:
-                    parent.message_text.append('MODE2 RESPONSE: ' + (_json.dumps(resp, ensure_ascii=False) if isinstance(resp, dict) else str(resp)))
-                except Exception:
-                    try:
-                        parent.message_text.append('MODE2 RESPONSE: ' + str(resp))
-                    except:
-                        pass
+        #     # Log into parent message area if available
+        #     if parent and hasattr(parent, 'message_text'):
+        #         try:
+        #             parent.message_text.append('MODE2 RESPONSE: ' + (_json.dumps(resp, ensure_ascii=False) if isinstance(resp, dict) else str(resp)))
+        #         except Exception:
+        #             try:
+        #                 parent.message_text.append('MODE2 RESPONSE: ' + str(resp))
+        #             except:
+        #                 pass
 
-            # Evaluate success and show user-facing dialog
-            success = False
-            resp_text = ''
-            status_code = None
-            if isinstance(resp, dict):
-                success = bool(resp.get('success'))
-                status_code = resp.get('status_code') or resp.get('status')
-                resp_text = resp.get('text') or resp.get('message') or str(resp.get('data') or '')
-            else:
-                success = bool(resp)
-                resp_text = str(resp)
+        #     # Evaluate success and show user-facing dialog
+        #     success = False
+        #     resp_text = ''
+        #     status_code = None
+        #     if isinstance(resp, dict):
+        #         success = bool(resp.get('success'))
+        #         status_code = resp.get('status_code') or resp.get('status')
+        #         resp_text = resp.get('text') or resp.get('message') or str(resp.get('data') or '')
+        #     else:
+        #         success = bool(resp)
+        #         resp_text = str(resp)
 
-            if success:
-                msg = f"Mode 2 request completed. status={status_code or ''}"
-                try:
-                    if parent and hasattr(parent, 'message_text'):
-                        parent.message_text.append(msg)
-                except:
-                    pass
-                QMessageBox.information(self, 'Server', msg)
-            else:
-                msg = resp_text or 'Unknown error'
-                try:
-                    if parent and hasattr(parent, 'message_text'):
-                        parent.message_text.append('Mode2 error: ' + str(msg))
-                except:
-                    pass
-                QMessageBox.warning(self, 'Server Error', f'Failed to create design layer on server:\n{msg}')
+        #     if success:
+        #         msg = f"Mode 2 request completed. status={status_code or ''}"
+        #         try:
+        #             if parent and hasattr(parent, 'message_text'):
+        #                 parent.message_text.append(msg)
+        #         except:
+        #             pass
+        #         QMessageBox.information(self, 'Server', msg)
+        #     else:
+        #         msg = resp_text or 'Unknown error'
+        #         try:
+        #             if parent and hasattr(parent, 'message_text'):
+        #                 parent.message_text.append('Mode2 error: ' + str(msg))
+        #         except:
+        #             pass
+        #         QMessageBox.warning(self, 'Server Error', f'Failed to create design layer on server:\n{msg}')
 
-        except Exception as e:
-            try:
-                print('Mode 2 API call exception:', e)
-            except:
-                pass
-            if getattr(self, 'parent', None) and hasattr(self.parent, 'message_text'):
-                try:
-                    self.parent.message_text.append(f'Mode 2 API call failed: {e}')
-                except:
-                    pass
-            QMessageBox.warning(self, 'API Error', f'Mode 2 API call failed: {e}')
+        # except Exception as e:
+        #     try:
+        #         print('Mode 2 API call exception:', e)
+        #     except:
+        #         pass
+        #     if getattr(self, 'parent', None) and hasattr(self.parent, 'message_text'):
+        #         try:
+        #             self.parent.message_text.append(f'Mode 2 API call failed: {e}')
+        #         except:
+        #             pass
+        #     QMessageBox.warning(self, 'API Error', f'Mode 2 API call failed: {e}')
 
         # Accept dialog after API call
         self.accept()
@@ -2696,88 +2696,88 @@ class ConstructionNewDialog(QDialog):
             self.parent.vtk_widget.GetRenderWindow().Render()
             self.parent.message_text.append(f"Base plane created from first selected baseline (width: {width:.2f}m)")
 
-    # =============================== API Payload of Material Layer Creation (Mode 3) ===============================
-        # Send Mode 3 API call to create a material layer on server using this dialog's layer name
-        try:
-            from API import WorksheetAPI
-            import json
+    # # =============================== API Payload of Material Layer Creation (Mode 3) ===============================
+    #     # Send Mode 3 API call to create a material layer on server using this dialog's layer name
+    #     try:
+    #         from API import WorksheetAPI
+    #         import json
 
-            parent = getattr(self, 'parent', None)
-            user_id = None
-            worksheet_id = None
-            design_layer_id = None
-            if parent:
-                user_id = getattr(parent, 'current_user_id', None) or getattr(parent, 'current_user', None) or getattr(parent, 'api_user_id', None)
-                worksheet_id = getattr(parent, 'current_worksheet_id', None) or (getattr(parent, 'current_worksheet_data', {}) or {}).get('id') or getattr(parent, 'created_worksheet_id', None)
-                design_layer_id = getattr(parent, 'current_layer_id', None)
+    #         parent = getattr(self, 'parent', None)
+    #         user_id = None
+    #         worksheet_id = None
+    #         design_layer_id = None
+    #         if parent:
+    #             user_id = getattr(parent, 'current_user_id', None) or getattr(parent, 'current_user', None) or getattr(parent, 'api_user_id', None)
+    #             worksheet_id = getattr(parent, 'current_worksheet_id', None) or (getattr(parent, 'current_worksheet_data', {}) or {}).get('id') or getattr(parent, 'created_worksheet_id', None)
+    #             design_layer_id = getattr(parent, 'current_layer_id', None)
 
-            reference_layer_2d = self.ref_layer_combo.currentText()
-            if reference_layer_2d in ("None", "(No designs folder)", "(No design layers found)"):
-                reference_layer_2d = None
+    #         reference_layer_2d = self.ref_layer_combo.currentText()
+    #         if reference_layer_2d in ("None", "(No designs folder)", "(No design layers found)"):
+    #             reference_layer_2d = None
 
-            selected_baselines = [
-                item.text() for item in self.base_lines_list.selectedItems()
-                if not item.text().startswith("(")
-            ]
+    #         selected_baselines = [
+    #             item.text() for item in self.base_lines_list.selectedItems()
+    #             if not item.text().startswith("(")
+    #         ]
 
-            layer_config_data = {
-                "construction_layer_name": layer_name,
-                "worksheet_name": getattr(parent, 'current_worksheet_name', "Unknown") if parent else "Unknown",
-                "project_name": getattr(parent, 'current_project_name', "None") if parent else "None",
-                "worksheet_type": "Design",
-                "worksheet_category": "Road",
-                "construction_type": "Road" if self.road_radio.isChecked() else "Bridge",
-                "reference_layer_2d": reference_layer_2d,
-                "design_layer_name": reference_layer_2d,
-                "base_lines_reference": selected_baselines,
-                "created_at": datetime.now().isoformat(),
-                "created_by": getattr(parent, 'current_user_full_name', getattr(parent, 'current_user', "Unknown")) if parent else "Unknown",
-                "material_lines": []
-            }
+    #         layer_config_data = {
+    #             "construction_layer_name": layer_name,
+    #             "worksheet_name": getattr(parent, 'current_worksheet_name', "Unknown") if parent else "Unknown",
+    #             "project_name": getattr(parent, 'current_project_name', "None") if parent else "None",
+    #             "worksheet_type": "Design",
+    #             "worksheet_category": "Road",
+    #             "construction_type": "Road" if self.road_radio.isChecked() else "Bridge",
+    #             "reference_layer_2d": reference_layer_2d,
+    #             "design_layer_name": reference_layer_2d,
+    #             "base_lines_reference": selected_baselines,
+    #             "created_at": datetime.now().isoformat(),
+    #             "created_by": getattr(parent, 'current_user_full_name', getattr(parent, 'current_user', "Unknown")) if parent else "Unknown",
+    #             "material_lines": []
+    #         }
 
-            payload = {
-                "mode": 3,
-                "user_id": int(user_id) if user_id is not None and str(user_id).isdigit() else user_id,
-                "worksheet_id": str(worksheet_id) if worksheet_id is not None else worksheet_id,
-                "design_layer_id": str(design_layer_id) if design_layer_id is not None else design_layer_id,
-                "material_layer_name": layer_name,
-                "layer_config_data": layer_config_data,
-                "layer_json_data": {}
-            }
+    #         payload = {
+    #             "mode": 3,
+    #             "user_id": int(user_id) if user_id is not None and str(user_id).isdigit() else user_id,
+    #             "worksheet_id": str(worksheet_id) if worksheet_id is not None else worksheet_id,
+    #             "design_layer_id": str(design_layer_id) if design_layer_id is not None else design_layer_id,
+    #             "material_layer_name": layer_name,
+    #             "layer_config_data": layer_config_data,
+    #             "layer_json_data": {}
+    #         }
 
-            resp = WorksheetAPI.create_worksheet(payload)
+    #         resp = WorksheetAPI.create_worksheet(payload)
             
-            if resp.get('success'):
-                # Print payload
-                print("\n=== MODE 3 PAYLOAD (SUCCESSFUL) ===")
-                print(json.dumps(payload, indent=4, default=str))
-                print("===================================\n")
+    #         if resp.get('success'):
+    #             # Print payload
+    #             print("\n=== MODE 3 PAYLOAD (SUCCESSFUL) ===")
+    #             print(json.dumps(payload, indent=4, default=str))
+    #             print("===================================\n")
                 
-                # Print API response
-                print("\n=== MODE 3 API RESPONSE (SUCCESSFUL) ===")
-                print(json.dumps(resp, indent=4, default=str))
-                print("========================================\n")
+    #             # Print API response
+    #             print("\n=== MODE 3 API RESPONSE (SUCCESSFUL) ===")
+    #             print(json.dumps(resp, indent=4, default=str))
+    #             print("========================================\n")
                 
-                # ✅ Extract and store the material layer ID
-                material_layer_id = None
-                if 'data' in resp and 'layer_id' in resp['data']:
-                    material_layer_id = resp['data']['layer_id']
-                elif 'layer_id' in resp:
-                    material_layer_id = resp['layer_id']
+    #             # ✅ Extract and store the material layer ID
+    #             material_layer_id = None
+    #             if 'data' in resp and 'layer_id' in resp['data']:
+    #                 material_layer_id = resp['data']['layer_id']
+    #             elif 'layer_id' in resp:
+    #                 material_layer_id = resp['layer_id']
                 
-                if material_layer_id:
-                    # Store in parent (main window) for later use in upload
-                    parent.current_material_layer_id = material_layer_id
-                    self.parent.message_text.append(f"Mode 3: Material layer created with ID {material_layer_id}")
-                else:
-                    self.parent.message_text.append("Mode 3: Success but no layer_id in response")
+    #             if material_layer_id:
+    #                 # Store in parent (main window) for later use in upload
+    #                 parent.current_material_layer_id = material_layer_id
+    #                 self.parent.message_text.append(f"Mode 3: Material layer created with ID {material_layer_id}")
+    #             else:
+    #                 self.parent.message_text.append("Mode 3: Success but no layer_id in response")
                 
-                self.parent.message_text.append("Mode 3: material layer creation request sent to server")
-            else:
-                msg = resp.get('message') or resp.get('text') or str(resp)
-                QMessageBox.warning(self, "Server Error", f"Failed to create material layer on server:\n{msg}")
-        except Exception as e:
-            self.parent.message_text.append(f"Mode 3 API call failed: {e}")
+    #             self.parent.message_text.append("Mode 3: material layer creation request sent to server")
+    #         else:
+    #             msg = resp.get('message') or resp.get('text') or str(resp)
+    #             QMessageBox.warning(self, "Server Error", f"Failed to create material layer on server:\n{msg}")
+    #     except Exception as e:
+    #         self.parent.message_text.append(f"Mode 3 API call failed: {e}")
     
     # ===========================================================================================================================================================================================================
         self.accept()
@@ -4076,126 +4076,126 @@ class WorksheetNewDialog(QDialog):
             self.start_download(auto_proceed=True)
             return
 
-    # =================================== Create Worksheet API Payload Mode 1 ====================================
-        # At this point the worksheet name exists and selected file is local (or None).
-        # Call server API for mode 1 to create worksheet entry.
-        try:
-            import requests
-        except Exception:
-            requests = None
+    # # =================================== Create Worksheet API Payload Mode 1 ====================================
+    #     # At this point the worksheet name exists and selected file is local (or None).
+    #     # Call server API for mode 1 to create worksheet entry.
+    #     try:
+    #         import requests
+    #     except Exception:
+    #         requests = None
 
-        worksheet_name = self.name_edit.text().strip()
-        # Determine user id from parent (ehu_id / current_user_id)
-        user_id = None
-        if self.parent:
-            user_id = getattr(self.parent, 'current_user_id', None) or getattr(self.parent, 'current_user', None)
+    #     worksheet_name = self.name_edit.text().strip()
+    #     # Determine user id from parent (ehu_id / current_user_id)
+    #     user_id = None
+    #     if self.parent:
+    #         user_id = getattr(self.parent, 'current_user_id', None) or getattr(self.parent, 'current_user', None)
 
-        # Determine file_id from combo data if available. If local file selected,
-        # try to resolve a matching server file and use its ID so server doesn't receive null.
-        file_id = None
-        file_name = None
-        if data:
-            # Support common keys used by server-side data
-            file_id = data.get('file_id') or data.get('id') or data.get('fileId')
-            file_name = data.get('name') or data.get('file_name') or data.get('local_path')
-            if file_name and file_name.endswith('.ply') and os.path.exists(file_name):
-                # if local_path provided, extract basename
-                file_name = os.path.basename(file_name)
+    #     # Determine file_id from combo data if available. If local file selected,
+    #     # try to resolve a matching server file and use its ID so server doesn't receive null.
+    #     file_id = None
+    #     file_name = None
+    #     if data:
+    #         # Support common keys used by server-side data
+    #         file_id = data.get('file_id') or data.get('id') or data.get('fileId')
+    #         file_name = data.get('name') or data.get('file_name') or data.get('local_path')
+    #         if file_name and file_name.endswith('.ply') and os.path.exists(file_name):
+    #             # if local_path provided, extract basename
+    #             file_name = os.path.basename(file_name)
 
-        # If file_id is still None, try to match the selected filename with server files
-        if not file_id and file_name:
-            try:
-                from API import WorksheetAPI
-                api_user_id = None
-                if self.parent:
-                    api_user_id = getattr(self.parent, 'api_user_id', None) or getattr(self.parent, 'current_user_id', None)
-                if api_user_id:
-                    files_resp = WorksheetAPI.get_edu_3d_files(api_user_id)
-                    if files_resp.get('success'):
-                        for f in files_resp.get('data', []):
-                            # match by filename or by cleaned name
-                            server_name = f.get('file_name') or f.get('name') or ''
-                            if server_name == file_name or os.path.basename(server_name) == file_name:
-                                file_id = f.get('id') or f.get('file_id')
-                                break
-            except Exception:
-                pass
+    #     # If file_id is still None, try to match the selected filename with server files
+    #     if not file_id and file_name:
+    #         try:
+    #             from API import WorksheetAPI
+    #             api_user_id = None
+    #             if self.parent:
+    #                 api_user_id = getattr(self.parent, 'api_user_id', None) or getattr(self.parent, 'current_user_id', None)
+    #             if api_user_id:
+    #                 files_resp = WorksheetAPI.get_edu_3d_files(api_user_id)
+    #                 if files_resp.get('success'):
+    #                     for f in files_resp.get('data', []):
+    #                         # match by filename or by cleaned name
+    #                         server_name = f.get('file_name') or f.get('name') or ''
+    #                         if server_name == file_name or os.path.basename(server_name) == file_name:
+    #                             file_id = f.get('id') or f.get('file_id')
+    #                             break
+    #         except Exception:
+    #             pass
 
-        payload = {
-            "mode": 1,
-            "user_id": int(user_id) if user_id is not None and str(user_id).isdigit() else user_id,
-            "worksheet_name": worksheet_name,
-            "file_id": file_id,
-            "worksheet_config_data": {
-                "worksheet_name": worksheet_name,
-                "project_name": "None",
-                "created_at": datetime.now().isoformat(),
-                "created_by": getattr(self.parent, 'current_user_full_name', getattr(self.parent, 'current_user', "Unknown")) if self.parent else "Unknown",
-                "worksheet_type": "Design",
-                "initial_layer": self.design_layer_edit.text() if hasattr(self, 'design_layer_edit') else "",
-                "worksheet_category": "Road",
-                "data_category": "Design",
-                "dimension": "2D",
-                "point_cloud_file": file_name if file_name else ""
-            }
-        }
+    #     payload = {
+    #         "mode": 1,
+    #         "user_id": int(user_id) if user_id is not None and str(user_id).isdigit() else user_id,
+    #         "worksheet_name": worksheet_name,
+    #         "file_id": file_id,
+    #         "worksheet_config_data": {
+    #             "worksheet_name": worksheet_name,
+    #             "project_name": "None",
+    #             "created_at": datetime.now().isoformat(),
+    #             "created_by": getattr(self.parent, 'current_user_full_name', getattr(self.parent, 'current_user', "Unknown")) if self.parent else "Unknown",
+    #             "worksheet_type": "Design",
+    #             "initial_layer": self.design_layer_edit.text() if hasattr(self, 'design_layer_edit') else "",
+    #             "worksheet_category": "Road",
+    #             "data_category": "Design",
+    #             "dimension": "2D",
+    #             "point_cloud_file": file_name if file_name else ""
+    #         }
+    #     }
 
 
-        # Make the API call if requests is available; otherwise proceed locally but warn user
-        api_ok = False
-        api_resp_text = ""
-        created_ws_id = None
-        print("\n=== CREATE WORKSHEET PAYLOAD ===")
-        try:
-            import json as _json
-            print(_json.dumps(payload, indent=2))
-        except Exception:
-            print(payload)
+    #     # Make the API call if requests is available; otherwise proceed locally but warn user
+    #     api_ok = False
+    #     api_resp_text = ""
+    #     created_ws_id = None
+    #     print("\n=== CREATE WORKSHEET PAYLOAD ===")
+    #     try:
+    #         import json as _json
+    #         print(_json.dumps(payload, indent=2))
+    #     except Exception:
+    #         print(payload)
 
-        # Use central API helper
-        try:
-            from API import WorksheetAPI
-            resp = WorksheetAPI.create_worksheet(payload)
-        except Exception as e:
-            resp = {"success": False, "message": str(e)}
+    #     # Use central API helper
+    #     try:
+    #         from API import WorksheetAPI
+    #         resp = WorksheetAPI.create_worksheet(payload)
+    #     except Exception as e:
+    #         resp = {"success": False, "message": str(e)}
 
-        # Print response debug
-        try:
-            print("=== CREATE WORKSHEET RESPONSE (via API helper) ===")
-            import json as _json
-            print(_json.dumps(resp, indent=2))
-        except Exception:
-            print(resp)
+    #     # Print response debug
+    #     try:
+    #         print("=== CREATE WORKSHEET RESPONSE (via API helper) ===")
+    #         import json as _json
+    #         print(_json.dumps(resp, indent=2))
+    #     except Exception:
+    #         print(resp)
 
-        if not resp.get('success'):
-            api_resp_text = resp.get('text') or resp.get('message') or str(resp)
-            QMessageBox.warning(self, "API Error", f"Failed to create worksheet on server.\n{api_resp_text}")
-            return
+    #     if not resp.get('success'):
+    #         api_resp_text = resp.get('text') or resp.get('message') or str(resp)
+    #         QMessageBox.warning(self, "API Error", f"Failed to create worksheet on server.\n{api_resp_text}")
+    #         return
 
-        # Save created worksheet id for later use (if returned)
-        created_ws_id = None
-        if isinstance(resp.get('data'), dict):
-            created_ws_id = resp['data'].get('worksheet_id') or resp['data'].get('worksheetId') or resp.get('worksheet_id')
-        if not created_ws_id:
-            # older servers might return id at top level
-            created_ws_id = resp.get('worksheet_id') or resp.get('data')
+    #     # Save created worksheet id for later use (if returned)
+    #     created_ws_id = None
+    #     if isinstance(resp.get('data'), dict):
+    #         created_ws_id = resp['data'].get('worksheet_id') or resp['data'].get('worksheetId') or resp.get('worksheet_id')
+    #     if not created_ws_id:
+    #         # older servers might return id at top level
+    #         created_ws_id = resp.get('worksheet_id') or resp.get('data')
 
-        if created_ws_id:
-            try:
-                self.created_worksheet_id = int(created_ws_id)
-            except Exception:
-                self.created_worksheet_id = created_ws_id
-            # Propagate created id to parent (main window) so callers can use it
-            try:
-                if hasattr(self, 'parent') and self.parent:
-                    setattr(self.parent, 'created_worksheet_id', self.created_worksheet_id)
-                    # also set current_worksheet_id for callers that expect it
-                    try:
-                        setattr(self.parent, 'current_worksheet_id', self.created_worksheet_id)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+    #     if created_ws_id:
+    #         try:
+    #             self.created_worksheet_id = int(created_ws_id)
+    #         except Exception:
+    #             self.created_worksheet_id = created_ws_id
+    #         # Propagate created id to parent (main window) so callers can use it
+    #         try:
+    #             if hasattr(self, 'parent') and self.parent:
+    #                 setattr(self.parent, 'created_worksheet_id', self.created_worksheet_id)
+    #                 # also set current_worksheet_id for callers that expect it
+    #                 try:
+    #                     setattr(self.parent, 'current_worksheet_id', self.created_worksheet_id)
+    #                 except Exception:
+    #                     pass
+    #         except Exception:
+    #             pass
     # ===============================================================================================================
 
         # Proceed to page 2 only if API call succeeded
@@ -4386,94 +4386,94 @@ class WorksheetNewDialog(QDialog):
             QMessageBox.warning(self, "Error", "Layer name is required.")
             return
     
-    # ================================ Create Layer API Payload Mode 2 =================================
-        # Worksheet id should have been set by the mode 1 response earlier
-        worksheet_id = getattr(self, 'created_worksheet_id', None)
-        if not worksheet_id and self.parent:
-            worksheet_id = getattr(self.parent, 'current_worksheet_id', None) or getattr(self.parent, 'created_worksheet_id', None)
+    # # ================================ Create Layer API Payload Mode 2 =================================
+    #     # Worksheet id should have been set by the mode 1 response earlier
+    #     worksheet_id = getattr(self, 'created_worksheet_id', None)
+    #     if not worksheet_id and self.parent:
+    #         worksheet_id = getattr(self.parent, 'current_worksheet_id', None) or getattr(self.parent, 'created_worksheet_id', None)
 
-        if not worksheet_id:
-            QMessageBox.warning(self, "Error", "Worksheet ID not found. Please complete the first step (Next) to create the worksheet on server.")
-            return
+    #     if not worksheet_id:
+    #         QMessageBox.warning(self, "Error", "Worksheet ID not found. Please complete the first step (Next) to create the worksheet on server.")
+    #         return
 
-        user_id = None
-        if self.parent:
-            user_id = getattr(self.parent, 'current_user_id', None) or getattr(self.parent, 'current_user', None)
+    #     user_id = None
+    #     if self.parent:
+    #         user_id = getattr(self.parent, 'current_user_id', None) or getattr(self.parent, 'current_user', None)
 
-        data = self.file_combo.currentData()
-        point_cloud_file = data.get("local_path") if data else ""
+    #     data = self.file_combo.currentData()
+    #     point_cloud_file = data.get("local_path") if data else ""
 
-        layer_config_data = {
-            "layer_name": layer_name,
-            "dimension": "2D",
-            "reference_type": self.reference_type or "Road",
-            "reference_line": "",
-            "master_layer": bool(self.cb_master_layer.isChecked()),
-            "project_name": self.allocated_project_name or "None",
-            "worksheet_name": self.name_edit.text().strip(),
-            "point_cloud_file": point_cloud_file,
-            "created_by": getattr(self.parent, 'current_user_full_name', getattr(self.parent, 'current_user', "Unknown")) if self.parent else "Unknown",
-            "created_at": datetime.now().isoformat()
-        }
+    #     layer_config_data = {
+    #         "layer_name": layer_name,
+    #         "dimension": "2D",
+    #         "reference_type": self.reference_type or "Road",
+    #         "reference_line": "",
+    #         "master_layer": bool(self.cb_master_layer.isChecked()),
+    #         "project_name": self.allocated_project_name or "None",
+    #         "worksheet_name": self.name_edit.text().strip(),
+    #         "point_cloud_file": point_cloud_file,
+    #         "created_by": getattr(self.parent, 'current_user_full_name', getattr(self.parent, 'current_user', "Unknown")) if self.parent else "Unknown",
+    #         "created_at": datetime.now().isoformat()
+    #     }
 
-        payload = {
-            "mode": 2,
-            "user_id": int(user_id) if user_id is not None and str(user_id).isdigit() else user_id,
-            "worksheet_id": str(worksheet_id),
-            "layer_name": layer_name,
-            "construction_type": 1,
-            "is_2d": 1,
-            "type_2d": 1,
-            "is_3d": 0,
-            "type_3d": 0,
-            "file_path": "",
-            "layer_config_data": layer_config_data,
-            "layer_json_data": {}
-        }
+    #     payload = {
+    #         "mode": 2,
+    #         "user_id": int(user_id) if user_id is not None and str(user_id).isdigit() else user_id,
+    #         "worksheet_id": str(worksheet_id),
+    #         "layer_name": layer_name,
+    #         "construction_type": 1,
+    #         "is_2d": 1,
+    #         "type_2d": 1,
+    #         "is_3d": 0,
+    #         "type_3d": 0,
+    #         "file_path": "",
+    #         "layer_config_data": layer_config_data,
+    #         "layer_json_data": {}
+    #     }
 
 
-        # Print debug payload
-        try:
-            import json as _json
-            print("\n=== MODE 2 (CREATE LAYER) PAYLOAD ===")
-            print(_json.dumps(payload, indent=2))
-        except Exception:
-            print(payload)
+    #     # Print debug payload
+    #     try:
+    #         import json as _json
+    #         print("\n=== MODE 2 (CREATE LAYER) PAYLOAD ===")
+    #         print(_json.dumps(payload, indent=2))
+    #     except Exception:
+    #         print(payload)
 
-        # Use central API helper for mode 2
-        try:
-            from API import WorksheetAPI
-            resp = WorksheetAPI.create_worksheet(payload)
-        except Exception as e:
-            resp = {"success": False, "message": str(e)}
+    #     # Use central API helper for mode 2
+    #     try:
+    #         from API import WorksheetAPI
+    #         resp = WorksheetAPI.create_worksheet(payload)
+    #     except Exception as e:
+    #         resp = {"success": False, "message": str(e)}
 
-        try:
-            print("=== MODE 2 RESPONSE (via API helper) ===")
-            import json as _json2
-            print(_json2.dumps(resp, indent=2))
-        except Exception:
-            print(resp)
+    #     try:
+    #         print("=== MODE 2 RESPONSE (via API helper) ===")
+    #         import json as _json2
+    #         print(_json2.dumps(resp, indent=2))
+    #     except Exception:
+    #         print(resp)
 
-        if not resp.get('success'):
-            api_resp_text = resp.get('text') or resp.get('message') or str(resp)
-            QMessageBox.critical(self, "API Error", f"Failed to create layer on server.\n{api_resp_text}")
-            return
+    #     if not resp.get('success'):
+    #         api_resp_text = resp.get('text') or resp.get('message') or str(resp)
+    #         QMessageBox.critical(self, "API Error", f"Failed to create layer on server.\n{api_resp_text}")
+    #         return
 
-        # Save created layer id if returned
-        created_layer_id = None
-        if isinstance(resp.get('data'), dict):
-            created_layer_id = resp['data'].get('layer_id') or resp['data'].get('layerId') or resp['data'].get('id')
-        if not created_layer_id:
-            created_layer_id = resp.get('layer_id') or resp.get('data')
+    #     # Save created layer id if returned
+    #     created_layer_id = None
+    #     if isinstance(resp.get('data'), dict):
+    #         created_layer_id = resp['data'].get('layer_id') or resp['data'].get('layerId') or resp['data'].get('id')
+    #     if not created_layer_id:
+    #         created_layer_id = resp.get('layer_id') or resp.get('data')
 
-        if created_layer_id:
-            self.created_layer_id = created_layer_id
-            # propagate to parent if present
-            if self.parent:
-                try:
-                    setattr(self.parent, 'current_layer_id', created_layer_id)
-                except Exception:
-                    pass
+    #     if created_layer_id:
+    #         self.created_layer_id = created_layer_id
+    #         # propagate to parent if present
+    #         if self.parent:
+    #             try:
+    #                 setattr(self.parent, 'current_layer_id', created_layer_id)
+    #             except Exception:
+    #                 pass
 
         self.reference_type = "Road"
         self.accept()
@@ -23604,3 +23604,240 @@ class UnderpassWallDialog(QDialog):
             "hw_thickness": self.hw_thickness_input.value(),
             "position": pos
         }
+## Mayur 6-8-2026
+# ======================================================================================================================================
+#                                   *** Tunnel Type Selection Dialog ***
+# ======================================================================================================================================
+class TunnelTypeSelectionDialog(QDialog):
+    """Dialog for selecting the type of Tunnel."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Tunnel Type")
+        self.setModal(True)
+        self.setMinimumWidth(300)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #eef4ff, stop:1 #f8fbff);
+            }
+            QLabel {
+                color: #1f2937;
+                font-weight: 600;
+                font-size: 16px;
+            }
+            QRadioButton {
+                font-size: 14px;
+                color: #374151;
+                font-weight: bold;
+                padding: 5px;
+            }
+            QPushButton {
+                border-radius: 18px;
+                padding: 10px 16px;
+                font-weight: bold;
+                min-width: 96px;
+                border: none;
+            }
+            QPushButton#okBtn {
+                background-color: #16a34a;
+                color: white;
+            }
+            QPushButton#okBtn:hover {
+                background-color: #15803d;
+            }
+            QPushButton#cancelBtn {
+                background-color: #e5e7eb;
+                color: #111827;
+            }
+            QPushButton#cancelBtn:hover {
+                background-color: #d1d5db;
+            }
+        """)
+
+        self.selected_type = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        title = QLabel("Select Tunnel Type")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        self.radio_group = QButtonGroup(self)
+        
+        self.rb_tbm = QRadioButton("TBM Tunnel")
+        self.rb_tbm.setChecked(True)
+        self.radio_group.addButton(self.rb_tbm, 1)
+        layout.addWidget(self.rb_tbm)
+
+        self.rb_drill = QRadioButton("Drill & Blast")
+        self.radio_group.addButton(self.rb_drill, 2)
+        layout.addWidget(self.rb_drill)
+
+        # Future options can easily be added here as new QRadioButtons
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setObjectName("okBtn")
+        self.ok_btn.clicked.connect(self._on_ok)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setObjectName("cancelBtn")
+        self.cancel_btn.clicked.connect(self.reject)
+
+        btn_row.addWidget(self.ok_btn)
+        btn_row.addWidget(self.cancel_btn)
+        layout.addLayout(btn_row)
+
+    def _on_ok(self):
+        if self.rb_tbm.isChecked():
+            self.selected_type = "TBM"
+        elif self.rb_drill.isChecked():
+            self.selected_type = "DrillBlast"
+        self.accept()
+
+
+# ======================================================================================================================================
+#                                   *** Menu Tunnel Configuration Dialog ***
+# ======================================================================================================================================
+class MenuTunnelConfigurationDialog(QDialog):
+    """Dialog for capturing Tunnel dimensional parameters."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Tunnel Configuration")
+        self.setModal(True)
+        self.setMinimumWidth(480)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #eef4ff, stop:1 #f8fbff);
+            }
+            QLabel {
+                color: #1f2937;
+                font-weight: 600;
+            }
+            QGroupBox {
+                border: 2px solid #2f80ed;
+                border-radius: 12px;
+                margin-top: 12px;
+                padding-top: 10px;
+                font-weight: bold;
+                color: #174ea6;
+                background-color: rgba(255, 255, 255, 0.5);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 4px 10px;
+                background-color: #dbeafe;
+                border-radius: 6px;
+            }
+            QLineEdit {
+                border: 2px solid #93c5fd;
+                border-radius: 8px;
+                padding: 7px;
+                background-color: white;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #2563eb;
+                background-color: #eff6ff;
+            }
+            QPushButton {
+                border-radius: 18px;
+                padding: 10px 16px;
+                font-weight: bold;
+                min-width: 96px;
+                border: none;
+            }
+            QPushButton#okBtn {
+                background-color: #16a34a;
+                color: white;
+            }
+            QPushButton#okBtn:hover {
+                background-color: #15803d;
+            }
+            QPushButton#cancelBtn {
+                background-color: #e5e7eb;
+                color: #111827;
+            }
+            QPushButton#cancelBtn:hover {
+                background-color: #d1d5db;
+            }
+        """)
+
+        # Collected values (populated on OK)
+        self.tunnel_values = {}
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(18, 18, 18, 18)
+        main_layout.setSpacing(12)
+
+        # Title
+        title = QLabel("Tunnel Configuration")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #174ea6;")
+        main_layout.addWidget(title)
+
+        # Dimensions group
+        dimensions_group = QGroupBox("Dimensions")
+        grid = QGridLayout(dimensions_group)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(10)
+
+        # Define the input fields: (label, key, placeholder)
+        field_definitions = [
+            ("Tunnel Radius (m)", "radius", "e.g. 5 m"),
+            ("Wall Thickness (m)", "wall_thickness", "e.g. 0.5 m"),
+        ]
+
+        self._field_edits = {}
+        validator = QDoubleValidator(0.0, 1000000.0, 3)
+
+        for row, (label_text, key, placeholder) in enumerate(field_definitions):
+            label = QLabel(f"{label_text}:")
+            edit = QLineEdit()
+            edit.setValidator(validator)
+            edit.setPlaceholderText(placeholder)
+            edit.setMinimumHeight(32)
+            grid.addWidget(label, row, 0)
+            grid.addWidget(edit, row, 1)
+            self._field_edits[key] = edit
+
+        main_layout.addWidget(dimensions_group)
+
+        # Button row
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setObjectName("okBtn")
+        self.ok_btn.clicked.connect(self._on_ok)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setObjectName("cancelBtn")
+        self.cancel_btn.clicked.connect(self.reject)
+
+        btn_row.addWidget(self.ok_btn)
+        btn_row.addWidget(self.cancel_btn)
+        main_layout.addLayout(btn_row)
+
+    def _on_ok(self):
+        """Collect the entered values and accept the dialog."""
+        self.tunnel_values = {}
+        for key, edit in self._field_edits.items():
+            text = edit.text().strip()
+            if text:
+                try:
+                    self.tunnel_values[key] = float(text)
+                except ValueError:
+                    self.tunnel_values[key] = 0.0
+            else:
+                self.tunnel_values[key] = 0.0
+        self.accept()
+
