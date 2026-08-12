@@ -1912,11 +1912,78 @@ class DesignNewDialog(QDialog):
         dim_layout.addWidget(self.radio_2d)
         layout.addWidget(dim_group)
 
-        # === Road checkbox (application is road-only) ===
-        self.cb_road = QCheckBox("Road")
-        self.cb_road.setChecked(True)
-        self.cb_road.stateChanged.connect(lambda s: self.update_reference_dropdown())
-        layout.addWidget(self.cb_road)
+    ## Mayur 10-8-2026 update dailog box of tunnel
+        # === Infrastructure Type Group ===
+        infra_group = QGroupBox("Infrastructure Type")
+        infra_layout = QVBoxLayout(infra_group)
+
+        self.radio_infra_tunnel = QRadioButton("Tunnel")
+        self.radio_infra_road = QRadioButton("Road")
+        
+        self.infra_btn_group = QButtonGroup(self)
+        self.infra_btn_group.addButton(self.radio_infra_tunnel)
+        self.infra_btn_group.addButton(self.radio_infra_road)
+        
+        infra_layout.addWidget(self.radio_infra_tunnel)
+        infra_layout.addWidget(self.radio_infra_road)
+        
+        # Tunnel Options Container (only visible when Tunnel is selected)
+        self.tunnel_container = QWidget()
+        tunnel_container_layout = QVBoxLayout(self.tunnel_container)
+        tunnel_container_layout.setContentsMargins(20, 0, 0, 0)
+        
+        self.radio_tbm = QRadioButton("Tunnel (TBM)")
+        self.radio_natm = QRadioButton("Tunnel (NATM)")
+        
+        self.tunnel_btn_group = QButtonGroup(self)
+        self.tunnel_btn_group.addButton(self.radio_tbm)
+        self.tunnel_btn_group.addButton(self.radio_natm)
+        self.radio_tbm.setChecked(True)
+        
+        # TBM Options
+        self.tbm_group = QWidget()
+        tbm_layout = QVBoxLayout(self.tbm_group)
+        tbm_layout.setContentsMargins(20, 0, 0, 0)
+        self.tbm_road = QRadioButton("Road")
+        self.tbm_railway = QRadioButton("Railway")
+        self.tbm_metro = QRadioButton("Metro")
+        self.tbm_road.setChecked(True)
+        tbm_layout.addWidget(self.tbm_road)
+        tbm_layout.addWidget(self.tbm_railway)
+        tbm_layout.addWidget(self.tbm_metro)
+        
+        # NATM Options
+        self.natm_group = QWidget()
+        natm_layout = QVBoxLayout(self.natm_group)
+        natm_layout.setContentsMargins(20, 0, 0, 0)
+        self.natm_road = QRadioButton("Road")
+        self.natm_railway = QRadioButton("Railway")
+        self.natm_metro = QRadioButton("Metro")
+        self.natm_road.setChecked(True)
+        natm_layout.addWidget(self.natm_road)
+        natm_layout.addWidget(self.natm_railway)
+        natm_layout.addWidget(self.natm_metro)
+        
+        tunnel_container_layout.addWidget(self.radio_tbm)
+        tunnel_container_layout.addWidget(self.tbm_group)
+        tunnel_container_layout.addWidget(self.radio_natm)
+        tunnel_container_layout.addWidget(self.natm_group)
+        
+        infra_layout.addWidget(self.tunnel_container)
+        layout.addWidget(infra_group)
+        
+        # Connections
+        self.radio_infra_tunnel.toggled.connect(self.on_infra_type_changed)
+        self.radio_infra_road.toggled.connect(self.on_infra_type_changed)
+        
+        self.radio_tbm.toggled.connect(self.on_tunnel_type_changed)
+        self.radio_natm.toggled.connect(self.on_tunnel_type_changed)
+        
+        # Set initial state
+        self.radio_infra_tunnel.setChecked(True)
+        self.on_infra_type_changed()
+        self.on_tunnel_type_changed()
+        #########################################################################
         
         # === Create mode ===
         mode_group = QGroupBox("Create Mode")
@@ -2145,15 +2212,24 @@ class DesignNewDialog(QDialog):
 
     def get_configuration(self):
         layer_name = self.name_edit.text().strip()
-        reference_type = None
         reference_line = None
-        if self.radio_3d.isChecked():
-            if self.cb_road.isChecked():
-                reference_type = "Road"
-                reference_line = None
+
+        if self.radio_infra_road.isChecked():
+            reference_type = "Road"
         else:
-            if self.cb_road.isChecked():
-                reference_type = "Road"
+            is_tbm = self.radio_tbm.isChecked()
+            tunnel_type = "TBM" if is_tbm else "NATM"
+            
+            if is_tbm:
+                if self.tbm_road.isChecked(): infra = "Road"
+                elif self.tbm_railway.isChecked(): infra = "Railway"
+                else: infra = "Metro"
+            else:
+                if self.natm_road.isChecked(): infra = "Road"
+                elif self.natm_railway.isChecked(): infra = "Railway"
+                else: infra = "Metro"
+
+            reference_type = f"{tunnel_type} - {infra}"
 
         return {
             "layer_name": layer_name,
@@ -2163,6 +2239,15 @@ class DesignNewDialog(QDialog):
             "master_layer": bool(self.cb_master.isChecked()),
             "creation_mode": "design_with_material" if self.mode_design_with_material_radio.isChecked() else "design"
         }
+## Mayur 10-8-2026
+    def on_infra_type_changed(self):
+        is_tunnel = self.radio_infra_tunnel.isChecked()
+        self.tunnel_container.setVisible(is_tunnel)
+
+    def on_tunnel_type_changed(self):
+        is_tbm = self.radio_tbm.isChecked()
+        self.tbm_group.setEnabled(is_tbm)
+        self.natm_group.setEnabled(not is_tbm)
 
 # ===========================================================================================================================
 #                                                ** HELP Dialog Box **
@@ -4883,6 +4968,16 @@ class MaterialSegmentDialog(QDialog):
     """Simplified Material Segment Dialog - Only user input fields, no API calls"""
     def __init__(self, material_thickness=None, width=None, after_rolling=None, material_description=None, from_chainage=None, to_chainage=None, from_chainage_m=None, to_chainage_m=None, parent=None, auto_save=False, **kwargs):
         super().__init__(parent)
+        #Mayur 11-8-2026
+        self.target_line = kwargs.get('target_line', None)
+        self.base_line_width = kwargs.get('base_line_width', None)
+        
+        self.is_tunnel = False
+        if parent and hasattr(parent, 'reference_type'):
+            ref_type = parent.reference_type
+            if ref_type and ("Tunnel" in ref_type or "TBM" in ref_type or "NATM" in ref_type):
+                self.is_tunnel = True
+                #########################################################################
         self.setWindowTitle("Material Segment Configuration")
         self.setModal(True)
         self.setMinimumWidth(550)
@@ -5122,10 +5217,34 @@ class MaterialSegmentDialog(QDialog):
         self.width_edit.setPlaceholderText("Enter width in meters")
         if width:
             self.width_edit.setText(str(width))
+        elif self.base_line_width is not None:
+            self.width_edit.setText(f"{float(self.base_line_width):.2f}")
         width_layout.addWidget(width_label)
         width_layout.addWidget(self.width_edit, 1)
         layout.addLayout(width_layout)
-
+    # Mayur 11-8-2026 
+        # 4.5 Target Line (Only for Tunnels)
+        if self.is_tunnel:
+            target_layout = QHBoxLayout()
+            target_label = QLabel("Target Line:")
+            target_label.setFixedWidth(120)
+            self.target_line_combo = QComboBox()
+            self.target_line_combo.addItem("None", None)
+            
+            # Populate from baseline_widths keys if available
+            if self.parent and hasattr(self.parent, 'baseline_widths'):
+                for bl in self.parent.baseline_widths.keys():
+                    self.target_line_combo.addItem(bl.replace('_', ' ').title(), bl)
+                    
+            if self.target_line:
+                idx = self.target_line_combo.findData(self.target_line)
+                if idx >= 0:
+                    self.target_line_combo.setCurrentIndex(idx)
+                    
+            target_layout.addWidget(target_label)
+            target_layout.addWidget(self.target_line_combo, 1)
+            layout.addLayout(target_layout)
+################################################################################
         # 5. Position Type
         position_group = QGroupBox("Filling Position")
         position_group.setStyleSheet("QGroupBox { font-size: 14px; font-weight: bold; margin-top: 10px; }")
@@ -5332,6 +5451,10 @@ class MaterialSegmentDialog(QDialog):
             'width_m': width_val,
             'is_below_ground': self.get_is_below_ground()
         }
+        
+        if self.is_tunnel and hasattr(self, 'target_line_combo'):
+            data['target_line'] = self.target_line_combo.currentData()
+            
         # Add numeric chainage values (MUST be floats, not strings)
         if self.from_chainage_m is not None:
             data['from_chainage_m'] = float(self.from_chainage_m)
@@ -23675,6 +23798,14 @@ class TunnelTypeSelectionDialog(QDialog):
         self.radio_group.addButton(self.rb_drill, 2)
         layout.addWidget(self.rb_drill)
 
+        self.rb_digging = QRadioButton("Digging")
+        self.radio_group.addButton(self.rb_digging, 3)
+        layout.addWidget(self.rb_digging)
+
+        self.rb_cut = QRadioButton("Cut")
+        self.radio_group.addButton(self.rb_cut, 4)
+        layout.addWidget(self.rb_cut)
+
         # Future options can easily be added here as new QRadioButtons
 
         btn_row = QHBoxLayout()
@@ -23697,8 +23828,105 @@ class TunnelTypeSelectionDialog(QDialog):
             self.selected_type = "TBM"
         elif self.rb_drill.isChecked():
             self.selected_type = "DrillBlast"
+        elif self.rb_digging.isChecked():
+            self.selected_type = "Digging"
+        elif self.rb_cut.isChecked():
+            self.selected_type = "Cut"
         self.accept()
 
+## Mayur 11-8-2026
+# ======================================================================================================================================
+#                                   *** TBM Options Dialog ***
+# ======================================================================================================================================
+class TBMOptionsDialog(QDialog):
+    """Dialog for selecting TBM options."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select TBM Option")
+        self.setModal(True)
+        self.setMinimumWidth(320)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #eef4ff, stop:1 #f8fbff);
+            }
+            QLabel {
+                color: #1f2937;
+                font-weight: 600;
+                font-size: 16px;
+            }
+            QRadioButton {
+                font-size: 14px;
+                color: #374151;
+                font-weight: bold;
+                padding: 5px;
+            }
+            QPushButton {
+                border-radius: 18px;
+                padding: 10px 16px;
+                font-weight: bold;
+                min-width: 96px;
+                border: none;
+            }
+            QPushButton#okBtn {
+                background-color: #16a34a;
+                color: white;
+            }
+            QPushButton#okBtn:hover {
+                background-color: #15803d;
+            }
+            QPushButton#cancelBtn {
+                background-color: #e5e7eb;
+                color: #111827;
+            }
+            QPushButton#cancelBtn:hover {
+                background-color: #d1d5db;
+            }
+        """)
+
+        self.selected_option = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        title = QLabel("Select Option")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        self.radio_group = QButtonGroup(self)
+        
+        self.rb_setup = QRadioButton("TBM Setup")
+        self.radio_group.addButton(self.rb_setup, 1)
+        layout.addWidget(self.rb_setup)
+
+        self.rb_implementation = QRadioButton("TBM Tunnel Implementation")
+        self.rb_implementation.setChecked(True)
+        self.radio_group.addButton(self.rb_implementation, 2)
+        layout.addWidget(self.rb_implementation)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.setObjectName("okBtn")
+        self.ok_btn.clicked.connect(self._on_ok)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setObjectName("cancelBtn")
+        self.cancel_btn.clicked.connect(self.reject)
+
+        btn_row.addWidget(self.ok_btn)
+        btn_row.addWidget(self.cancel_btn)
+        layout.addLayout(btn_row)
+
+    def _on_ok(self):
+        if self.rb_setup.isChecked():
+            self.selected_option = "Setup"
+        elif self.rb_implementation.isChecked():
+            self.selected_option = "Implementation"
+        self.accept()
+#####################################################################################
 
 # ======================================================================================================================================
 #                                   *** Menu Tunnel Configuration Dialog ***
@@ -23840,4 +24068,54 @@ class MenuTunnelConfigurationDialog(QDialog):
             else:
                 self.tunnel_values[key] = 0.0
         self.accept()
-
+## Mayur 12-8-2026
+class DiggingOptionsDialog(QDialog):
+    """Dialog for selecting Digging options: Mark Points and Cut."""
+    def __init__(self, parent=None, is_marking=False):
+        super().__init__(parent)
+        self.setWindowTitle("Digging Options")
+        self.setModal(False)
+        self.setMinimumWidth(300)
+        
+        self.is_marking = is_marking
+        
+        main_layout = QVBoxLayout(self)
+        
+        title = QLabel("Digging Options")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #174ea6;")
+        main_layout.addWidget(title)
+        
+        # Action Group
+        action_group = QGroupBox("Action")
+        action_layout = QVBoxLayout(action_group)
+        
+        self.btn_mark_points = QPushButton("Complete Polygon" if self.is_marking else "Mark Points")
+        self.btn_mark_points.clicked.connect(self._on_mark_points)
+        action_layout.addWidget(self.btn_mark_points)
+        
+        self.btn_cut = QPushButton("Cut")
+        self.btn_cut.clicked.connect(self._on_cut)
+        action_layout.addWidget(self.btn_cut)
+        
+        main_layout.addWidget(action_group)
+        
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        self.close_btn = QPushButton("Close")
+        self.close_btn.clicked.connect(self.reject)
+        btn_row.addWidget(self.close_btn)
+        main_layout.addLayout(btn_row)
+        
+        self.action_selected = None
+        
+    def _on_mark_points(self):
+        if self.is_marking:
+            self.action_selected = "CompletePolygon"
+        else:
+            self.action_selected = "MarkPoints"
+        self.accept()
+        
+    def _on_cut(self):
+        self.action_selected = "Cut"
+        self.accept()

@@ -12,7 +12,7 @@ except:
 from PyQt5.QtWidgets import QApplication, QDialog
 from PyQt5.QtGui import QIcon
 from pointcloudviewer import PointCloudViewer
-from login import LoginDialog
+from login import LoginDialog   
 from welcome_page import WelcomePage
 from utils import resource_path, is_internet_connected
 

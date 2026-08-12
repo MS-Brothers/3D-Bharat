@@ -39,7 +39,7 @@ from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, Mate
                     StreetLightDialog, SignalPoleDialog, LaneMarkingDialog, PoleAssetDialog, BuddyDialog, BuddiesWorksheetsDialog, OneDirectionStreetLightDialog, 
                     TwoDirectionStreetLightDialog, FourDirectionStreetLightDialog, OneDirectionSignalPoleDialog, TwoDirectionSignalPoleDialog, FourDirectionSignalPoleDialog, 
                     ##### Mayur Wakhare 1-7-2026 Tunnel Light
-                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog,UnderPassDialog,UnderPassPreviewDialog,UnderpassCCTVDialog,UnderpassLightDialog,TunnelWallDialog,UnderpassWallDialog, MenuTunnelConfigurationDialog, TunnelTypeSelectionDialog)
+                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog,UnderPassDialog,UnderPassPreviewDialog,UnderpassCCTVDialog,UnderpassLightDialog,TunnelWallDialog,UnderpassWallDialog, MenuTunnelConfigurationDialog, TunnelTypeSelectionDialog, TBMOptionsDialog, DiggingOptionsDialog)
                     ###########################################################
 from measurement_widget import MeasurementWidget
 from digging_point import DiggingPointInput
@@ -1886,6 +1886,7 @@ class PointCloudViewer(ApplicationUI):
             worksheet_id=worksheet_id,
             # --- Aniket Added 02-05-2026: Pass material index for better tracking in dialog and potential future use ---
             material_index=material_idx,
+            base_line_width=self._get_base_line_width_for_material(material_idx),
             parent=self
         )
         dialog.setWindowTitle(f"Material Segment - M{material_idx+1}")
@@ -2209,6 +2210,8 @@ class PointCloudViewer(ApplicationUI):
             material_description=existing_material_data.get('material_description') or existing_material_data.get('material_line_name') or material_name,
             # ------- Aniket added 02-05-2026: Pass material index for better tracking in dialog and potential future use -------
             material_index=index,
+            base_line_width=self._get_base_line_width_for_material(index),
+            target_line=existing_material_data.get('target_line', None),
             auto_save=False,
             parent=self
         )
@@ -2440,7 +2443,19 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             self.message_text.append(f"Error loading material data: {str(e)}")
             return {}
-
+## Mayur 11-8-2026
+    def _get_base_line_width_for_material(self, material_idx):
+        if not hasattr(self, 'material_configs') or material_idx >= len(self.material_configs):
+            return None
+        cfg = self.material_configs[material_idx]
+        ref_layer = cfg.get('ref_layer', '')
+        if isinstance(ref_layer, list) and len(ref_layer) > 0:
+            ref_layer = ref_layer[0]
+        if not ref_layer:
+            return None
+        ref_key = str(ref_layer).lower().replace(' ', '_')
+        return getattr(self, 'baseline_widths', {}).get(ref_key, None)
+############################################################
     def _update_material_segment_visualization(self, material_index, updated_data, existing_data):
         """Update material segment visualization on both 2D and 3D views"""
         try:
@@ -2454,9 +2469,10 @@ class PointCloudViewer(ApplicationUI):
             after_rolling_m = updated_data.get('after_rolling_thickness_m', 0.0)
             description = updated_data.get('description', '')
             is_below_ground = updated_data.get('is_below_ground', False)
+            target_line = updated_data.get('target_line', None)
 
             # Update saved data
-            self._save_updated_material_segment_data(material_index, description, thickness_m, after_rolling_m, width_m, is_below_ground, existing_data)
+            self._save_updated_material_segment_data(material_index, description, thickness_m, after_rolling_m, width_m, is_below_ground, existing_data, target_line)
 
             # Remove old 2D and 3D actors for this material before redraw
             self.clear_current_material_line(material_index)
@@ -2546,7 +2562,7 @@ class PointCloudViewer(ApplicationUI):
             QMessageBox.critical(self, "Layer Copy Error", f"Could not create updated construction layer:\n{e}")
             return False
 
-    def _save_updated_material_segment_data(self, material_index, description, thickness_m, after_rolling_m, width_m, is_below_ground, existing_data=None):
+    def _save_updated_material_segment_data(self, material_index, description, thickness_m, after_rolling_m, width_m, is_below_ground, existing_data=None, target_line=None):
         """Save updated material segment data to material_construction_config.json"""
         try:
             if not hasattr(self, 'current_construction_layer_path'):
@@ -2598,6 +2614,8 @@ class PointCloudViewer(ApplicationUI):
                 seg['material_thickness_m'] = thickness_m
                 seg['width_m'] = width_m
                 seg['after_rolling_thickness_m'] = after_rolling_m
+                if target_line is not None:
+                    seg['target_line'] = target_line
 
                 self._apply_thickness_delta_to_segment(seg, thickness_delta, ref_xs, ref_ys)
                 self._recalculate_segment_volume_and_heights(seg)
@@ -6381,12 +6399,15 @@ class PointCloudViewer(ApplicationUI):
             if hasattr(self, 'bridge_zero_container'):
                 self.bridge_zero_container.setVisible(False)
 
-            if reference_type == "Road":
+            print(f"DEBUG UI VISIBILITY: reference_type = {reference_type}")
+            if reference_type == "Road" or (reference_type and ("TBM" in reference_type or "NATM" in reference_type)):
+                print("DEBUG UI VISIBILITY: Showing Road/Tunnel containers")
                 self.surface_container.setVisible(True)
                 self.construction_container.setVisible(True)
                 self.road_surface_container.setVisible(True)
                 self.zero_container.setVisible(True)
             elif reference_type == "Bridge":
+                print("DEBUG UI VISIBILITY: Showing Bridge containers")
                 self.deck_line_container.setVisible(True)
                 self.projection_container.setVisible(True)
                 self.construction_dots_container.setVisible(True)
@@ -9606,6 +9627,7 @@ class PointCloudViewer(ApplicationUI):
 
         
         if saved_count > 0 or saved_files:
+            self._debug_tbm_width_mismatch("SAVE TO JSON")
             self.consolidate_design_layer_to_single_json(layer_folder, baselines_data)
 
 # ===========================================================================================================================================================
@@ -9772,6 +9794,18 @@ class PointCloudViewer(ApplicationUI):
             projection_line = baselines_data.get('projection_line')
             operational_config = baselines_data.get('operation_config')
             
+            # Load existing master data first to preserve tunnels and other things
+            master_data = DesignConstructionManager.load_master(layer_folder)
+            if "design" not in master_data:
+                master_data["design"] = {}
+                
+            # Append pending tunnel data if it exists
+            if getattr(self, "pending_tunnel_data", None) is not None:
+                tunnels = master_data["design"].get("tunnels", [])
+                tunnels.append(self.pending_tunnel_data)
+                master_data["design"]["tunnels"] = tunnels
+                self.pending_tunnel_data = None # Clear it so it isn't saved twice
+            
             # Get current user
             current_user = getattr(self, 'current_user', 'aniket07')
             
@@ -9787,6 +9821,8 @@ class PointCloudViewer(ApplicationUI):
                 deck_line=deck_line,
                 projection_line=projection_line,
                 operational_config=operational_config,
+                tunnels=master_data["design"].get("tunnels", []),
+                tunnel_config=getattr(self, 'menu_tunnel_values', None),
                 saved_by=current_user
             )
             
@@ -10518,6 +10554,7 @@ class PointCloudViewer(ApplicationUI):
                 f"Generated {planes_generated} smooth curved 3D plane(s) using master alignment"
             )
             self.message_text.append(f"Widths: {width_list}")
+            self._debug_tbm_width_mismatch("MAP FROM JSON")
             return True
         else:
             self.message_text.append("No 3D planes generated.")
@@ -12832,6 +12869,42 @@ class PointCloudViewer(ApplicationUI):
 ### Mayur 5-8-2026
     def undo_last_pick(self):
         """Undo the last picked point for the currently active line type."""
+        # Handle Tunnel Point Selection Undo
+        if getattr(self, 'tunnel_point_selection_mode', False) or (hasattr(self, 'tunnel_selected_points') and len(self.tunnel_selected_points) > 0 and hasattr(self, 'tunnel_active_ltype')):
+            if not getattr(self, 'tunnel_selected_points', []):
+                if hasattr(self, 'message_text'):
+                    self.message_text.append("Undo: No tunnel points to undo.")
+                return
+
+            self.tunnel_selected_points.pop()
+            
+            if hasattr(self, 'tunnel_2d_artists') and self.tunnel_2d_artists:
+                artist = self.tunnel_2d_artists.pop()
+                artist.remove()
+                if hasattr(self, 'canvas'):
+                    self.canvas.draw_idle()
+                    
+            if hasattr(self, 'tunnel_3d_actors') and self.tunnel_3d_actors:
+                actor = self.tunnel_3d_actors.pop()
+                self.renderer.RemoveActor(actor)
+                rw = (self.vtk_widget if hasattr(self, 'vtk_widget') else self.vtkWidget).GetRenderWindow()
+                rw.Render()
+                
+            if len(self.tunnel_selected_points) == 0:
+                if hasattr(self, 'tunnel_start_point'):
+                    del self.tunnel_start_point
+                self.tunnel_point_selection_mode = True
+            elif len(self.tunnel_selected_points) == 1:
+                if hasattr(self, 'tunnel_end_point'):
+                    del self.tunnel_end_point
+                self.tunnel_point_selection_mode = True
+                
+            self.pending_tunnel_data = None
+                
+            if hasattr(self, 'message_text'):
+                self.message_text.append("Undo: Removed last tunnel selection point.")
+            return
+
         if getattr(self, 'active_line_type', None) not in ['center_line', 'surface', 'road_surface', 'construction']:
             return
             
@@ -12886,6 +12959,11 @@ class PointCloudViewer(ApplicationUI):
                 self.message_text.append("Undo: Removed last 2D point.")
 #################################################################################################
     def on_draw_click(self, event):
+        if getattr(self, 'tunnel_point_selection_mode', False):
+            if event.inaxes == self.ax:
+                self._handle_tunnel_point_selection(event.xdata, event.ydata)
+            return
+
         if event.inaxes != self.ax or self.active_line_type is None:
             return
         
@@ -12916,9 +12994,10 @@ class PointCloudViewer(ApplicationUI):
         # Get current time for double-click detection
         current_time = time.time()
         time_diff = current_time - self.last_click_time
-
+        # Mayur 12-8-2026 to pop up message error in case of double click tunnel starting and ending points
         # Handle double-click to finish line
-        if time_diff < self.double_click_threshold and len(self.current_points) > 1:
+        is_double_click = getattr(event, 'dblclick', False) or (time_diff < self.double_click_threshold)
+        if is_double_click and len(self.current_points) > 1:
             self.finish_current_polyline()
             self.last_click_time = 0
             return
@@ -12971,6 +13050,84 @@ class PointCloudViewer(ApplicationUI):
                 self.elevation_angle_start_chainage = self.get_chainage_str_from_x(x)
             else:
                 self.current_points.append((x, y))
+                
+            if self.active_line_type in ['road_surface', 'construction']:
+                line_name = "Road Surface Line" if self.active_line_type == 'road_surface' else "Construction Line"
+                cl_polys = self.line_types.get('center_line', {}).get('polylines', [])
+                if cl_polys:
+                    cl_xs, cl_ys = [], []
+                    for poly in cl_polys:
+                        for pt in poly:
+                            cl_xs.append(pt[0])
+                            cl_ys.append(pt[1])
+                    if cl_xs:
+                        sorted_idx = np.argsort(cl_xs)
+                        cl_xs = np.array(cl_xs)[sorted_idx]
+                        cl_ys = np.array(cl_ys)[sorted_idx]
+                        cl_y_at_x = np.interp(x, cl_xs, cl_ys)
+                        gap = cl_y_at_x - y
+                        position_text = "below" if gap >= 0 else "above"
+                        print(f"Center Line Z = {cl_y_at_x:.2f}m, {line_name} Z = {y:.2f}m → Gap = {abs(gap):.2f}m {position_text} Center Line.")
+                        
+                        radius = 0.0
+                        if hasattr(self, 'menu_tunnel_values') and self.menu_tunnel_values:
+                            radius = float(self.menu_tunnel_values.get("radius", 0))
+                        
+                        if not radius and hasattr(self, 'current_worksheet_data') and self.current_worksheet_data:
+                            design_cfg = self.current_worksheet_data.get("design", {})
+                            
+                            def get_rad_from_t(t):
+                                if not isinstance(t, dict): return 0.0
+                                r = float(t.get("radius", 0))
+                                if r == 0.0 and t.get("arc_points") and len(t.get("arc_points")) >= 3:
+                                    import numpy as np
+                                    arc = t.get("arc_points")
+                                    try:
+                                        A, B, C = np.array(arc[0]), np.array(arc[1]), np.array(arc[2])
+                                        a, b, c = np.linalg.norm(C-B), np.linalg.norm(C-A), np.linalg.norm(B-A)
+                                        s = (a+b+c)/2
+                                        area = np.sqrt(max(0, s*(s-a)*(s-b)*(s-c)))
+                                        if area > 1e-6:
+                                            return float((a*b*c)/(4*area))
+                                    except Exception:
+                                        pass
+                                return r
+                            
+                            # Try single tunnel dict
+                            radius = get_rad_from_t(design_cfg.get("tunnel", {}))
+                                
+                            # Try tunnels list
+                            if not radius:
+                                tunnels_list = design_cfg.get("tunnels", [])
+                                if isinstance(tunnels_list, list):
+                                    for t in tunnels_list:
+                                        r = get_rad_from_t(t)
+                                        if r > 0:
+                                            radius = r
+                                            break
+                                            
+                        if not radius and hasattr(self, 'tunnel_values') and self.tunnel_values:
+                            radius = float(self.tunnel_values.get("radius", 0))
+                            
+                        if radius and radius > abs(gap):
+                            import math
+                            half_width = math.sqrt(radius**2 - gap**2)
+                            remaining_width = 2 * half_width
+                            print(f"R={radius}m, gap={abs(gap):.2f}m → Half Width={half_width:.3f}m, Remaining Width={remaining_width:.2f}m")
+                        elif radius:
+                            print(f"R={radius}m, gap={abs(gap):.2f}m → Gap is larger than radius. Cannot calculate remaining width.")
+                        else:
+                            print("DEBUG: Tunnel Radius not found in configuration. Cannot calculate remaining width.")
+                            if hasattr(self, 'current_worksheet_data') and self.current_worksheet_data:
+                                d_cfg = self.current_worksheet_data.get("design", {})
+                                print(f"DEBUG: design dict keys: {list(d_cfg.keys())}")
+                                t_arr = d_cfg.get("tunnels", [])
+                                print(f"DEBUG: tunnels list length: {len(t_arr)}")
+                                if len(t_arr) > 0:
+                                    print(f"DEBUG: first tunnel keys: {list(t_arr[0].keys())}")
+                                    print(f"DEBUG: first tunnel radius value: {t_arr[0].get('radius')}")
+                            else:
+                                print("DEBUG: self.current_worksheet_data is empty or not set.")
         else:
             if self.active_line_type in ['road_surface', 'center_line'] and self.elevation_angle_active:
                 prev_point = self.current_points[-1]
@@ -14445,6 +14602,105 @@ class PointCloudViewer(ApplicationUI):
         return None
 
 # =================================================================================================================================
+    def _debug_tbm_width_mismatch(self, trigger_event, render_width_c="N/A", render_width_r="N/A"):
+        try:
+            if not (hasattr(self, 'reference_type') and self.reference_type and "TBM" in self.reference_type):
+                return
+            
+            live_c = self.line_types.get('construction', {}).get('width_meters', 'N/A')
+            live_r = self.line_types.get('road_surface', {}).get('width_meters', 'N/A')
+            
+            json_c = 'N/A'
+            json_r = 'N/A'
+            if hasattr(self, 'current_worksheet_data') and self.current_worksheet_data:
+                design = self.current_worksheet_data.get('design', {})
+                c_line = design.get('construction_line', {})
+                if not c_line: c_line = design.get('construction_baseline', {})
+                json_c = c_line.get('width_meters', 'N/A')
+                
+                r_line = design.get('road_surface_line', {})
+                if not r_line: r_line = design.get('road_surface_baseline', {})
+                json_r = r_line.get('width_meters', 'N/A')
+
+            rc = render_width_c if render_width_c != "N/A" else live_c
+            rr = render_width_r if render_width_r != "N/A" else live_r
+            
+            print(f"--- DEBUG TBM WIDTHS [{trigger_event}] ---")
+            
+            radius = 0.0
+            def get_rad_from_t(t):
+                if not isinstance(t, dict): return 0.0
+                r = float(t.get("radius", 0))
+                if r == 0.0 and t.get("arc_points") and len(t.get("arc_points")) >= 3:
+                    import numpy as np
+                    arc = t.get("arc_points")
+                    try:
+                        A, B, C = np.array(arc[0]), np.array(arc[1]), np.array(arc[2])
+                        a, b, c = np.linalg.norm(C-B), np.linalg.norm(C-A), np.linalg.norm(B-A)
+                        s = (a+b+c)/2
+                        area = np.sqrt(max(0, s*(s-a)*(s-b)*(s-c)))
+                        if area > 1e-6: return float((a*b*c)/(4*area))
+                    except: pass
+                return r
+
+            if hasattr(self, 'menu_tunnel_values') and self.menu_tunnel_values:
+                radius = float(self.menu_tunnel_values.get("radius", 0))
+            if not radius and hasattr(self, 'current_worksheet_data') and self.current_worksheet_data:
+                design_cfg = self.current_worksheet_data.get("design", {})
+                radius = get_rad_from_t(design_cfg.get("tunnel", {}))
+                if not radius:
+                    tunnels_list = design_cfg.get("tunnels", [])
+                    if isinstance(tunnels_list, list):
+                        for t in tunnels_list:
+                            r = get_rad_from_t(t)
+                            if r > 0:
+                                radius = r
+                                break
+            if not radius and hasattr(self, 'tunnel_values') and self.tunnel_values:
+                radius = float(self.tunnel_values.get("radius", 0))
+                
+            gap = 0.0
+            cl_pts = self.line_types.get('center_line', {}).get('polylines', [])
+            const_pts = self.line_types.get('construction', {}).get('polylines', [])
+            if cl_pts and const_pts and len(cl_pts[0]) > 0 and len(const_pts[0]) > 0:
+                gap = abs(cl_pts[0][-1][1] - const_pts[0][-1][1])
+                
+            rem_width = 'N/A'
+            if radius > 0 and gap < radius:
+                import math
+                rem_width = 2 * math.sqrt(radius**2 - gap**2)
+            print(f"calculated remaining width = {rem_width}")
+            
+            print(f"LIVE WIDTH | Construction = {live_c} | Road Surface = {live_r}")
+            print(f"JSON SAVE | Construction = {json_c} | Road Surface = {json_r}")
+            print(f"JSON LOAD | Construction = {json_c} | Road Surface = {json_r}")
+            print(f"RENDER APPLY | Construction = {rc} | Road Surface = {rr}")
+            
+            def safe_float(v):
+                try: return float(v)
+                except: return -999.99
+                
+            if safe_float(live_c) != safe_float(json_c) or safe_float(live_c) != safe_float(rc) or \
+               safe_float(live_r) != safe_float(json_r) or safe_float(live_r) != safe_float(rr):
+                print("WIDTH MISMATCH")
+                
+            first_c = 'N/A'; last_c = 'N/A'
+            if const_pts and len(const_pts[0]) > 0:
+                first_c = const_pts[0][0].get('width_m', 'N/A') if isinstance(const_pts[0][0], dict) else 'N/A'
+                last_c = const_pts[0][-1].get('width_m', 'N/A') if isinstance(const_pts[0][-1], dict) else 'N/A'
+                
+            first_r = 'N/A'; last_r = 'N/A'
+            r_pts = self.line_types.get('road_surface', {}).get('polylines', [])
+            if r_pts and len(r_pts[0]) > 0:
+                first_r = r_pts[0][0].get('width_m', 'N/A') if isinstance(r_pts[0][0], dict) else 'N/A'
+                last_r = r_pts[0][-1].get('width_m', 'N/A') if isinstance(r_pts[0][-1], dict) else 'N/A'
+                
+            print(f"Layer: Construction Line -> First pt width: {first_c}, Last pt width: {last_c}")
+            print(f"Layer: Road Surface Line -> First pt width: {first_r}, Last pt width: {last_r}")
+            print("---------------------------------------")
+        except Exception as e:
+            print(f"DEBUG WIDTHS ERROR: {e}")
+
 # MAP ROAD BASELINES TO 3D PLANES
 
     def map_baselines_to_3d_planes(self):
@@ -14581,6 +14837,28 @@ class PointCloudViewer(ApplicationUI):
             else:
                 # self.baseline_widths[ltype] = config['sections'][0]['width'] if config['sections'] else 10.0
                 self.message_text.append(f" Lane Drop configuration confirmed for {display_name} ({len(config['sections'])} sections)")
+    ## Mayur 12-8-2026 for surface line massage pop up starting point and ending point  
+            if ltype in ('surface', 'center_line'):
+                layer_folder = str(getattr(self, 'current_design_layer_path', ''))
+                layer_name = str(getattr(self, 'current_layer_name', ''))
+                const_folder = str(getattr(self, 'current_construction_layer_path', ''))
+                
+                ref_type = ""
+                if hasattr(self, 'get_current_reference_type'):
+                    ref_type = str(self.get_current_reference_type())
+                else:
+                    ref_type = str(getattr(self, 'reference_type', ''))
+                
+                is_tunnel = False
+                for val in [layer_folder, layer_name, const_folder, ref_type]:
+                    if val and ("Tunnel (TBM/NATM)" in val or "Tunnel" in val or "TBM" in val or "NATM" in val):
+                        is_tunnel = True
+                        break
+                        
+                if is_tunnel:
+                    line_display_name = "Surface Line" if ltype == 'surface' else "Center Line"
+                    print(f"DEBUG: Tunnel {line_display_name} configured in Map on 3D -> Opening Start/End Point popup.")
+                    self._prompt_tunnel_start_end_mode(ltype=ltype)
 
         valid_types = [ltype for ltype in checked_types if ltype in self.baseline_configs]
     
@@ -14813,6 +15091,7 @@ class PointCloudViewer(ApplicationUI):
             f"Widths used:\n{width_list}\n\n"
             "Click 'Save' to store these baselines permanently with the entered widths."
         )
+        self._debug_tbm_width_mismatch("MAP 3D DIALOG")
 
 # =================================================================
 # New: create_vtk_polyline
@@ -16144,6 +16423,7 @@ class PointCloudViewer(ApplicationUI):
             design_layer_id=current_layer_id,
             worksheet_id=worksheet_id,
             material_index=material_idx,
+            base_line_width=self._get_base_line_width_for_material(material_idx),
             parent=self
         )
         dialog.setWindowTitle(f"Material Segment - M{material_idx+1}")
@@ -16465,6 +16745,7 @@ class PointCloudViewer(ApplicationUI):
             width=None,
             after_rolling=None,
             material_index=idx,
+            base_line_width=self._get_base_line_width_for_material(idx),
             parent=self
         )
         dialog.setWindowTitle(f"Configure Material Line - M{idx+1}")
@@ -16917,6 +17198,8 @@ class PointCloudViewer(ApplicationUI):
             after_rolling=target_segment.get("after_rolling_thickness_m"),
             material_description=target_segment.get("material_description"),
             material_index=mat_idx,
+            base_line_width=self._get_base_line_width_for_material(mat_idx),
+            target_line=target_segment.get("target_line", None),
             parent=self
         )
         dialog.below_ground_radio.setChecked(is_below)
@@ -17382,25 +17665,90 @@ class PointCloudViewer(ApplicationUI):
             self.message_text.append(f"Failed to update material_lines_config.txt: {str(e)}")
 
 # =====================================================================================================================================
+    def _calculate_xy_from_curves(self, chainage_m):
+        if not hasattr(self, 'zero_start_point') or not hasattr(self, 'zero_end_point'):
+            return None, None
+            
+        import numpy as np
+        p0 = np.array([self.zero_start_point[0], self.zero_start_point[1]])
+        p1 = np.array([self.zero_end_point[0], self.zero_end_point[1]])
+        dir_vec = p1 - p0
+        norm = np.linalg.norm(dir_vec)
+        if norm > 0:
+            dir_vec = dir_vec / norm
+        else:
+            dir_vec = np.array([1.0, 0.0])
+            
+        current_pos = p0.copy()
+        current_dir = dir_vec.copy()
+        
+        raw_curves = []
+        if getattr(self, 'curve_labels', None):
+            for item in self.curve_labels:
+                raw_curves.append((
+                    float(item.get('chainage', 0.0)),
+                    float(item.get('config', {}).get('angle', 0.0)),
+                    bool(item.get('config', {}).get('inner_curve', False)),
+                    bool(item.get('config', {}).get('outer_curve', False))
+                ))
+                
+        raw_curves.sort(key=lambda x: x[0])
+        deduped_curves = []
+        for entry in raw_curves:
+            if deduped_curves and abs(entry[0] - deduped_curves[-1][0]) < 0.6:
+                continue
+            deduped_curves.append(entry)
+            
+        last_ch = 0.0
+        for curve in deduped_curves:
+            c_ch, c_angle, c_inner, c_outer = curve
+            if chainage_m <= c_ch:
+                break
+                
+            dist = c_ch - last_ch
+            if dist > 0:
+                current_pos += current_dir * dist
+                
+            if c_angle > 0:
+                angle_rad = np.deg2rad(c_angle)
+                direction = 'left' if c_inner else ('right' if c_outer else 'left')
+                sin_a = np.sin(angle_rad) if direction == 'left' else -np.sin(angle_rad)
+                cos_a = np.cos(angle_rad)
+                rot_matrix = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
+                current_dir = rot_matrix @ current_dir
+                n = np.linalg.norm(current_dir)
+                if n > 0:
+                    current_dir /= n
+                    
+            last_ch = c_ch
+            
+        remaining = chainage_m - last_ch
+        if remaining > 0:
+            current_pos += current_dir * remaining
+            
+        return float(current_pos[0]), float(current_pos[1])
+
     def get_real_coordinates_from_chainage(self, chainage_m):
         """
         Return real-world (X, Y, Z) coordinates for a given chainage in meters.
         This is the PRIMARY method used everywhere for accurate positioning.
         """
-        if not hasattr(self, 'horizontal_alignment') or not self.horizontal_alignment:
-            return None, None, None
-        if not hasattr(self, 'vertical_profile') or not self.vertical_profile:
-            return None, None, None
+        X, Y = None, None
+        if hasattr(self, 'horizontal_alignment') and self.horizontal_alignment:
+            try:
+                X, Y = self.horizontal_alignment.get_xy(chainage_m)
+            except:
+                pass
+                
+        if X is None or Y is None:
+            X, Y = self._calculate_xy_from_curves(chainage_m)
 
-        try:
-            X, Y = self.horizontal_alignment.get_xy(chainage_m)  # Accurate horizontal position
-        except:
-            X, Y = None, None
-
-        try:
-            Z = self.vertical_profile.get_elevation(chainage_m)  # Accurate vertical elevation
-        except:
-            Z = None
+        Z = None
+        if hasattr(self, 'vertical_profile') and self.vertical_profile:
+            try:
+                Z = self.vertical_profile.get_elevation(chainage_m)
+            except:
+                pass
 
         return X, Y, Z
 
@@ -19085,6 +19433,19 @@ class PointCloudViewer(ApplicationUI):
             return
 
         try:
+            is_tunnel = False
+            ref_type = getattr(self, 'reference_type', "")
+            if ref_type and ("Tunnel" in ref_type or "TBM" in ref_type or "NATM" in ref_type):
+                is_tunnel = True
+                
+            target_line = material_config.get('target_line', None)
+            target_path = None
+            if is_tunnel and target_line:
+                try:
+                    target_path = self._get_curved_reference_path(ref_layer=target_line)
+                except Exception:
+                    pass
+
             # Get the curved reference path (same as green baseline)
             ref_layer_name = material_config.get('ref_layer', 'construction')
             ref_path = self._get_curved_reference_path(ref_layer=ref_layer_name)
@@ -19157,6 +19518,8 @@ class PointCloudViewer(ApplicationUI):
             zero_z = getattr(self, 'zero_start_z', getattr(self, 'zero_start_point', [0,0,0])[2])
 
             pts_3d = vtk.vtkPoints()
+            
+            N_z_tunnel = 10
             for i in range(len(center_points_3d)):
                 c = center_points_3d[i]
 #Mayur Wakhare 09-06-2026 : added
@@ -19176,7 +19539,10 @@ class PointCloudViewer(ApplicationUI):
                     #################################################
                 else:
                    z_abs_cons = c[2]
+                if is_tunnel and target_path is not None and len(target_path['chainage']) > 0:
+                    top_z = float(np.interp(ch, target_path['chainage'], target_path['z']))
 
+                # Always compute top and bottom widths (w_top, w_bot) first
                 z_road = z_abs_cons + 0.1
                 if road_path is not None and len(road_path['chainage']) > 0:
                     z_road = float(np.interp(ch, road_path['chainage'], road_path['z']))
@@ -19203,34 +19569,105 @@ class PointCloudViewer(ApplicationUI):
                 if w_top < 0: w_top = 0.1
                 if w_bot < 0: w_bot = 0.1
 
-                n_bot = normals_3d[i] * (w_bot / 2.0)
-                n_top = normals_3d[i] * (w_top / 2.0)
+                if is_tunnel:
+                    tunnel_radius = 5.0
+                    if hasattr(self, 'menu_tunnel_values') and self.menu_tunnel_values:
+                        tunnel_radius = float(self.menu_tunnel_values.get("radius", 5.0))
+                    elif hasattr(self, 'current_worksheet_data') and self.current_worksheet_data:
+                        design_cfg = self.current_worksheet_data.get("design", {})
+                        tunnel_cfg = design_cfg.get("tunnel", {})
+                        tunnel_radius = float(tunnel_cfg.get("radius", 5.0))
+                    
+                    # The tunnel tube is drawn with 24 segments. The flat faces of the polygon 
+                    # are closer to the center than the mathematical circle by a factor of cos(pi/24).
+                    # We must reduce the radius here so the material doesn't stick out of the flat faces.
+                    eff_radius = tunnel_radius * np.cos(np.pi / 24)
+                    
+                    # Fetch center line profile for tunnel center Z calculation
+                    center_line_data = getattr(self, 'line_types', {}).get('center_line', {})
+                    polylines = center_line_data.get('polylines', [])
+                    prof_x, prof_dz = None, None
+                    if polylines and len(polylines[0]) >= 2:
+                        profile_pts = []
+                        for pline in polylines: profile_pts.extend(pline)
+                        profile_pts.sort(key=lambda p: p[0])
+                        prof_x = np.array([p[0] for p in profile_pts])
+                        prof_dz = np.array([p[1] for p in profile_pts])
+                    
+                    Z_center_dz = float(np.interp(ch, prof_x, prof_dz)) if prof_x is not None else 0.0
+                    Z_center = z_abs_cons + Z_center_dz
+                    
+                    z_vals = np.linspace(bot_z, top_z, N_z_tunnel)
+                    # Right side (bottom to top)
+                    for z in z_vals:
+                        dy = z - Z_center
+                        hw = np.sqrt(max(0, eff_radius**2 - dy**2)) if abs(dy) <= eff_radius else 0.0
+                        n_v = normals_3d[i] * hw
+                        pts_3d.InsertNextPoint(c[0] - n_v[0], c[1] - n_v[1], z)
+                    # Left side (top to bottom)
+                    for z in reversed(z_vals):
+                        dy = z - Z_center
+                        hw = np.sqrt(max(0, eff_radius**2 - dy**2)) if abs(dy) <= eff_radius else 0.0
+                        n_v = normals_3d[i] * hw
+                        pts_3d.InsertNextPoint(c[0] + n_v[0], c[1] + n_v[1], z)
+                else:
+                    n_bot = normals_3d[i] * (w_bot / 2.0)
+                    n_top = normals_3d[i] * (w_top / 2.0)
 
-                pts_3d.InsertNextPoint(c[0] + n_top[0], c[1] + n_top[1], top_z)   # left top
-                pts_3d.InsertNextPoint(c[0] - n_top[0], c[1] - n_top[1], top_z)   # right top
-                pts_3d.InsertNextPoint(c[0] + n_bot[0], c[1] + n_bot[1], bot_z)   # left bottom
-                pts_3d.InsertNextPoint(c[0] - n_bot[0], c[1] - n_bot[1], bot_z)   # right bottom
+                    pts_3d.InsertNextPoint(c[0] + n_top[0], c[1] + n_top[1], top_z)   # left top
+                    pts_3d.InsertNextPoint(c[0] - n_top[0], c[1] - n_top[1], top_z)   # right top
+                    pts_3d.InsertNextPoint(c[0] + n_bot[0], c[1] + n_bot[1], bot_z)   # left bottom
+                    pts_3d.InsertNextPoint(c[0] - n_bot[0], c[1] - n_bot[1], bot_z)   # right bottom
 
             cells = vtk.vtkCellArray()
             n_seg = len(x_dense)
-            for i in range(n_seg - 1):
-                b = i * 4
-                for qid in [[b, b+1, b+5, b+4], [b+2, b+6, b+7, b+3],
-                            [b, b+4, b+6, b+2], [b+1, b+3, b+7, b+5]]:
-                    q = vtk.vtkQuad()
-                    for q_idx, pid in enumerate(qid):
-                        q.GetPointIds().SetId(q_idx, pid)
-                    cells.InsertNextCell(q)
-
-            # Caps
-            q = vtk.vtkQuad()
-            for q_idx, pid in enumerate([0, 2, 3, 1]): q.GetPointIds().SetId(q_idx, pid)
-            cells.InsertNextCell(q)
             
-            q = vtk.vtkQuad()
-            last = (n_seg - 1) * 4
-            for q_idx, pid in enumerate([last, last+1, last+3, last+2]): q.GetPointIds().SetId(q_idx, pid)
-            cells.InsertNextCell(q)
+            if is_tunnel:
+                pts_per_cs = 2 * N_z_tunnel
+                for i in range(n_seg - 1):
+                    b = i * pts_per_cs
+                    b_next = (i + 1) * pts_per_cs
+                    for j in range(pts_per_cs):
+                        j_next = (j + 1) % pts_per_cs
+                        q = vtk.vtkQuad()
+                        q.GetPointIds().SetId(0, b + j)
+                        q.GetPointIds().SetId(1, b_next + j)
+                        q.GetPointIds().SetId(2, b_next + j_next)
+                        q.GetPointIds().SetId(3, b + j_next)
+                        cells.InsertNextCell(q)
+                
+                # Caps
+                poly = vtk.vtkPolygon()
+                poly.GetPointIds().SetNumberOfIds(pts_per_cs)
+                for j in range(pts_per_cs):
+                    poly.GetPointIds().SetId(j, pts_per_cs - 1 - j) # reverse for normal
+                cells.InsertNextCell(poly)
+                
+                poly = vtk.vtkPolygon()
+                poly.GetPointIds().SetNumberOfIds(pts_per_cs)
+                last = (n_seg - 1) * pts_per_cs
+                for j in range(pts_per_cs):
+                    poly.GetPointIds().SetId(j, last + j)
+                cells.InsertNextCell(poly)
+            else:
+                for i in range(n_seg - 1):
+                    b = i * 4
+                    for qid in [[b, b+1, b+5, b+4], [b+2, b+6, b+7, b+3],
+                                [b, b+4, b+6, b+2], [b+1, b+3, b+7, b+5]]:
+                        q = vtk.vtkQuad()
+                        for q_idx, pid in enumerate(qid):
+                            q.GetPointIds().SetId(q_idx, pid)
+                        cells.InsertNextCell(q)
+
+                # Caps
+                q = vtk.vtkQuad()
+                for q_idx, pid in enumerate([0, 2, 3, 1]): q.GetPointIds().SetId(q_idx, pid)
+                cells.InsertNextCell(q)
+                
+                q = vtk.vtkQuad()
+                last = (n_seg - 1) * 4
+                for q_idx, pid in enumerate([last, last+1, last+3, last+2]): q.GetPointIds().SetId(q_idx, pid)
+                cells.InsertNextCell(q)
 
             poly_data = vtk.vtkPolyData()
             poly_data.SetPoints(pts_3d)
@@ -20377,7 +20814,8 @@ class PointCloudViewer(ApplicationUI):
                 if not hasattr(self, 'center_line_3d_actors'):
                     self.center_line_3d_actors = []
                     
-                actor = self.add_sphere_marker(clicked_point, label, radius=0.3, color="orange")
+                projected_point_3d = (nearest_x, nearest_y, clicked_point[2])
+                actor = self.add_sphere_marker(projected_point_3d, label, radius=0.3, color="orange")
                 self.center_line_3d_actors.append(actor)
                 
                 # Start the polyline
@@ -21012,7 +21450,25 @@ class PointCloudViewer(ApplicationUI):
             
             self.vtk_widget.GetRenderWindow().Render()
             return
-        
+     ## Mayur 12-8-2026   
+        # Handle digging polygon measurement
+        if self.current_measurement == 'digging_polygon':
+            if not hasattr(self, 'digging_points'):
+                self.digging_points = []
+            
+            self.digging_points.append(clicked_point)
+            point_label = str(len(self.digging_points))
+            self.add_sphere_marker(clicked_point, point_label)
+            print(f"[DEBUG] Digging polygon point count: {len(self.digging_points)}")
+            
+            if len(self.digging_points) >= 2:
+                p1 = self.digging_points[-2]
+                p2 = self.digging_points[-1]
+                self.add_line_between_points(p1, p2, "Red")
+                
+            self.vtk_widget.GetRenderWindow().Render()
+            return
+            ######################
         # Handle polygon measurement
         # In the on_click method, modify the polygon handling section:
         if self.current_measurement == 'polygon' :
@@ -36650,6 +37106,7 @@ class PointCloudViewer(ApplicationUI):
         except Exception as e:
             self.message_text.append(f"Error loading asset mapping: {str(e)}")
         # --- Restore and visualize saved tunnel if present ---
+        master_data = {}
         try:
             master_data = DesignConstructionManager.load_master(layer_path)
             tunnel_data = master_data.get("design", {}).get("tunnel")
@@ -36685,6 +37142,206 @@ class PointCloudViewer(ApplicationUI):
               #####################################################################################################  
                 self.message_text.append(" Tunnel structure restored and visualized from design_construction_config.json")
                 loaded_any = True
+        except Exception as e:
+            self.message_text.append(f"Error loading legacy tunnel structure: {str(e)}")
+
+        try:
+            # --- Restore TBM/NATM Tunnels from 'tunnels' array ---
+            tunnels_list = master_data.get("design", {}).get("tunnels", [])
+            if tunnels_list:
+                print("--- TUNNEL RESTORE DEBUG ---")
+                print(f"Tunnels found: {len(tunnels_list)}")
+                
+            for t_data in tunnels_list:
+                tunnel_id = t_data.get('tunnel_id', '')
+                tunnel_type = t_data.get("tunnel_type")
+                rad = t_data.get("radius", 5.0)
+                wall = t_data.get("wall_thickness", 0.5)
+                
+                print(f"Tunnel ID: {tunnel_id}")
+                print(f"Radius: {rad}")
+                print(f"Wall Thickness: {wall}")
+                
+                # Restore center_line geometry FIRST
+                c_data = t_data.get("center_line")
+                pts_count = 0
+                polylines_count = 0
+                
+                if c_data:
+                    polylines_2d = []
+                    for poly in c_data.get("polylines", []):
+                        poly_2d = []
+                        for pt in poly.get("points", []):
+                            dist = pt.get("chainage_m", 0.0)
+                            rel_z = pt.get("relative_elevation_m", 0.0)
+                            poly_2d.append((dist, rel_z))
+                            pts_count += 1
+                        if len(poly_2d) >= 2:
+                            polylines_2d.append(poly_2d)
+                            polylines_count += 1
+                    
+                    if 'center_line' not in self.line_types:
+                        self.line_types['center_line'] = {'color': 'orange', 'polylines': [], 'artists': []}
+                    self.line_types['center_line']['polylines'] = polylines_2d
+                    self.redraw_baseline_on_graph('center_line', style="solid")
+                    
+                    # Recreate curve labels
+                    if "curves" in c_data:
+                        for curve in c_data["curves"]:
+                            config = {
+                                'angle': curve.get("angle_deg", 5.0),
+                                'inner_curve': curve.get("inner_curve", False),
+                                'outer_curve': curve.get("outer_curve", False)
+                            }
+                            chainage = curve.get("chainage_m", 0.0)
+                            self.add_curve_label_at_x(chainage, config)
+                    else:
+                        for poly in c_data.get("polylines", []):
+                            for pt in poly.get("points", []):
+                                if "angle_deg" in pt:
+                                    chainage = pt.get("chainage_m", 0.0)
+                                    config = {
+                                        'angle': pt["angle_deg"],
+                                        'inner_curve': pt.get("inner_curve", False),
+                                        'outer_curve': pt.get("outer_curve", False)
+                                    }
+                                    self.curve_labels.append({'chainage': chainage, 'config': config})
+                                    self.add_curve_label_at_x(chainage, config)
+                                    
+                print(f"Center Line polylines restored: {polylines_count}")
+                print(f"Center Line points restored: {pts_count}")
+                
+                state_exists = ('center_line' in self.line_types) and (len(self.line_types['center_line']['polylines']) > 0)
+                print(f"Center Line internal state exists: {state_exists}")
+                
+                # Recreate Center Line Actor in 3D
+                center_actor_created = False
+                center_actor_in_renderer = False
+                
+                if state_exists:
+                    if not hasattr(self, 'center_line_3d_actors'):
+                        self.center_line_3d_actors = []
+                    
+                    # Compute 3D path for center line
+                    import numpy as np
+                    global_start_offset = 0.0
+                    if hasattr(self, 'zero_start_km') and self.zero_start_km is not None:
+                        global_start_offset = float(self.zero_start_km) * 1000.0 + float(getattr(self, 'zero_start_chainage', 0.0))
+                    elif hasattr(self, 'zero_start_chainage') and self.zero_start_chainage is not None:
+                        global_start_offset = float(self.zero_start_chainage)
+                        
+                    pts_3d_z = self.get_road_baseline_points_3d()
+                    if not pts_3d_z and hasattr(self, 'zero_start_point') and self.zero_start_point is not None and \
+                       hasattr(self, 'zero_end_point') and self.zero_end_point is not None:
+                        p0 = np.array(self.zero_start_point, dtype=float)
+                        p1 = np.array(self.zero_end_point, dtype=float)
+                        dist = float(getattr(self, 'total_distance', np.linalg.norm(p1 - p0)))
+                        pts_3d_z = [
+                            (global_start_offset, p0[0], p0[1], p0[2]),
+                            (global_start_offset + dist, p1[0], p1[1], p1[2])
+                        ]
+                        
+                    if pts_3d_z:
+                        ref_chs_arr = np.array([p[0] for p in pts_3d_z], dtype=float)
+                        ref_xs_arr = np.array([p[1] for p in pts_3d_z], dtype=float)
+                        ref_ys_arr = np.array([p[2] for p in pts_3d_z], dtype=float)
+                        ref_zs_arr = np.array([p[3] for p in pts_3d_z], dtype=float)
+                        
+                        is_absolute_ref = (global_start_offset > 0 and ref_chs_arr[0] >= global_start_offset - 1000)
+                        
+                        cl_3d_points = []
+                        for poly in self.line_types['center_line']['polylines']:
+                            for pt in poly:
+                                ch = pt[0]
+                                dz = pt[1]
+                                abs_ch = ch + global_start_offset if is_absolute_ref else ch
+                                abs_ch_clamped = np.clip(abs_ch, ref_chs_arr[0], ref_chs_arr[-1])
+                                x3d = np.interp(abs_ch_clamped, ref_chs_arr, ref_xs_arr)
+                                y3d = np.interp(abs_ch_clamped, ref_chs_arr, ref_ys_arr)
+                                ref_z = np.interp(abs_ch_clamped, ref_chs_arr, ref_zs_arr)
+                                z3d = ref_z + dz
+                                cl_3d_points.append(np.array([x3d, y3d, z3d]))
+                                
+                                # Recreate sphere exactly as user drew it
+                                label = f"{dz:+.2f} m"
+                                sphere_actor = self.add_sphere_marker((x3d, y3d, z3d), label, radius=0.3, color="orange")
+                                self.center_line_3d_actors.append(sphere_actor)
+                        
+                        if len(cl_3d_points) >= 2:
+                            cl_actor = self.create_continuous_line_actor(cl_3d_points, [1.0, 0.5, 0.0], 0.2)
+                            if cl_actor:
+                                self.renderer.AddActor(cl_actor)
+                                self.center_line_3d_actors.append(cl_actor)
+                                center_actor_created = True
+                                center_actor_in_renderer = self.renderer.HasViewProp(cl_actor)
+                
+                print(f"Center Line actor created: {center_actor_created}")
+                print(f"Center Line actor in renderer: {center_actor_in_renderer}")
+                
+                # Now draw the tunnel using the restored center line
+                tunnel_geom_created = False
+                tunnel_actor_created = False
+                tunnel_in_renderer = False
+                
+                if tunnel_type == "TBM":
+                    try:
+                        # Clear old first
+                        if not hasattr(self, 'tbm_tunnel_actors'):
+                            self.tbm_tunnel_actors = []
+                        for actor in self.tbm_tunnel_actors:
+                            if self.renderer.HasViewProp(actor):
+                                self.renderer.RemoveActor(actor)
+                        self.tbm_tunnel_actors.clear()
+                        
+                        start_ch = t_data.get("start_chainage")
+                        end_ch = t_data.get("end_chainage")
+                        
+                        # Generate Geometry
+                        self.draw_tbm_tunnel_actor(rad, wall, start_ch=start_ch, end_ch=end_ch)
+                        tunnel_geom_created = True
+                        
+                        # Recreate start and end points in 3D so they appear upon load
+                        if start_ch is not None and end_ch is not None:
+                            if not hasattr(self, 'tunnel_3d_actors'):
+                                self.tunnel_3d_actors = []
+                            # Fetch actual 3D coords for start and end
+                            sx, sy, sz = self.get_real_coordinates_from_chainage(start_ch)
+                            ex, ey, ez = self.get_real_coordinates_from_chainage(end_ch)
+                            
+                            # Add sphere actors
+                            import vtk
+                            for coords, label_text in [((sx, sy, sz), f"Start: {start_ch:.2f}m"), ((ex, ey, ez), f"End: {end_ch:.2f}m")]:
+                                sphere = vtk.vtkSphereSource()
+                                sphere.SetRadius(1.0)
+                                sphere.SetCenter(coords)
+                                mapper = vtk.vtkPolyDataMapper()
+                                mapper.SetInputConnection(sphere.GetOutputPort())
+                                actor = vtk.vtkActor()
+                                actor.SetMapper(mapper)
+                                actor.GetProperty().SetColor(1.0, 0.0, 1.0) # Magenta
+                                self.renderer.AddActor(actor)
+                                self.tunnel_3d_actors.append(actor)
+                        
+                        if len(self.tbm_tunnel_actors) > 0:
+                            tunnel_actor = self.tbm_tunnel_actors[-1]
+                            tunnel_actor_created = True
+                            tunnel_in_renderer = self.renderer.HasViewProp(tunnel_actor)
+                        
+                        self.message_text.append(f" TBM Tunnel {tunnel_id} restored.")
+                        loaded_any = True
+                    except Exception as e:
+                        print(f"Error drawing tunnel: {e}")
+                
+                print(f"Tunnel geometry created: {tunnel_geom_created}")
+                print(f"Tunnel actor created: {tunnel_actor_created}")
+                print(f"Tunnel actor in renderer: {tunnel_in_renderer}")
+                
+                num_actors = self.renderer.GetActors().GetNumberOfItems() if self.renderer else 0
+                print(f"Renderer actors after restore: {num_actors}")
+                
+            if tunnels_list and hasattr(self, 'vtk_widget'):
+                self.vtk_widget.GetRenderWindow().Render()
+                
         except Exception as e:
             self.message_text.append(f"Error loading tunnel structure: {str(e)}")
         ######### Mayur Wakhare 3-7-2026 Tunnel light json
@@ -37903,7 +38560,6 @@ class PointCloudViewer(ApplicationUI):
         self.master_report_data['digging'] = total_digging
         
         # Show Design Volumes in Report
-        from PyQt5.QtWidgets import QLabel, QFrame, QHBoxLayout, QPushButton
         from PyQt5.QtCore import Qt
         
         # Heading: Design Data
@@ -45493,21 +46149,74 @@ class PointCloudViewer(ApplicationUI):
         type_dialog = TunnelTypeSelectionDialog(self)
         if type_dialog.exec_() == QDialog.Accepted:
             if type_dialog.selected_type == "TBM":
-                if not getattr(self, "current_worksheet_name", None):
-                    QMessageBox.warning(self, "No Worksheet", "Please open a worksheet first.")
-                    return
-                    
-                layer_folder = getattr(self, 'current_design_layer_path', None)
-                if not layer_folder or not os.path.exists(layer_folder):
-                    QMessageBox.warning(self, "No Design Layer", "Please load a design layer first.")
-                    return
+                tbm_options = TBMOptionsDialog(self)
+                if tbm_options.exec_() == QDialog.Accepted:
+                    if tbm_options.selected_option == "Setup":
+                        QMessageBox.information(self, "Coming Soon", "Coming Soon")
+                    elif tbm_options.selected_option == "Implementation":
+                        if not getattr(self, "current_worksheet_name", None):
+                            QMessageBox.warning(self, "No Worksheet", "Please open a worksheet first.")
+                            return
+                            
+                        layer_folder = getattr(self, 'current_design_layer_path', None)
+                        if not layer_folder or not os.path.exists(layer_folder):
+                            QMessageBox.warning(self, "No Design Layer", "Please load a design layer first.")
+                            return
 
-                dialog = MenuTunnelConfigurationDialog(self)
-                if dialog.exec_() == QDialog.Accepted:
-                    self.menu_tunnel_values = dialog.tunnel_values
-                    print(f"Menu Tunnel values: {self.menu_tunnel_values}")
-                    # Do not implement any tunnel rendering yet
+                        dialog = MenuTunnelConfigurationDialog(self)
+                        if dialog.exec_() == QDialog.Accepted:
+                            self.menu_tunnel_values = dialog.tunnel_values
+                            print(f"Menu Tunnel values: {self.menu_tunnel_values}")
+                            rad = float(self.menu_tunnel_values.get("radius", 5.0))
+                            wall = float(self.menu_tunnel_values.get("wall_thickness", 0.5))
+                            self.draw_tbm_tunnel_actor(rad, wall)
+                            
+                            # Construct the tunnel config with center_line but do NOT save yet
+                            import uuid
+                            tunnel_id = f"TUN-{uuid.uuid4().hex[:6].upper()}"
+                            tunnel_data = {
+                                "tunnel_id": tunnel_id,
+                                "tunnel_type": "TBM",
+                                "radius": rad,
+                                "wall_thickness": wall,
+                                "start_chainage": getattr(self, "current_tunnel_start_ch", 0.0),
+                                "end_chainage": getattr(self, "current_tunnel_end_ch", 0.0)
+                            }
+                            
+                            center_line_data = self._build_baseline_data('center_line')
+                            if center_line_data:
+                                tunnel_data["center_line"] = center_line_data
+                                
+                            self.pending_tunnel_data = tunnel_data
+                            self.message_text.append(f" Tunnel {tunnel_id} generated. Click 'Save Design' to save to JSON.")
             elif type_dialog.selected_type == "DrillBlast":
+                QMessageBox.information(self, "Coming Soon", "Coming Soon")
+            elif type_dialog.selected_type == "Digging":
+                is_marking = (getattr(self, 'current_measurement', None) == 'digging_polygon')
+                dig_dialog = DiggingOptionsDialog(self, is_marking=is_marking)
+                if dig_dialog.exec_() == QDialog.Accepted:
+                    if dig_dialog.action_selected == "MarkPoints":
+                        self.current_measurement = 'digging_polygon'
+                        self.measurement_active = True
+                        self.plotting_active = True
+                        self.freeze_view = False
+                        if not hasattr(self, 'digging_points'):
+                            self.digging_points = []
+                        self.message_text.append("Digging mode active. Click on point cloud to mark points.")
+                    elif dig_dialog.action_selected == "CompletePolygon":
+                        if hasattr(self, 'digging_points') and len(self.digging_points) > 2:
+                            p1 = self.digging_points[-1]
+                            p2 = self.digging_points[0]
+                            self.add_line_between_points(p1, p2, "Red")
+                            self.vtk_widget.GetRenderWindow().Render()
+                            self.message_text.append("Digging Polygon Completed.")
+                            print(f"[DEBUG] Polygon completed with {len(self.digging_points)} points.")
+                            # self.current_measurement = None # Keep polygon visible, disable marking if needed
+                        else:
+                            self.message_text.append("Not enough points to complete polygon.")
+                    elif dig_dialog.action_selected == "Cut":
+                        QMessageBox.information(self, "Coming Soon", "Cut operation coming soon.")
+            elif type_dialog.selected_type == "Cut":
                 QMessageBox.information(self, "Coming Soon", "Coming Soon")
 ####################################################################################################
     ###### Mayur Wakhare 05-06-2026 : Added "Under pass" button on Menu bar ############
@@ -47030,3 +47739,514 @@ class PointCloudViewer(ApplicationUI):
                 layer_folder = data.get("source_layer_folder")
                 if layer_folder:
                     self._sync_tunnel_walls_to_json(layer_folder)
+    ## Mayur 10-8-2026                
+    def draw_tbm_tunnel_actor(self, radius, wall_thickness, start_ch=None, end_ch=None):
+        """Draws a hollow TBM Tunnel exactly centered along the Center Line."""
+        import vtk
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox
+
+        # Clear existing tunnel actors if any
+        if not hasattr(self, 'tbm_tunnel_actors'):
+            self.tbm_tunnel_actors = []
+        for actor in self.tbm_tunnel_actors:
+            self.renderer.RemoveActor(actor)
+        self.tbm_tunnel_actors.clear()
+
+        # Restore original point cloud before re-clipping
+        if hasattr(self, 'point_cloud_actor') and self.point_cloud_actor:
+            if hasattr(self, 'original_point_cloud_polydata') and self.original_point_cloud_polydata is not None:
+                self.point_cloud_actor.GetMapper().SetInputData(self.original_point_cloud_polydata)
+            else:
+                self.original_point_cloud_polydata = self.point_cloud_actor.GetMapper().GetInput()
+
+        # 1. Get the center line 2D profile
+        center_line_data = self.line_types.get('center_line', {})
+        polylines = center_line_data.get('polylines', [])
+        if not polylines or len(polylines[0]) < 2:
+            QMessageBox.warning(self, "No Center Line", "Please draw a Center Line on the 2D graph first.")
+            return
+
+        profile_pts = []
+        for pline in polylines:
+            profile_pts.extend(pline)
+        profile_pts.sort(key=lambda p: p[0])
+
+        if len(profile_pts) < 2:
+            return
+
+        prof_x = np.array([p[0] for p in profile_pts])
+        prof_dz = np.array([p[1] for p in profile_pts])
+
+        # 2. Get the baseline to map to 3D
+        global_start_offset = 0.0
+        if hasattr(self, 'zero_start_km') and self.zero_start_km is not None:
+            global_start_offset = float(self.zero_start_km) * 1000.0 + float(getattr(self, 'zero_start_chainage', 0.0))
+        elif hasattr(self, 'zero_start_chainage') and self.zero_start_chainage is not None:
+            global_start_offset = float(self.zero_start_chainage)
+        else:
+            layer_folder = getattr(self, 'current_design_layer_path', None)
+            if layer_folder and os.path.exists(layer_folder):
+                global_start_offset = self._get_global_start_offset(layer_folder)
+
+        pts_3d_z = self.get_road_baseline_points_3d()
+        if not pts_3d_z:
+            if hasattr(self, 'zero_start_point') and self.zero_start_point is not None and \
+               hasattr(self, 'zero_end_point') and self.zero_end_point is not None:
+                p0 = np.array(self.zero_start_point, dtype=float)
+                p1 = np.array(self.zero_end_point, dtype=float)
+                dist = float(getattr(self, 'total_distance', np.linalg.norm(p1 - p0)))
+                pts_3d_z = [
+                    (global_start_offset, p0[0], p0[1], p0[2]),
+                    (global_start_offset + dist, p1[0], p1[1], p1[2])
+                ]
+            else:
+                QMessageBox.warning(self, "No Baseline", "Zero Line is not fully set. Cannot map the Center Line.")
+                return
+
+        ref_chs_arr = np.array([p[0] for p in pts_3d_z], dtype=float)
+        ref_xs_arr = np.array([p[1] for p in pts_3d_z], dtype=float)
+        ref_ys_arr = np.array([p[2] for p in pts_3d_z], dtype=float)
+        ref_zs_arr = np.array([p[3] for p in pts_3d_z], dtype=float)
+
+        # Determine if ref_chs_arr contains absolute or relative chainages
+        is_absolute_ref = (global_start_offset > 0 and ref_chs_arr[0] >= global_start_offset - 1000)
+
+        # To prevent the tunnel from sticking out outside the actual zero line range
+        zero_line_start_ch = ref_chs_arr[0]
+        min_gx = zero_line_start_ch - global_start_offset if is_absolute_ref else zero_line_start_ch
+
+        # Check if user explicitly selected start/end points
+        has_custom_points = False
+        if start_ch is not None and end_ch is not None:
+            start_x = min(start_ch, end_ch)
+            end_x = max(start_ch, end_ch)
+            start_x = max(min_gx, start_x)
+            end_x = min(prof_x[-1], end_x)
+        elif hasattr(self, 'tunnel_start_point') and hasattr(self, 'tunnel_end_point'):
+            has_custom_points = True
+            
+        if has_custom_points:
+            t_s_x = min(self.tunnel_start_point[0], self.tunnel_end_point[0])
+            t_e_x = max(self.tunnel_start_point[0], self.tunnel_end_point[0])
+            start_x = max(min_gx, t_s_x)
+            end_x = min(prof_x[-1], t_e_x)
+        elif start_ch is None or end_ch is None:
+            # Default fallback if no points were manually selected and no ch provided
+            start_x = min_gx
+            end_x = prof_x[-1]
+            
+        if start_x >= end_x:
+            self.message_text.append("Error: Tunnel start/end points are invalid or out of bounds.")
+            return
+
+        self.current_tunnel_start_ch = float(start_x)
+        self.current_tunnel_end_ch = float(end_x)
+            
+        step = 0.5
+        
+        sampled_x = np.arange(start_x, end_x, step)
+        if len(sampled_x) == 0 or sampled_x[-1] != end_x:
+            sampled_x = np.append(sampled_x, end_x)
+
+        path_3d = []
+        for gx in sampled_x:
+            abs_ch = gx + global_start_offset if is_absolute_ref else gx
+            
+            rx, ry, rz = self.get_real_coordinates_from_chainage(gx)
+            
+            if abs_ch < ref_chs_arr[0] and len(ref_chs_arr) > 1:
+                t = (abs_ch - ref_chs_arr[0]) / (ref_chs_arr[1] - ref_chs_arr[0])
+                fallback_x3d = ref_xs_arr[0] + t * (ref_xs_arr[1] - ref_xs_arr[0])
+                fallback_y3d = ref_ys_arr[0] + t * (ref_ys_arr[1] - ref_ys_arr[0])
+                fallback_ref_z = ref_zs_arr[0] + t * (ref_zs_arr[1] - ref_zs_arr[0])
+            elif abs_ch > ref_chs_arr[-1] and len(ref_chs_arr) > 1:
+                t = (abs_ch - ref_chs_arr[-1]) / (ref_chs_arr[-1] - ref_chs_arr[-2])
+                fallback_x3d = ref_xs_arr[-1] + t * (ref_xs_arr[-1] - ref_xs_arr[-2])
+                fallback_y3d = ref_ys_arr[-1] + t * (ref_ys_arr[-1] - ref_ys_arr[-2])
+                fallback_ref_z = ref_zs_arr[-1] + t * (ref_zs_arr[-1] - ref_zs_arr[-2])
+            else:
+                fallback_x3d = np.interp(abs_ch, ref_chs_arr, ref_xs_arr)
+                fallback_y3d = np.interp(abs_ch, ref_chs_arr, ref_ys_arr)
+                fallback_ref_z = np.interp(abs_ch, ref_chs_arr, ref_zs_arr)
+                
+            x3d = rx if rx is not None else fallback_x3d
+            y3d = ry if ry is not None else fallback_y3d
+            ref_z = rz if rz is not None else fallback_ref_z
+            
+            dz = np.interp(gx, prof_x, prof_dz)
+            z3d = ref_z + dz
+            path_3d.append(np.array([x3d, y3d, z3d]))
+
+        # 4. Generate VTK PolyData for the hollow tube
+        points = vtk.vtkPoints()
+        polys = vtk.vtkCellArray()
+        
+        N_points = len(path_3d)
+        if N_points < 2:
+            return
+
+        tangents = []
+        for i in range(N_points):
+            if i == 0:
+                t = path_3d[1] - path_3d[0]
+            elif i == N_points - 1:
+                t = path_3d[i] - path_3d[i-1]
+            else:
+                t = path_3d[i+1] - path_3d[i-1]
+            nrm = np.linalg.norm(t)
+            tangents.append(t / nrm if nrm > 1e-9 else np.array([1.0, 0.0, 0.0]))
+
+        up = np.array([0.0, 0.0, 1.0])
+        n0 = np.cross(tangents[0], up)
+        if np.linalg.norm(n0) < 1e-5:
+            n0 = np.cross(tangents[0], np.array([0.0, 1.0, 0.0]))
+        n0 = n0 / np.linalg.norm(n0)
+        
+        normals = [n0]
+        for i in range(1, N_points):
+            t_prev = tangents[i-1]
+            t_curr = tangents[i]
+            n_prev = normals[i-1]
+            
+            axis = np.cross(t_prev, t_curr)
+            angle = np.arccos(np.clip(np.dot(t_prev, t_curr), -1.0, 1.0))
+            
+            if np.linalg.norm(axis) > 1e-9 and abs(angle) > 1e-9:
+                axis = axis / np.linalg.norm(axis)
+                K = np.array([[0, -axis[2], axis[1]],
+                              [axis[2], 0, -axis[0]],
+                              [-axis[1], axis[0], 0]])
+                R = np.eye(3) + np.sin(angle)*K + (1-np.cos(angle))*np.dot(K, K)
+                n_curr = np.dot(R, n_prev)
+            else:
+                n_curr = n_prev
+            
+            n_curr = n_curr - np.dot(n_curr, t_curr)*t_curr
+            n_curr = n_curr / np.linalg.norm(n_curr)
+            normals.append(n_curr)
+
+        # 5. Build vertices and faces
+        num_segments = 24
+        inner_r = float(radius)
+        outer_r = float(radius) + float(wall_thickness)
+        
+        for i in range(N_points):
+            P = path_3d[i]
+            T = tangents[i]
+            N = normals[i]
+            B = np.cross(T, N)
+            for j in range(num_segments):
+                theta = 2.0 * np.pi * j / num_segments
+                vx = np.cos(theta) * N + np.sin(theta) * B
+                points.InsertNextPoint((P + inner_r * vx).tolist())
+                points.InsertNextPoint((P + outer_r * vx).tolist())
+
+        for i in range(N_points - 1):
+            for j in range(num_segments):
+                j_next = (j + 1) % num_segments
+                i0 = i * (2 * num_segments) + 2 * j       
+                o0 = i * (2 * num_segments) + 2 * j + 1   
+                i1 = i * (2 * num_segments) + 2 * j_next  
+                o1 = i * (2 * num_segments) + 2 * j_next + 1 
+                
+                ni0 = (i + 1) * (2 * num_segments) + 2 * j       
+                no0 = (i + 1) * (2 * num_segments) + 2 * j + 1   
+                ni1 = (i + 1) * (2 * num_segments) + 2 * j_next  
+                no1 = (i + 1) * (2 * num_segments) + 2 * j_next + 1 
+                
+                # Inner wall
+                polys.InsertNextCell(4)
+                polys.InsertCellPoint(i0)
+                polys.InsertCellPoint(ni0)
+                polys.InsertCellPoint(ni1)
+                polys.InsertCellPoint(i1)
+                # Outer wall
+                polys.InsertNextCell(4)
+                polys.InsertCellPoint(o0)
+                polys.InsertCellPoint(o1)
+                polys.InsertCellPoint(no1)
+                polys.InsertCellPoint(no0)
+
+        for j in range(num_segments):
+            j_next = (j + 1) % num_segments
+            # Front cap
+            polys.InsertNextCell(4)
+            polys.InsertCellPoint(2 * j)
+            polys.InsertCellPoint(2 * j_next)
+            polys.InsertCellPoint(2 * j_next + 1)
+            polys.InsertCellPoint(2 * j + 1)
+            # Back cap
+            offset = (N_points - 1) * (2 * num_segments)
+            polys.InsertNextCell(4)
+            polys.InsertCellPoint(offset + 2 * j)
+            polys.InsertCellPoint(offset + 2 * j + 1)
+            polys.InsertCellPoint(offset + 2 * j_next + 1)
+            polys.InsertCellPoint(offset + 2 * j_next)
+
+        polydata = vtk.vtkPolyData()
+        polydata.SetPoints(points)
+        polydata.SetPolys(polys)
+        
+        normals_calc = vtk.vtkPolyDataNormals()
+        normals_calc.SetInputData(polydata)
+        normals_calc.ComputePointNormalsOn()
+        normals_calc.ComputeCellNormalsOff()
+        normals_calc.SplittingOff()
+        normals_calc.Update()
+        
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(normals_calc.GetOutputPort())
+        
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        actor.GetProperty().SetColor(0.5, 0.5, 0.5)
+        
+        self.tbm_tunnel_actors.append(actor)
+        self.renderer.AddActor(actor)
+        
+        # 6. Generate solid inner cylinder for clipping
+        inner_points = vtk.vtkPoints()
+        inner_polys = vtk.vtkCellArray()
+        
+        for i in range(N_points):
+            P = path_3d[i]
+            T = tangents[i]
+            N = normals[i]
+            B = np.cross(T, N)
+            for j in range(num_segments):
+                theta = 2.0 * np.pi * j / num_segments
+                vx = np.cos(theta) * N + np.sin(theta) * B
+                inner_points.InsertNextPoint((P + inner_r * vx).tolist())
+                
+        for i in range(N_points - 1):
+            for j in range(num_segments):
+                j_next = (j + 1) % num_segments
+                i0 = i * num_segments + j
+                i1 = i * num_segments + j_next
+                ni0 = (i + 1) * num_segments + j
+                ni1 = (i + 1) * num_segments + j_next
+                
+                # Outer facing normals for inner cavity cylinder
+                inner_polys.InsertNextCell(4)
+                inner_polys.InsertCellPoint(i0)
+                inner_polys.InsertCellPoint(i1)
+                inner_polys.InsertCellPoint(ni1)
+                inner_polys.InsertCellPoint(ni0)
+                
+        # Add front and back center points for capping
+        front_center_idx = inner_points.InsertNextPoint(path_3d[0].tolist())
+        back_center_idx = inner_points.InsertNextPoint(path_3d[-1].tolist())
+        
+        for j in range(num_segments):
+            j_next = (j + 1) % num_segments
+            # Front cap
+            inner_polys.InsertNextCell(3)
+            inner_polys.InsertCellPoint(j_next)
+            inner_polys.InsertCellPoint(j)
+            inner_polys.InsertCellPoint(front_center_idx)
+            
+            # Back cap
+            offset = (N_points - 1) * num_segments
+            inner_polys.InsertNextCell(3)
+            inner_polys.InsertCellPoint(offset + j)
+            inner_polys.InsertCellPoint(offset + j_next)
+            inner_polys.InsertCellPoint(back_center_idx)
+
+        inner_polydata = vtk.vtkPolyData()
+        inner_polydata.SetPoints(inner_points)
+        inner_polydata.SetPolys(inner_polys)
+        
+        inner_normals = vtk.vtkPolyDataNormals()
+        inner_normals.SetInputData(inner_polydata)
+        inner_normals.ComputeCellNormalsOn()
+        inner_normals.ComputePointNormalsOff()
+        inner_normals.ConsistencyOn()
+        inner_normals.Update()
+        
+        # 7. Clip point cloud using Spatial Bounding Box Filtering
+        if hasattr(self, 'point_cloud_actor') and self.point_cloud_actor:
+            try:
+                self.message_text.append("Clipping point cloud inside tunnel cavity... Please wait.")
+                # We need to process events to show the message
+                from PyQt5.QtWidgets import QApplication
+                QApplication.processEvents()
+                
+                # Get bounds of the inner tunnel cavity
+                bounds = inner_normals.GetOutput().GetBounds()
+                
+                # Pad bounds slightly
+                padding = 2.0
+                padded_bounds = (
+                    bounds[0] - padding, bounds[1] + padding,
+                    bounds[2] - padding, bounds[3] + padding,
+                    bounds[4] - padding, bounds[5] + padding
+                )
+                
+                # Create vtkBox for the padded bounds
+                bbox = vtk.vtkBox()
+                bbox.SetBounds(padded_bounds)
+                
+                # Split point cloud into 'local' and 'far' parts
+                extractor = vtk.vtkExtractPolyDataGeometry()
+                extractor.SetInputData(self.original_point_cloud_polydata)
+                extractor.SetImplicitFunction(bbox)
+                
+                # Get Local points (Inside bounding box)
+                extractor.SetExtractInside(True)
+                extractor.Update()
+                local_pc = vtk.vtkPolyData()
+                local_pc.DeepCopy(extractor.GetOutput())
+                
+                # Get Far points (Outside bounding box)
+                extractor.SetExtractInside(False)
+                extractor.Update()
+                far_pc = vtk.vtkPolyData()
+                far_pc.DeepCopy(extractor.GetOutput())
+                
+                # Run the expensive Implicit Distance check ONLY on local points
+                implicit_dist = vtk.vtkImplicitPolyDataDistance()
+                implicit_dist.SetInput(inner_normals.GetOutput())
+                
+                extractor2 = vtk.vtkExtractPolyDataGeometry()
+                extractor2.SetInputData(local_pc)
+                extractor2.SetImplicitFunction(implicit_dist)
+                extractor2.SetExtractInside(False)
+                extractor2.Update()
+                clipped_local_pc = vtk.vtkPolyData()
+                clipped_local_pc.DeepCopy(extractor2.GetOutput())
+                
+                # Recombine far points and clipped local points
+                appender = vtk.vtkAppendPolyData()
+                appender.AddInputData(far_pc)
+                appender.AddInputData(clipped_local_pc)
+                appender.Update()
+                
+                # Update the original actor mapper with the highly optimized result
+                self.point_cloud_actor.GetMapper().SetInputData(appender.GetOutput())
+                self.message_text.append("Point cloud successfully clipped (Optimized).")
+            except Exception as e:
+                self.message_text.append(f"Error clipping point cloud: {e}")
+
+        self.vtk_widget.GetRenderWindow().Render()
+        print("[Tunnel] TBM Hollow Tunnel successfully drawn.")
+## Mayur 12-8-2026
+    def _prompt_tunnel_start_end_mode(self, ltype="surface"):
+        from PyQt5.QtWidgets import QMessageBox
+        line_name = "Surface Line" if ltype == "surface" else "Center Line"
+        reply = QMessageBox.question(
+            self, 'Tunnel Points', 
+            f'Please mark the starting and ending points of the tunnel on the {line_name}.',
+            QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Ok
+        )
+        if reply == QMessageBox.Ok:
+            self.tunnel_point_selection_mode = True
+            self.tunnel_selected_points = []
+            self.tunnel_2d_artists = []
+            self.tunnel_3d_actors = []
+            self.tunnel_active_ltype = ltype
+            self.message_text.append(f"Tunnel Start/End Selection Mode: Click exactly 2 points on the {line_name}.")
+            try:
+                self.tunnel_surface_line_points = self.line_types[ltype]['polylines'][-1]
+            except (KeyError, IndexError):
+                self.tunnel_surface_line_points = []
+        else:
+            self.tunnel_point_selection_mode = False
+
+    def _handle_tunnel_point_selection(self, click_x, click_y):
+        if not getattr(self, 'tunnel_surface_line_points', []):
+            ltype_name = "Surface Line" if getattr(self, 'tunnel_active_ltype', 'surface') == 'surface' else "Center Line"
+            self.message_text.append(f"Error: No {ltype_name} points found to snap to.")
+            self.tunnel_point_selection_mode = False
+            return
+            
+        import numpy as np
+        min_dist = float('inf')
+        closest_pt = None
+        pts = self.tunnel_surface_line_points
+        click_pt = np.array([click_x, click_y])
+        
+        for i in range(len(pts) - 1):
+            p1 = np.array([pts[i][0], pts[i][1]])
+            p2 = np.array([pts[i+1][0], pts[i+1][1]])
+            
+            l2 = np.sum((p1 - p2)**2)
+            if l2 == 0:
+                t = 0
+            else:
+                t = max(0, min(1, np.dot(click_pt - p1, p2 - p1) / l2))
+                
+            projection = p1 + t * (p2 - p1)
+            dist = np.linalg.norm(click_pt - projection)
+            
+            if dist < min_dist:
+                min_dist = dist
+                closest_pt = projection
+                
+        if closest_pt is None:
+            closest_pt = min(pts, key=lambda p: (p[0]-click_x)**2 + (p[1]-click_y)**2)
+            closest_pt = np.array([closest_pt[0], closest_pt[1]])
+            
+        snapped_x, snapped_y = closest_pt[0], closest_pt[1]
+        
+        self.tunnel_selected_points.append((snapped_x, snapped_y))
+        artist = self.ax.plot(snapped_x, snapped_y, 'ro', markersize=10, markeredgecolor='black', markeredgewidth=2)[0]
+        if not hasattr(self, 'tunnel_2d_artists'):
+            self.tunnel_2d_artists = []
+        self.tunnel_2d_artists.append(artist)
+        self.canvas.draw_idle()
+        
+        # Plot point in 3D viewer
+        if hasattr(self, 'zero_start_point') and hasattr(self, 'zero_end_point') and hasattr(self, 'total_distance'):
+            import vtk
+            start_pt = np.array(self.zero_start_point, dtype=float)
+            end_pt = np.array(self.zero_end_point, dtype=float)
+            
+            ref_z = getattr(self, 'zero_start_z', 0.0)
+            if not ref_z and hasattr(self, 'zero_start_point'):
+                ref_z = self.zero_start_point[2] if len(self.zero_start_point) > 2 else 0.0
+
+            if self.total_distance > 0:
+                t = snapped_x / self.total_distance
+                t = max(0.0, min(1.0, t))
+                pos_3d = start_pt + t * (end_pt - start_pt)
+                pos_3d[2] = ref_z + snapped_y
+                
+                # Apply true curved 3D coordinates if available
+                rx, ry, _ = self.get_real_coordinates_from_chainage(snapped_x)
+                if rx is not None and ry is not None:
+                    pos_3d[0] = rx
+                    pos_3d[1] = ry
+                
+                sphere = vtk.vtkSphereSource()
+                sphere.SetRadius(1.0)
+                sphere.SetCenter(pos_3d[0], pos_3d[1], pos_3d[2])
+                sphere.SetThetaResolution(16)
+                sphere.SetPhiResolution(16)
+
+                mapper = vtk.vtkPolyDataMapper()
+                mapper.SetInputConnection(sphere.GetOutputPort())
+
+                actor = vtk.vtkActor()
+                actor.SetMapper(mapper)
+                actor.GetProperty().SetColor(1.0, 0.0, 0.0)
+                
+                self.renderer.AddActor(actor)
+                if not hasattr(self, 'tunnel_3d_actors'):
+                    self.tunnel_3d_actors = []
+                self.tunnel_3d_actors.append(actor)
+                rw = (self.vtk_widget if hasattr(self, 'vtk_widget') else self.vtkWidget).GetRenderWindow()
+                rw.Render()
+        
+        if len(self.tunnel_selected_points) == 1:
+            self.tunnel_start_point = (snapped_x, snapped_y)
+            self.message_text.append(f"Tunnel Start Point set: {self.tunnel_start_point}")
+            print(f"TUNNEL START POINT = {self.tunnel_start_point}")
+        elif len(self.tunnel_selected_points) == 2:
+            self.tunnel_end_point = (snapped_x, snapped_y)
+            self.message_text.append(f"Tunnel End Point set: {self.tunnel_end_point}")
+            print(f"TUNNEL END POINT = {self.tunnel_end_point}")
+            self.tunnel_point_selection_mode = False
+            self.message_text.append("Tunnel Start/End selection complete.")
+            
+        self.canvas.draw_idle()

@@ -13,7 +13,20 @@ from utils import resource_path
 from PyQt5.QtSvg import QSvgRenderer
 
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as _FigureCanvasQTAgg
+
+class FigureCanvas(_FigureCanvasQTAgg):
+    def paintEvent(self, event):
+        try:
+            super().paintEvent(event)
+        except RuntimeError:
+            pass
+
+    def draw(self):
+        try:
+            super().draw()
+        except RuntimeError:
+            pass
 from matplotlib.figure import Figure
 import matplotlib.ticker as ticker
 

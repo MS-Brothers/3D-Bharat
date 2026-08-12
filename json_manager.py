@@ -970,6 +970,8 @@ class DesignConstructionManager:
                                        deck_line: Dict[str, Any] = None,
                                        projection_line: Dict[str, Any] = None,
                                        operational_config: Dict[str, Any] = None,
+                                       tunnels: list = None,
+                                       tunnel_config: Dict[str, Any] = None,
                                        saved_by: str = "") -> bool:
         """
         Save all design layer baselines into a SINGLE unified JSON file: design_construction_config.json
@@ -986,7 +988,8 @@ class DesignConstructionManager:
                 "road_surface_baseline": {...},
                 "deck_line": {...},
                 "projection_line": {...},
-                "operational_config": {...}
+                "operational_config": {...},
+                "tunnels": [...]
             },
             "saved_at": "timestamp",
             "saved_by": "username"
@@ -1002,6 +1005,7 @@ class DesignConstructionManager:
             deck_line (dict): Deck line data (or None)
             projection_line (dict): Projection line data (or None)
             operational_config (dict): Operational configuration (or None)
+            tunnels (list): List of tunnel objects (or None)
             saved_by (str): Username or identifier of person saving
             
         Returns:
@@ -1025,10 +1029,25 @@ class DesignConstructionManager:
                 "projection_line": projection_line,
                 "operational_config": operational_config
             }
+            ## Mayur 10-8-2026
+            if tunnels is not None:
+                design_data["tunnels"] = tunnels
             
             # Load existing master JSON to preserve other sections
             master_data = DesignConstructionManager.load_master(layer_root)
-            master_data["design"] = design_data
+            
+            if tunnel_config is not None:
+                existing_tunnel = master_data.get("design", {}).get("tunnel", {})
+                merged_tunnel = dict(existing_tunnel)
+                merged_tunnel.update(tunnel_config)
+                design_data["tunnel"] = merged_tunnel
+            if "design" not in master_data:
+                master_data["design"] = {}
+                
+            # Preserve existing design data that is not part of this save (like older "tunnel" config, etc.)
+            for k, v in design_data.items():
+                master_data["design"][k] = v
+                
             master_data["saved_at"] = datetime.now().isoformat()
             master_data["saved_by"] = saved_by
             
