@@ -24119,3 +24119,65 @@ class DiggingOptionsDialog(QDialog):
     def _on_cut(self):
         self.action_selected = "Cut"
         self.accept()
+## Mayur 12-8-2026
+class TunnelDiggingConfigDialog(QDialog):
+    """Dialog for Tunnel Digging Cut Configuration."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Tunnel Digging Configuration")
+        self.setMinimumWidth(300)
+        
+        main_layout = QVBoxLayout(self)
+        grid_layout = QGridLayout()
+        
+        self.left_offset_input = QLineEdit("0.0")
+        self.right_offset_input = QLineEdit("0.0")
+        self.left_wall_height_input = QLineEdit("0.0")
+        self.right_wall_height_input = QLineEdit("0.0")
+        self.depth_offset_input = QLineEdit("0.0")
+        
+        validator = QDoubleValidator()
+        self.left_offset_input.setValidator(validator)
+        self.right_offset_input.setValidator(validator)
+        self.left_wall_height_input.setValidator(validator)
+        self.right_wall_height_input.setValidator(validator)
+        self.depth_offset_input.setValidator(validator)
+        
+        grid_layout.addWidget(QLabel("Left Offset (m):"), 0, 0)
+        grid_layout.addWidget(self.left_offset_input, 0, 1)
+        
+        grid_layout.addWidget(QLabel("Right Offset (m):"), 1, 0)
+        grid_layout.addWidget(self.right_offset_input, 1, 1)
+        
+        grid_layout.addWidget(QLabel("Left Side Wall Height (m):"), 2, 0)
+        grid_layout.addWidget(self.left_wall_height_input, 2, 1)
+        
+        grid_layout.addWidget(QLabel("Right Side Wall Height (m):"), 3, 0)
+        grid_layout.addWidget(self.right_wall_height_input, 3, 1)
+        
+        grid_layout.addWidget(QLabel("Depth Offset (m):"), 4, 0)
+        grid_layout.addWidget(self.depth_offset_input, 4, 1)
+        
+        main_layout.addLayout(grid_layout)
+        
+        btn_layout = QHBoxLayout()
+        self.btn_ok = QPushButton("OK")
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_ok)
+        btn_layout.addWidget(self.btn_cancel)
+        main_layout.addLayout(btn_layout)
+        
+    def get_config(self):
+        try:
+            return {
+                "left_offset": float(self.left_offset_input.text()),
+                "right_offset": float(self.right_offset_input.text()),
+                "left_wall_height": float(self.left_wall_height_input.text()),
+                "right_wall_height": float(self.right_wall_height_input.text()),
+                "depth_offset": float(self.depth_offset_input.text())
+            }
+        except ValueError:
+            return None

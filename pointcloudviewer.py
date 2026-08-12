@@ -39,7 +39,7 @@ from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, Mate
                     StreetLightDialog, SignalPoleDialog, LaneMarkingDialog, PoleAssetDialog, BuddyDialog, BuddiesWorksheetsDialog, OneDirectionStreetLightDialog, 
                     TwoDirectionStreetLightDialog, FourDirectionStreetLightDialog, OneDirectionSignalPoleDialog, TwoDirectionSignalPoleDialog, FourDirectionSignalPoleDialog, 
                     ##### Mayur Wakhare 1-7-2026 Tunnel Light
-                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog,UnderPassDialog,UnderPassPreviewDialog,UnderpassCCTVDialog,UnderpassLightDialog,TunnelWallDialog,UnderpassWallDialog, MenuTunnelConfigurationDialog, TunnelTypeSelectionDialog, TBMOptionsDialog, DiggingOptionsDialog)
+                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog,UnderPassDialog,UnderPassPreviewDialog,UnderpassCCTVDialog,UnderpassLightDialog,TunnelWallDialog,UnderpassWallDialog, MenuTunnelConfigurationDialog, TunnelTypeSelectionDialog, TBMOptionsDialog, DiggingOptionsDialog, TunnelDiggingConfigDialog)
                     ###########################################################
 from measurement_widget import MeasurementWidget
 from digging_point import DiggingPointInput
@@ -20712,6 +20712,11 @@ class PointCloudViewer(ApplicationUI):
         # Use Point picker to accurately select any point cloud vertex (main LiDAR or baseline)
         point_picker = vtk.vtkPointPicker()
         point_picker.SetTolerance(0.005) # Good tolerance for point picking
+        # Mayur 12-8-2026
+        if getattr(self, 'current_measurement', None) == 'digging' and getattr(self, 'point_cloud_actor', None):
+            point_picker.AddPickList(self.point_cloud_actor)
+            point_picker.PickFromListOn()
+            
         point_picker.Pick(pos[0], pos[1], 0, self.renderer)
         
         clicked_point = None
@@ -20722,6 +20727,11 @@ class PointCloudViewer(ApplicationUI):
             # Fallback to cell picker just in case there are lines or solid surfaces
             cell_picker = vtk.vtkCellPicker()
             cell_picker.SetTolerance(0.005)
+           # Mayur 12-8-2026   
+            if getattr(self, 'current_measurement', None) == 'digging' and getattr(self, 'point_cloud_actor', None):
+                cell_picker.AddPickList(self.point_cloud_actor)
+                cell_picker.PickFromListOn()
+                
             cell_picker.Pick(pos[0], pos[1], 0, self.renderer)
             
             if cell_picker.GetActor() is not None and cell_picker.GetCellId() != -1:
@@ -37304,9 +37314,20 @@ class PointCloudViewer(ApplicationUI):
                         if start_ch is not None and end_ch is not None:
                             if not hasattr(self, 'tunnel_3d_actors'):
                                 self.tunnel_3d_actors = []
-                            # Fetch actual 3D coords for start and end
-                            sx, sy, sz = self.get_real_coordinates_from_chainage(start_ch)
-                            ex, ey, ez = self.get_real_coordinates_from_chainage(end_ch)
+                            
+                            # Use explicit points from JSON if they exist
+                            s_pt = t_data.get("start_point")
+                            e_pt = t_data.get("end_point")
+                            
+                            if s_pt and len(s_pt) == 3:
+                                sx, sy, sz = s_pt
+                            else:
+                                sx, sy, sz = self.get_real_coordinates_from_chainage(start_ch)
+                                
+                            if e_pt and len(e_pt) == 3:
+                                ex, ey, ez = e_pt
+                            else:
+                                ex, ey, ez = self.get_real_coordinates_from_chainage(end_ch)
                             
                             # Add sphere actors
                             import vtk
@@ -37328,6 +37349,15 @@ class PointCloudViewer(ApplicationUI):
                             tunnel_in_renderer = self.renderer.HasViewProp(tunnel_actor)
                         
                         self.message_text.append(f" TBM Tunnel {tunnel_id} restored.")
+                        
+                        # Apply Digging/Trench cut if it was saved
+                        dig_data = t_data.get("digging_data")
+                        if dig_data and "config" in dig_data and "polygon_points" in dig_data:
+                            self.digging_points = dig_data["polygon_points"]
+                            if hasattr(self, 'execute_tunnel_cut'):
+                                self.execute_tunnel_cut(dig_data["config"], polylines_2d)
+                                self.message_text.append(f" Trench excavation restored for Tunnel {tunnel_id}.")
+                                
                         loaded_any = True
                     except Exception as e:
                         print(f"Error drawing tunnel: {e}")
@@ -46174,14 +46204,32 @@ class PointCloudViewer(ApplicationUI):
                             # Construct the tunnel config with center_line but do NOT save yet
                             import uuid
                             tunnel_id = f"TUN-{uuid.uuid4().hex[:6].upper()}"
+                            
+                            start_ch = getattr(self, "current_tunnel_start_ch", 0.0)
+                            end_ch = getattr(self, "current_tunnel_end_ch", 0.0)
+                            tunnel_length = abs(end_ch - start_ch)
+                            
+                            # Get start and end real coordinates
+                            start_coords = self.get_real_coordinates_from_chainage(start_ch)
+                            end_coords = self.get_real_coordinates_from_chainage(end_ch)
+                            
                             tunnel_data = {
                                 "tunnel_id": tunnel_id,
                                 "tunnel_type": "TBM",
                                 "radius": rad,
                                 "wall_thickness": wall,
-                                "start_chainage": getattr(self, "current_tunnel_start_ch", 0.0),
-                                "end_chainage": getattr(self, "current_tunnel_end_ch", 0.0)
+                                "start_chainage": start_ch,
+                                "end_chainage": end_ch,
+                                "tunnel_length": tunnel_length,
+                                "start_point": list(start_coords) if start_coords else None,
+                                "end_point": list(end_coords) if end_coords else None
                             }
+                            
+                            # Attach the last digging data directly into the tunnel object
+                            if hasattr(self, 'last_digging_data') and self.last_digging_data:
+                                tunnel_data['digging_data'] = self.last_digging_data
+                                # Clear it so it doesn't get attached to the next tunnel unless redrawn
+                                self.last_digging_data = None
                             
                             center_line_data = self._build_baseline_data('center_line')
                             if center_line_data:
@@ -46211,13 +46259,259 @@ class PointCloudViewer(ApplicationUI):
                             self.vtk_widget.GetRenderWindow().Render()
                             self.message_text.append("Digging Polygon Completed.")
                             print(f"[DEBUG] Polygon completed with {len(self.digging_points)} points.")
-                            # self.current_measurement = None # Keep polygon visible, disable marking if needed
+                            
+                            # Disable marking mode immediately
+                            self.current_measurement = None
+                            self.measurement_active = False
+                            self.plotting_active = False
                         else:
                             self.message_text.append("Not enough points to complete polygon.")
                     elif dig_dialog.action_selected == "Cut":
-                        QMessageBox.information(self, "Coming Soon", "Cut operation coming soon.")
+                        center_line_data = self.line_types.get('center_line', {})
+                        polylines = center_line_data.get('polylines', [])
+                        if not polylines or len(polylines) == 0 or len(polylines[0]) < 2:
+                            QMessageBox.warning(self, "Missing Data", "Center Line is required for tunnel digging.")
+                        else:
+                            config_dialog = TunnelDiggingConfigDialog(self)
+                            if config_dialog.exec_() == QDialog.Accepted:
+                                config = config_dialog.get_config()
+                                if config:
+                                    self.execute_tunnel_cut(config, polylines)
             elif type_dialog.selected_type == "Cut":
                 QMessageBox.information(self, "Coming Soon", "Coming Soon")
+##   # Mayur 12-8-2026
+    def execute_tunnel_cut(self, config, center_polylines):
+        print("DEBUG DIGGING START")
+        print("DEBUG | Center Line = FOUND")
+        print(f"DEBUG | Polygon Points = {len(self.digging_points) if hasattr(self, 'digging_points') else 0}")
+        print(f"DEBUG | Left Offset = {config['left_offset']} m")
+        print(f"DEBUG | Right Offset = {config['right_offset']} m")
+        print(f"DEBUG | Depth Offset = {config['depth_offset']} m")
+        print(f"DEBUG | Left Wall Height = {config['left_wall_height']} m")
+        print(f"DEBUG | Right Wall Height = {config['right_wall_height']} m")
+
+        if not hasattr(self, 'digging_points') or len(self.digging_points) < 3:
+            QMessageBox.warning(self, "Invalid Polygon", "Not enough points in digging polygon. Please mark at least 3 points.")
+            return
+
+        pts_3d_z = []
+        if hasattr(self, 'get_road_baseline_points_3d'):
+            pts_3d_z = self.get_road_baseline_points_3d()
+            
+        if not pts_3d_z:
+            if hasattr(self, 'zero_start_point') and self.zero_start_point is not None and \
+               hasattr(self, 'zero_end_point') and self.zero_end_point is not None:
+                p0 = np.array(self.zero_start_point, dtype=float)
+                p1 = np.array(self.zero_end_point, dtype=float)
+                dist = float(getattr(self, 'total_distance', np.linalg.norm(p1 - p0)))
+                global_start_offset = 0
+                if hasattr(self, '_get_global_start_offset'):
+                    try:
+                        layer_folder = getattr(self, 'current_design_layer_path', None)
+                        if layer_folder:
+                            val = self._get_global_start_offset(layer_folder)
+                            if val is not None:
+                                global_start_offset = val
+                    except Exception:
+                        pass
+                pts_3d_z = [
+                    (global_start_offset, p0[0], p0[1], p0[2]),
+                    (global_start_offset + dist, p1[0], p1[1], p1[2])
+                ]
+            else:
+                QMessageBox.warning(self, "No Baseline", "Zero Line is required to map the Center Line for cutting.")
+                return
+
+        ref_chs_arr = np.array([p[0] for p in pts_3d_z], dtype=float)
+        ref_xs_arr = np.array([p[1] for p in pts_3d_z], dtype=float)
+        ref_ys_arr = np.array([p[2] for p in pts_3d_z], dtype=float)
+        ref_zs_arr = np.array([p[3] for p in pts_3d_z], dtype=float)
+        
+        profile_pts = []
+        for pline in center_polylines:
+            profile_pts.extend(pline)
+        profile_pts.sort(key=lambda p: p[0])
+        prof_x = np.array([p[0] for p in profile_pts])
+        prof_dz = np.array([p[1] for p in profile_pts])
+
+        dig_pts_2d = np.array([[p[0], p[1]] for p in self.digging_points])
+        dig_path = matplotlib.path.Path(dig_pts_2d)
+        
+        if not hasattr(self, 'point_cloud') or self.point_cloud is None:
+            return
+            
+        points = np.asarray(self.point_cloud.points)
+        colors = np.asarray(self.point_cloud.colors) if self.point_cloud.has_colors() else np.zeros_like(points)
+        
+        pts_2d = points[:, :2]
+        inside_mask = dig_path.contains_points(pts_2d)
+        inside_indices = np.where(inside_mask)[0]
+        
+        new_points = points.copy()
+        new_colors = colors.copy()
+        
+        soil_color = [0.4, 0.25, 0.1] # Brown earth color
+        
+        excavated_count = 0
+        
+        ## Mayur 12-8-2026
+        def get_trench_z(offset_val, left_off, right_off, original_z, bz):
+            slope_w_l = max(0.5, left_off * 0.4)
+            slope_w_r = max(0.5, right_off * 0.4)
+            
+            if offset_val >= 0:
+                if offset_val <= left_off - slope_w_l:
+                    return bz
+                elif offset_val > left_off:
+                    return original_z
+                else:
+                    ratio = (offset_val - (left_off - slope_w_l)) / slope_w_l
+                    smooth_ratio = ratio * ratio * (3 - 2 * ratio)
+                    return bz + (original_z - bz) * smooth_ratio
+            else:
+                abs_off = abs(offset_val)
+                if abs_off <= right_off - slope_w_r:
+                    return bz
+                elif abs_off > right_off:
+                    return original_z
+                else:
+                    ratio = (abs_off - (right_off - slope_w_r)) / slope_w_r
+                    smooth_ratio = ratio * ratio * (3 - 2 * ratio)
+                    return bz + (original_z - bz) * smooth_ratio
+
+        for idx in inside_indices:
+            p = points[idx]
+            px, py, pz = p[0], p[1], p[2]
+            
+            # Project onto Center Line
+            min_dist = float('inf')
+            best_ch = ref_chs_arr[0]
+            best_ref_z = ref_zs_arr[0]
+            best_i = 0
+            best_t = 0
+            
+            for i in range(len(ref_chs_arr) - 1):
+                p1 = np.array([ref_xs_arr[i], ref_ys_arr[i]])
+                p2 = np.array([ref_xs_arr[i+1], ref_ys_arr[i+1]])
+                seg_v = p2 - p1
+                pt_v = np.array([px, py]) - p1
+                seg_len_sq = np.dot(seg_v, seg_v)
+                
+                t = 0 if seg_len_sq == 0 else max(0, min(1, np.dot(pt_v, seg_v) / seg_len_sq))
+                dist = np.linalg.norm(np.array([px, py]) - (p1 + t * seg_v))
+                
+                if dist < min_dist:
+                    min_dist = dist
+                    best_ch = ref_chs_arr[i] + t * (ref_chs_arr[i+1] - ref_chs_arr[i])
+                    best_ref_z = ref_zs_arr[i] + t * (ref_zs_arr[i+1] - ref_zs_arr[i])
+                    best_i = i
+                    best_t = t
+                    
+            p1 = np.array([ref_xs_arr[best_i], ref_ys_arr[best_i]])
+            p2 = np.array([ref_xs_arr[best_i+1], ref_ys_arr[best_i+1]])
+            seg_v = p2 - p1
+            length = np.linalg.norm(seg_v)
+            if length == 0:
+                nx, ny = 0, 1
+            else:
+                nx, ny = -seg_v[1]/length, seg_v[0]/length
+                
+            pt_v = np.array([px, py]) - (p1 + best_t * seg_v)
+            offset = np.dot(pt_v, np.array([nx, ny])) # Positive is left
+            
+            within_width = False
+            if offset >= 0 and offset <= config['left_offset']:
+                within_width = True
+            elif offset < 0 and -offset <= config['right_offset']:
+                within_width = True
+                
+            if within_width:
+                dz = np.interp(best_ch, prof_x, prof_dz)
+                center_line_Z = best_ref_z + dz
+                digging_bottom_Z = center_line_Z - config['depth_offset']
+                
+                target_z = get_trench_z(offset, config['left_offset'], config['right_offset'], pz, digging_bottom_Z)
+                
+                if pz - target_z > 0.05:
+                    target_z += np.random.normal(0, 0.05)
+                    new_points[idx][2] = target_z
+                    
+                    blend_factor = min(1.0, (pz - target_z) / 1.5)
+                    orig_color = colors[idx]
+                    new_colors[idx] = orig_color * (1 - blend_factor) + np.array(soil_color) * blend_factor
+                    
+                    excavated_count += 1
+                    
+        print(f"DEBUG | Total Bottom Points Generated = {excavated_count}")
+        
+        # Generate dense artificial points for the trench to ensure it looks solid and not sparse
+        wall_points = []
+        wall_colors = []
+        
+        step = 0.25 # 25cm grid
+        min_gx = max(prof_x[0], ref_chs_arr[0])
+        max_gx = min(prof_x[-1], ref_chs_arr[-1])
+        
+        sampled_x = np.arange(min_gx, max_gx, step)
+        for gx in sampled_x:
+            best_idx = 0
+            for i in range(len(ref_chs_arr) - 1):
+                if ref_chs_arr[i] <= gx <= ref_chs_arr[i+1]:
+                    best_idx = i
+                    break
+            
+            i = best_idx
+            t = 0 if ref_chs_arr[i+1] == ref_chs_arr[i] else (gx - ref_chs_arr[i]) / (ref_chs_arr[i+1] - ref_chs_arr[i])
+            rx = ref_xs_arr[i] + t * (ref_xs_arr[i+1] - ref_xs_arr[i])
+            ry = ref_ys_arr[i] + t * (ref_ys_arr[i+1] - ref_ys_arr[i])
+            rz = ref_zs_arr[i] + t * (ref_zs_arr[i+1] - ref_zs_arr[i])
+            
+            dz = np.interp(gx, prof_x, prof_dz)
+            center_z = rz + dz
+            bottom_z = center_z - config['depth_offset']
+            
+            dx = ref_xs_arr[i+1] - ref_xs_arr[i]
+            dy = ref_ys_arr[i+1] - ref_ys_arr[i]
+            length = np.sqrt(dx**2 + dy**2)
+            if length == 0: continue
+            nx, ny = -dy / length, dx / length
+            
+            # Sweep across the trench width
+            for off in np.arange(-config['right_offset'], config['left_offset'] + step, step):
+                wx = rx + nx * off
+                wy = ry + ny * off
+                
+                if dig_path.contains_point([wx, wy]):
+                    tz = get_trench_z(off, config['left_offset'], config['right_offset'], center_z, bottom_z)
+                    tz += np.random.normal(0, 0.05) # soil noise
+                    
+                    wall_points.append([wx, wy, tz])
+                    
+                    c_noise = np.random.uniform(-0.05, 0.05, 3)
+                    final_color = np.clip(np.array(soil_color) + c_noise, 0, 1)
+                    wall_colors.append(final_color)
+                    
+        # Apply changes to point cloud
+        self.point_cloud.points = o3d.utility.Vector3dVector(new_points)
+        self.point_cloud.colors = o3d.utility.Vector3dVector(new_colors)
+        
+        if wall_points:
+            wall_pcd = o3d.geometry.PointCloud()
+            wall_pcd.points = o3d.utility.Vector3dVector(np.array(wall_points))
+            wall_pcd.colors = o3d.utility.Vector3dVector(np.array(wall_colors))
+            self.point_cloud += wall_pcd
+            
+        if hasattr(self, 'display_point_cloud'):
+            self.display_point_cloud(reset_camera=False)
+            
+        # Store the digging operation data so it can be attached to a Tunnel object
+        self.last_digging_data = {
+            "polygon_points": self.digging_points if hasattr(self, 'digging_points') else [],
+            "config": config
+        }
+            
+        self.message_text.append("Cut operation completed. Trench generated.")
+        print("DEBUG DIGGING COMPLETE")
 ####################################################################################################
     ###### Mayur Wakhare 05-06-2026 : Added "Under pass" button on Menu bar ############
     def handle_under_pass_clicked(self):
