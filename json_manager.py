@@ -5,8 +5,19 @@ Consolidates all design layer and construction layer JSON data into a single mas
 
 import json
 import os
+import numpy as np
 from typing import Dict, Any, Optional
 from datetime import datetime
+## Mayur 14-8-2026
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        return super(NumpyEncoder, self).default(obj)
 
 class DesignConstructionManager:
     """
@@ -116,7 +127,8 @@ class DesignConstructionManager:
             os.makedirs(layer_root, exist_ok=True)
             
             with open(path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+             ## Mayur 14-8-2026 polypoints
+                json.dump(data, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
             return True
         except Exception as e:
             print(f"ERROR saving master JSON to {path}: {str(e)}")
@@ -989,7 +1001,8 @@ class DesignConstructionManager:
                 "deck_line": {...},
                 "projection_line": {...},
                 "operational_config": {...},
-                "tunnels": [...]
+                "tunnels": [...],
+                "tunnel_config": {...}
             },
             "saved_at": "timestamp",
             "saved_by": "username"
@@ -1005,7 +1018,8 @@ class DesignConstructionManager:
             deck_line (dict): Deck line data (or None)
             projection_line (dict): Projection line data (or None)
             operational_config (dict): Operational configuration (or None)
-            tunnels (list): List of tunnel objects (or None)
+            tunnels (list): Tunnels data (or None)
+            tunnel_config (dict): Tunnel configuration data (or None)
             saved_by (str): Username or identifier of person saving
             
         Returns:
@@ -1029,30 +1043,26 @@ class DesignConstructionManager:
                 "projection_line": projection_line,
                 "operational_config": operational_config
             }
-            ## Mayur 10-8-2026
             if tunnels is not None:
                 design_data["tunnels"] = tunnels
-            
+            if tunnel_config is not None:
+                design_data["tunnel_config"] = tunnel_config
+                
             # Load existing master JSON to preserve other sections
             master_data = DesignConstructionManager.load_master(layer_root)
             
-            if tunnel_config is not None:
-                existing_tunnel = master_data.get("design", {}).get("tunnel", {})
-                merged_tunnel = dict(existing_tunnel)
-                merged_tunnel.update(tunnel_config)
-                design_data["tunnel"] = merged_tunnel
-            if "design" not in master_data:
-                master_data["design"] = {}
+            # Preserve existing tunnels if not explicitly passed
+            if tunnels is None and "design" in master_data and "tunnels" in master_data["design"]:
+                design_data["tunnels"] = master_data["design"]["tunnels"]
+            if tunnel_config is None and "design" in master_data and "tunnel_config" in master_data["design"]:
+                design_data["tunnel_config"] = master_data["design"]["tunnel_config"]
                 
-            # Preserve existing design data that is not part of this save (like older "tunnel" config, etc.)
-            for k, v in design_data.items():
-                master_data["design"][k] = v
-                
+            master_data["design"] = design_data
             master_data["saved_at"] = datetime.now().isoformat()
             master_data["saved_by"] = saved_by
             
             with open(master_file_path, 'w', encoding='utf-8') as f:
-                json.dump(master_data, f, indent=2, ensure_ascii=False)
+                json.dump(master_data, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
 
             
             print(f"✓ All baselines saved to {master_file_path}")
@@ -1137,7 +1147,7 @@ def update_design_construction_config(directory_path, key, data):
     try:
         os.makedirs(directory_path, exist_ok=True)
         with open(output_filepath, 'w') as f:
-            json.dump(master_config, f, indent=4)
+            json.dump(master_config, f, indent=4, cls=NumpyEncoder)
         print(f"Successfully saved {key} to master config at {output_filepath}")
         return True
     except Exception as e:
@@ -1229,7 +1239,7 @@ def merge_design_construction_json(directory_path, output_filepath=None):
 
     try:
         with open(output_filepath, 'w') as f:
-            json.dump(merged_data, f, indent=4)
+            json.dump(merged_data, f, indent=4, cls=NumpyEncoder)
         print(f"Successfully saved merged data to {output_filepath}")
         return merged_data
     except Exception as e:

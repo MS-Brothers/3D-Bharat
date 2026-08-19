@@ -22,7 +22,7 @@ import os
 import json
 import shutil
 from API import WorksheetAPI
-from json_manager import DesignConstructionManager
+# from json_manager import DesignConstructionManager
 
 from datetime import datetime
 import glob
@@ -23794,17 +23794,22 @@ class TunnelTypeSelectionDialog(QDialog):
         self.radio_group.addButton(self.rb_tbm, 1)
         layout.addWidget(self.rb_tbm)
 
-        self.rb_drill = QRadioButton("Drill & Blast")
-        self.radio_group.addButton(self.rb_drill, 2)
-        layout.addWidget(self.rb_drill)
 
         self.rb_digging = QRadioButton("Digging")
         self.radio_group.addButton(self.rb_digging, 3)
         layout.addWidget(self.rb_digging)
 
-        self.rb_cut = QRadioButton("Cut")
-        self.radio_group.addButton(self.rb_cut, 4)
-        layout.addWidget(self.rb_cut)
+        self.rb_tunnel_wall = QRadioButton("Tunnel Wall")
+        self.radio_group.addButton(self.rb_tunnel_wall, 5)
+        layout.addWidget(self.rb_tunnel_wall)
+
+        self.rb_drill_blast = QRadioButton("Drill and Blast")
+        self.radio_group.addButton(self.rb_drill_blast, 6)
+        layout.addWidget(self.rb_drill_blast)
+
+        self.rb_cutter = QRadioButton("Cutter")
+        self.radio_group.addButton(self.rb_cutter, 7)
+        layout.addWidget(self.rb_cutter)
 
         # Future options can easily be added here as new QRadioButtons
 
@@ -23826,12 +23831,14 @@ class TunnelTypeSelectionDialog(QDialog):
     def _on_ok(self):
         if self.rb_tbm.isChecked():
             self.selected_type = "TBM"
-        elif self.rb_drill.isChecked():
-            self.selected_type = "DrillBlast"
         elif self.rb_digging.isChecked():
             self.selected_type = "Digging"
-        elif self.rb_cut.isChecked():
-            self.selected_type = "Cut"
+        elif self.rb_tunnel_wall.isChecked():
+            self.selected_type = "TunnelWall"
+        elif self.rb_drill_blast.isChecked():
+            self.selected_type = "DrillBlast"
+        elif self.rb_cutter.isChecked():
+            self.selected_type = "Cutter"
         self.accept()
 
 ## Mayur 11-8-2026
@@ -23927,6 +23934,8 @@ class TBMOptionsDialog(QDialog):
             self.selected_option = "Implementation"
         self.accept()
 #####################################################################################
+## Mayur 14-8-2026
+
 
 # ======================================================================================================================================
 #                                   *** Menu Tunnel Configuration Dialog ***
@@ -24112,13 +24121,176 @@ class DiggingOptionsDialog(QDialog):
     def _on_mark_points(self):
         if self.is_marking:
             self.action_selected = "CompletePolygon"
+            if self.parent():
+                self.parent().complete_digging_polygon()
+            self.is_marking = False
+            self.btn_mark_points.setText("Mark Points")
         else:
             self.action_selected = "MarkPoints"
-        self.accept()
+            self.accept()
         
     def _on_cut(self):
         self.action_selected = "Cut"
         self.accept()
+## Mayur 14-8-2026
+class DrillBlastOptionsDialog(QDialog):
+    """Dialog for Drill and Blast options."""
+    def __init__(self, parent=None, is_marking=False):
+        super().__init__(parent)
+        self.setWindowTitle("Drill and Blast Options")
+        self.setMinimumWidth(300)
+        
+        self.is_marking = is_marking
+        
+        main_layout = QVBoxLayout(self)
+        
+        title = QLabel("Drill and Blast Options")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #174ea6;")
+        main_layout.addWidget(title)
+        
+        # Action Group
+        action_group = QGroupBox("Action")
+        action_layout = QVBoxLayout(action_group)
+        
+        self.btn_mark_arc_points = QPushButton("Complete tunnel arc polyline")
+        self.btn_mark_arc_points.clicked.connect(self._on_mark_arc_points)
+        action_layout.addWidget(self.btn_mark_arc_points)
+        
+        main_layout.addWidget(action_group)
+        
+        # Settings Group
+        settings_group = QGroupBox("Settings")
+        grid_layout = QGridLayout(settings_group)
+        
+        current_dist = ""
+        if parent and hasattr(parent, 'drill_blast_distance'):
+            current_dist = str(parent.drill_blast_distance)
+            
+        self.digging_distance_input = QLineEdit(current_dist)
+        self.digging_distance_input.setPlaceholderText("e.g. 10.0")
+        validator = QDoubleValidator()
+        self.digging_distance_input.setValidator(validator)
+        
+        grid_layout.addWidget(QLabel("Tunnel Digging Distance (m):"), 0, 0)
+        grid_layout.addWidget(self.digging_distance_input, 0, 1)
+        
+        main_layout.addWidget(settings_group)
+        
+        # Cut Group
+        cut_group = QGroupBox("Cut")
+        cut_layout = QVBoxLayout(cut_group)
+        
+        self.btn_cut = QPushButton("Cut")
+        self.btn_cut.clicked.connect(self._on_cut_arc)
+        cut_layout.addWidget(self.btn_cut)
+        
+        main_layout.addWidget(cut_group)
+        btn_layout = QHBoxLayout()
+        self.btn_ok = QPushButton("OK")
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_ok.clicked.connect(self._on_ok)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_ok)
+        btn_layout.addWidget(self.btn_cancel)
+        main_layout.addLayout(btn_layout)
+        
+        self.action_selected = None
+        
+    def _on_mark_arc_points(self):
+        config = self.get_config()
+        self.action_selected = "CompleteArc"
+        self.accept()
+        if self.parent():
+            self.parent().complete_drill_blast_arc(config)
+
+    def _on_cut_arc(self):
+        self.action_selected = "CutArc"
+        self.accept()
+
+    def _on_ok(self):
+        self.action_selected = "OK"
+        self.accept()
+        
+    def get_config(self):
+        try:
+            dist = self.digging_distance_input.text().strip()
+            distance = float(dist) if dist else 0.0
+            return {
+                "digging_distance": distance
+            }
+        except ValueError:
+            return {
+                "digging_distance": 0.0
+            }
+## Mayur 17/8/2026
+class ConfigureTunnelArcPointsDialog(QDialog):
+    """Dialog to configure tunnel arc point offsets."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Configure Tunnel Arc Points")
+        self.setMinimumWidth(300)
+        
+        main_layout = QVBoxLayout(self)
+        
+        title = QLabel("Configure Tunnel Arc Points")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #174ea6;")
+        main_layout.addWidget(title)
+        
+        grid_layout = QGridLayout()
+        
+        self.height_offset_input = QLineEdit("")
+        self.height_offset_input.setPlaceholderText("e.g. 3.0")
+        self.height_offset_input.setValidator(QDoubleValidator())
+        
+        self.left_offset_input = QLineEdit("")
+        self.left_offset_input.setPlaceholderText("e.g. 5.0")
+        self.left_offset_input.setValidator(QDoubleValidator())
+        
+        self.right_offset_input = QLineEdit("")
+        self.right_offset_input.setPlaceholderText("e.g. 5.0")
+        self.right_offset_input.setValidator(QDoubleValidator())
+        
+        grid_layout.addWidget(QLabel("Height Offset from Center Line (m):"), 0, 0)
+        grid_layout.addWidget(self.height_offset_input, 0, 1)
+        
+        grid_layout.addWidget(QLabel("Left Offset (m):"), 1, 0)
+        grid_layout.addWidget(self.left_offset_input, 1, 1)
+        
+        grid_layout.addWidget(QLabel("Right Offset (m):"), 2, 0)
+        grid_layout.addWidget(self.right_offset_input, 2, 1)
+        
+        main_layout.addLayout(grid_layout)
+        
+        btn_layout = QHBoxLayout()
+        self.btn_ok = QPushButton("OK")
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_ok)
+        btn_layout.addWidget(self.btn_cancel)
+        main_layout.addLayout(btn_layout)
+        
+    def get_offsets(self):
+        try:
+            h = self.height_offset_input.text().strip()
+            l = self.left_offset_input.text().strip()
+            r = self.right_offset_input.text().strip()
+            
+            return {
+                "height_offset": float(h) if h else 0.0,
+                "left_offset": float(l) if l else 0.0,
+                "right_offset": float(r) if r else 0.0
+            }
+        except ValueError:
+            return {
+                "height_offset": 0.0,
+                "left_offset": 0.0,
+                "right_offset": 0.0
+            }
 ## Mayur 12-8-2026
 class TunnelDiggingConfigDialog(QDialog):
     """Dialog for Tunnel Digging Cut Configuration."""
@@ -24130,17 +24302,30 @@ class TunnelDiggingConfigDialog(QDialog):
         main_layout = QVBoxLayout(self)
         grid_layout = QGridLayout()
         
-        self.left_offset_input = QLineEdit("0.0")
-        self.right_offset_input = QLineEdit("0.0")
-        self.left_wall_height_input = QLineEdit("0.0")
-        self.right_wall_height_input = QLineEdit("0.0")
-        self.depth_offset_input = QLineEdit("0.0")
+        self.left_offset_input = QLineEdit("")
+        self.left_offset_input.setPlaceholderText("e.g. 5.0")
+        
+        self.right_offset_input = QLineEdit("")
+        self.right_offset_input.setPlaceholderText("e.g. 5.0")
+        
+        self.left_wall_height_input = QLineEdit("")
+        self.left_wall_height_input.setPlaceholderText("e.g. 2.5")
+        
+        self.right_wall_height_input = QLineEdit("")
+        self.right_wall_height_input.setPlaceholderText("e.g. 2.5")
+        
+        self.front_wall_height_input = QLineEdit("")
+        self.front_wall_height_input.setPlaceholderText("e.g. 3.0")
+        
+        self.depth_offset_input = QLineEdit("")
+        self.depth_offset_input.setPlaceholderText("e.g. 1.0")
         
         validator = QDoubleValidator()
         self.left_offset_input.setValidator(validator)
         self.right_offset_input.setValidator(validator)
         self.left_wall_height_input.setValidator(validator)
         self.right_wall_height_input.setValidator(validator)
+        self.front_wall_height_input.setValidator(validator)
         self.depth_offset_input.setValidator(validator)
         
         grid_layout.addWidget(QLabel("Left Offset (m):"), 0, 0)
@@ -24155,8 +24340,11 @@ class TunnelDiggingConfigDialog(QDialog):
         grid_layout.addWidget(QLabel("Right Side Wall Height (m):"), 3, 0)
         grid_layout.addWidget(self.right_wall_height_input, 3, 1)
         
-        grid_layout.addWidget(QLabel("Depth Offset (m):"), 4, 0)
-        grid_layout.addWidget(self.depth_offset_input, 4, 1)
+        grid_layout.addWidget(QLabel("Front Wall Height (m):"), 4, 0)
+        grid_layout.addWidget(self.front_wall_height_input, 4, 1)
+        
+        grid_layout.addWidget(QLabel("Depth Offset (m):"), 5, 0)
+        grid_layout.addWidget(self.depth_offset_input, 5, 1)
         
         main_layout.addLayout(grid_layout)
         
@@ -24172,12 +24360,154 @@ class TunnelDiggingConfigDialog(QDialog):
         
     def get_config(self):
         try:
+            def get_val(line_edit):
+                t = line_edit.text().strip()
+                return float(t) if t else 0.0
+                
             return {
-                "left_offset": float(self.left_offset_input.text()),
-                "right_offset": float(self.right_offset_input.text()),
-                "left_wall_height": float(self.left_wall_height_input.text()),
-                "right_wall_height": float(self.right_wall_height_input.text()),
-                "depth_offset": float(self.depth_offset_input.text())
+                "left_offset": get_val(self.left_offset_input),
+                "right_offset": get_val(self.right_offset_input),
+                "left_wall_height": get_val(self.left_wall_height_input),
+                "right_wall_height": get_val(self.right_wall_height_input),
+                "front_wall_height": get_val(self.front_wall_height_input),
+                "depth_offset": get_val(self.depth_offset_input)
+            }
+        except ValueError:
+            return None
+## Mayur 13-8-2026
+# ======================================================================================================================================
+#                                   *** Tunnel Wall Configuration Dialog ***
+# ======================================================================================================================================
+class TunnelWallConfigurationDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Tunnel Wall Configuration")
+        self.setModal(True)
+        self.setMinimumWidth(350)
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #eef4ff, stop:1 #f8fbff);
+            }
+            QLabel {
+                color: #1f2937;
+                font-weight: 600;
+                font-size: 14px;
+            }
+            QLineEdit {
+                padding: 6px;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QRadioButton {
+                font-size: 14px;
+                color: #374151;
+            }
+            QPushButton {
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-width: 80px;
+                border: none;
+            }
+            QPushButton#okBtn {
+                background-color: #16a34a;
+                color: white;
+            }
+            QPushButton#okBtn:hover {
+                background-color: #15803d;
+            }
+            QPushButton#cancelBtn {
+                background-color: #e5e7eb;
+                color: #111827;
+            }
+            QPushButton#cancelBtn:hover {
+                background-color: #d1d5db;
+            }
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #d1d5db;
+                border-radius: 5px;
+                margin-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 3px 0 3px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        # Wall Position
+        position_group = QGroupBox("Wall Position")
+        position_layout = QVBoxLayout()
+        
+        self.rb_front = QRadioButton("Front Side Wall")
+        self.rb_end = QRadioButton("End Side Wall")
+        self.rb_both = QRadioButton("Both")
+        self.rb_both.setChecked(True)
+        
+        position_layout.addWidget(self.rb_front)
+        position_layout.addWidget(self.rb_end)
+        position_layout.addWidget(self.rb_both)
+        position_group.setLayout(position_layout)
+        layout.addWidget(position_group)
+        
+        # Parameters
+        param_layout = QGridLayout()
+        param_layout.setVerticalSpacing(10)
+        
+        self.left_offset_input = QLineEdit("0.0")
+        self.right_offset_input = QLineEdit("0.0")
+        self.height_input = QLineEdit("3.0")
+        self.wall_thickness_input = QLineEdit("1.0")
+        
+        param_layout.addWidget(QLabel("Left Offset (m):"), 0, 0)
+        param_layout.addWidget(self.left_offset_input, 0, 1)
+        
+        param_layout.addWidget(QLabel("Right Offset (m):"), 1, 0)
+        param_layout.addWidget(self.right_offset_input, 1, 1)
+        
+        param_layout.addWidget(QLabel("Height (m):"), 2, 0)
+        param_layout.addWidget(self.height_input, 2, 1)
+
+        param_layout.addWidget(QLabel("Wall Thickness (m):"), 3, 0)
+        param_layout.addWidget(self.wall_thickness_input, 3, 1)
+        
+        layout.addLayout(param_layout)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        self.btn_ok = QPushButton("OK")
+        self.btn_ok.setObjectName("okBtn")
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setObjectName("cancelBtn")
+        
+        self.btn_ok.clicked.connect(self.accept)
+        self.btn_cancel.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.btn_ok)
+        btn_layout.addWidget(self.btn_cancel)
+        layout.addLayout(btn_layout)
+
+    def get_config(self):
+        try:
+            position = "Both"
+            if self.rb_front.isChecked(): position = "Front Side Wall"
+            elif self.rb_end.isChecked(): position = "End Side Wall"
+            
+            return {
+                "Wall Position": position,
+                "Left Offset (m)": float(self.left_offset_input.text()),
+                "Right Offset (m)": float(self.right_offset_input.text()),
+                "Height (m)": float(self.height_input.text()),
+                "Wall Thickness (m)": float(self.wall_thickness_input.text())
             }
         except ValueError:
             return None

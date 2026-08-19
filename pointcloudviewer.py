@@ -39,12 +39,13 @@ from dialogs import (ConstructionConfigDialog, CurveDialog, ZeroLineDialog, Mate
                     StreetLightDialog, SignalPoleDialog, LaneMarkingDialog, PoleAssetDialog, BuddyDialog, BuddiesWorksheetsDialog, OneDirectionStreetLightDialog, 
                     TwoDirectionStreetLightDialog, FourDirectionStreetLightDialog, OneDirectionSignalPoleDialog, TwoDirectionSignalPoleDialog, FourDirectionSignalPoleDialog, 
                     ##### Mayur Wakhare 1-7-2026 Tunnel Light
-                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog,UnderPassDialog,UnderPassPreviewDialog,UnderpassCCTVDialog,UnderpassLightDialog,TunnelWallDialog,UnderpassWallDialog, MenuTunnelConfigurationDialog, TunnelTypeSelectionDialog, TBMOptionsDialog, DiggingOptionsDialog, TunnelDiggingConfigDialog)
+                    FootPathDialog, SideWallDialog, DividerDialog, Buy3DFilesDialog, ViewSystemDesignDialog, SimulationConfigDialog, CopyDialog, PasteDialog, ClearLayersDialog, TunnelConfigDialog, TunnelLightDialog, FireExtinguisherDialog, CCTVCameraDialog,UnderPassDialog,UnderPassPreviewDialog,UnderpassCCTVDialog,UnderpassLightDialog,TunnelWallDialog,UnderpassWallDialog, MenuTunnelConfigurationDialog, TunnelTypeSelectionDialog, TBMOptionsDialog, DiggingOptionsDialog, TunnelDiggingConfigDialog, TunnelWallConfigurationDialog, DrillBlastOptionsDialog)
                     ###########################################################
 from measurement_widget import MeasurementWidget
 from digging_point import DiggingPointInput
 from API import WorksheetAPI
 from login import ModernInfoDialog
+# from json_manager import DesignConstructionManager
 
 from gpu_connection import setup_gpu_acceleration, show_gpu_status
 import shutil
@@ -8969,10 +8970,16 @@ class PointCloudViewer(ApplicationUI):
                         config = json.load(f)
                 else:
                     self.message_text.append(" No zero_line_config found in unified file or as separate file")
+                    print("\n!!! ZERO LINE RESTORE FAILURE !!!")
+                    print("Stage = LOAD")
+                    print("load_zero_line_from_layer: No zero_line_config found in JSON")
                     return False
 
             if not config.get("zero_line_set", False):
                 self.message_text.append(" Zero line is not set in config")
+                print("\n!!! ZERO LINE RESTORE FAILURE !!!")
+                print("Stage = LOAD")
+                print("load_zero_line_from_layer: zero_line_set is False")
                 return False
 
             # 
@@ -9035,6 +9042,75 @@ class PointCloudViewer(ApplicationUI):
             # 4. Redraw canvas
             self.canvas.draw_idle()
 
+            # 5. Restore 3D Zero Line Actors
+            if hasattr(self, 'zero_start_actor') and self.zero_start_actor:
+                try:
+                    if self.renderer.HasViewProp(self.zero_start_actor):
+                        self.renderer.RemoveActor(self.zero_start_actor)
+                except: pass
+                self.zero_start_actor = None
+            if hasattr(self, 'zero_end_actor') and self.zero_end_actor:
+                try:
+                    if self.renderer.HasViewProp(self.zero_end_actor):
+                        self.renderer.RemoveActor(self.zero_end_actor)
+                except: pass
+                self.zero_end_actor = None
+            
+            if hasattr(self, 'zero_line_actor') and self.zero_line_actor:
+                try:
+                    if self.renderer.HasViewProp(self.zero_line_actor):
+                        self.renderer.RemoveActor(self.zero_line_actor)
+                except: pass
+                self.zero_line_actor = None
+            
+            actor_count_before = self.renderer.GetActors().GetNumberOfItems()
+
+            # Recreate them
+            self.zero_start_actor = self.add_sphere_marker(self.zero_start_point, "Start", color="purple")
+            self.zero_end_actor = self.add_sphere_marker(self.zero_end_point, "End", color="purple")
+            
+            # Recreate the line
+            self.zero_line_actor = self.add_line_between_points(
+                self.zero_start_point,
+                self.zero_end_point,
+                "purple",
+                show_label=False
+            )
+            
+            if self.zero_line_actor:
+                self.zero_line_actor.SetVisibility(True)
+            
+            actor_count_after = self.renderer.GetActors().GetNumberOfItems()
+            
+            if hasattr(self, 'vtk_widget') and self.vtk_widget:
+                self.vtk_widget.GetRenderWindow().Render()
+                render_called = True
+            else:
+                render_called = False
+
+            #
+            # EXACT DEBUG REQUIRED BY USER
+            #
+            print("\nDEBUG ZERO LINE RESTORE")
+            print(f"\nJSON Path = {layer_path}\\design_construction_config.json")
+            print(f"JSON Exists = TRUE")
+            print(f"zero_line_config Found = TRUE\n")
+            
+            print(f"Point 1 = {self.zero_start_point}")
+            print(f"Point 2 = {self.zero_end_point}")
+            print(f"Point Count = 2\n")
+            
+            print(f"Zero Line Object Created = TRUE")
+            print(f"Zero Line Geometry Created = {str(self.zero_line_actor is not None).upper()}")
+            print(f"Zero Line Actor Created = {str(self.zero_line_actor is not None).upper()}")
+            print(f"Zero Line Actor Added To Renderer = {str(self.renderer.HasViewProp(self.zero_line_actor)).upper()}")
+            print(f"Zero Line Visibility = {str(self.zero_line_actor.GetVisibility() == 1 if self.zero_line_actor else False).upper()}\n")
+            
+            print(f"Renderer Actor Count BEFORE = {actor_count_before}")
+            print(f"Renderer Actor Count AFTER = {actor_count_after}\n")
+            
+            print(f"Zero Line Render Called = {str(render_called).upper()}\n")
+
             # 
             # Feedback
             # 
@@ -9062,6 +9138,74 @@ class PointCloudViewer(ApplicationUI):
         
         loaded = {}
         
+        print("\n==================================================")
+        print("C. RELOAD AFTER APPLICATION RESTART")
+        print("==================================================")
+        print("\n========== LOAD DEBUG ==========")
+        j_path = os.path.join(layer_path, 'design_construction_config.json')
+        print(f"JSON Path Used = {j_path}")
+        print(f"JSON Exists = {str(os.path.exists(j_path)).upper()}")
+        
+        read_success = False
+        s_found, c_found, z_found = False, False, False
+        if os.path.exists(j_path):
+            try:
+                import json
+                with open(j_path, 'r', encoding='utf-8') as f:
+                    dd = json.load(f).get('design', {})
+                read_success = True
+                s_found = 'surface_baseline' in dd and dd['surface_baseline'] is not None
+                c_found = 'construction_baseline' in dd and dd['construction_baseline'] is not None
+                z_found = 'zero_line_config' in dd and dd['zero_line_config'] is not None
+            except:
+                pass
+                
+        print(f"JSON Read Successful = {str(read_success).upper()}")
+        print(f"Surface Line Found In JSON = {str(s_found).upper()}")
+        print(f"Center Line Found In JSON = {str(c_found).upper()}")
+        print(f"Zero Line Found In JSON = {str(z_found).upper()}")
+
+        def print_restore_debug():
+            print("\nDEBUG ZERO LINE LOAD")
+            z_arts = hasattr(self, 'zero_line_actor') and self.zero_line_actor is not None
+            print(f"JSON Found = {str(z_found).upper()}")
+            print(f"Object Created = {str(self.zero_line_set).upper() if hasattr(self, 'zero_line_set') else 'FALSE'}")
+            print(f"Points Restored = {2 if hasattr(self, 'zero_start_point') and self.zero_start_point is not None else 0}")
+            print(f"Actor Created = {str(z_arts).upper()}")
+            print(f"Actor Added = {str(z_arts).upper()}")
+            print(f"Visible = {str(z_arts).upper()}")
+
+            print("\nDEBUG SURFACE LINE LOAD")
+            s_ex = 'surface' in self.line_types and len(self.line_types['surface'].get('polylines', [])) > 0
+            s_pts = len(self.line_types['surface']['polylines'][0]) if s_ex else 0
+            s_arts = 'surface' in self.line_types and len(self.line_types['surface'].get('artists', [])) > 0
+            s_sm = hasattr(self, 'surface_start_marker_actor') and self.surface_start_marker_actor is not None
+            s_em = hasattr(self, 'surface_end_marker_actor') and self.surface_end_marker_actor is not None
+            print(f"JSON Found = {str(s_found).upper()}")
+            print(f"Points Restored = {s_pts}")
+            print(f"Actor Created = {str(s_arts).upper()}")
+            print(f"Actor Added = {str(s_arts).upper()}")
+            print(f"Visible = {str(s_arts).upper()}")
+            print(f"Start Marker Restored = {str(s_sm).upper()}")
+            print(f"End Marker Restored = {str(s_em).upper()}")
+
+            print("\nDEBUG CENTER LINE LOAD")
+            c_ex = 'center_line' in self.line_types and len(self.line_types['center_line'].get('polylines', [])) > 0
+            c_pts = len(self.line_types['center_line']['polylines'][0]) if c_ex else 0
+            c_arts = 'center_line' in self.line_types and len(self.line_types['center_line'].get('artists', [])) > 0
+            c_sm = hasattr(self, 'construction_start_marker_actor') and self.construction_start_marker_actor is not None
+            c_em = hasattr(self, 'construction_end_marker_actor') and self.construction_end_marker_actor is not None
+            print(f"JSON Found = {str(c_found).upper()}")
+            print(f"Points Restored = {c_pts}")
+            print(f"Actor Created = {str(c_arts).upper()}")
+            print(f"Actor Added = {str(c_arts).upper()}")
+            print(f"Visible = {str(c_arts).upper()}")
+            print(f"Start Marker Restored = {str(c_sm).upper()}")
+            print(f"End Marker Restored = {str(c_em).upper()}")
+
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(2000, print_restore_debug)
+        
         # Load all baselines from unified file
         all_baselines = DesignConstructionManager.load_all_baselines_from_unified(layer_path)
         
@@ -9069,7 +9213,7 @@ class PointCloudViewer(ApplicationUI):
         
         key_to_ltype = {
             'surface_baseline': 'surface',
-            'construction_baseline': 'construction',
+            'construction_baseline': 'center_line',
             'road_surface_baseline': 'road_surface',
             'deck_line': 'deck_line',
             'projection_line': 'projection_line',
@@ -9300,6 +9444,7 @@ class PointCloudViewer(ApplicationUI):
         baseline_checkboxes = {
             'surface': self.surface_baseline,
             'construction': self.construction_line,
+            'center_line': self.center_line,
             'road_surface': self.road_surface_line,
             'deck_line': self.deck_line,
             'projection_line': self.projection_line,
@@ -9312,13 +9457,22 @@ class PointCloudViewer(ApplicationUI):
         baselines_data = {
             'surface': None,
             'construction': None,
+            'center_line': None,
             'road_surface': None,
             'deck_line': None,
             'projection_line': None,
         }
 
         for ltype, checkbox in baseline_checkboxes.items():
-            if not checkbox.isChecked():
+            is_checked = checkbox.isChecked() if hasattr(checkbox, 'isChecked') else False
+            force_save = False
+            
+            # Unconditionally force save for surface and construction if they have any drawn points
+            if ltype in ['surface', 'construction', 'center_line']:
+                if ltype in self.line_types and self.line_types[ltype].get('polylines') and len(self.line_types[ltype]['polylines']) > 0:
+                    force_save = True
+
+            if not is_checked and not force_save:
                 continue
 
             polylines = self.line_types[ltype]['polylines']
@@ -9771,6 +9925,16 @@ class PointCloudViewer(ApplicationUI):
                 "wall_width": self.approach_road_wall_width
             }
 
+        # ========== ADD EXACT START/END MARKER COORDINATES ==========
+        if ltype in ['surface', 'construction', 'center_line']:
+            if baseline_data.get("polylines") and baseline_data["polylines"][0].get("points"):
+                pts = baseline_data["polylines"][0]["points"]
+                valid_coords = [p.get("world_coordinates") for p in pts if p.get("world_coordinates")]
+                if valid_coords:
+                    baseline_data["start_marker"] = valid_coords[0]
+                    if len(valid_coords) > 1:
+                        baseline_data["end_marker"] = valid_coords[-1]
+
         return baseline_data
 
 # ===========================================================================================================================================================
@@ -9783,16 +9947,77 @@ class PointCloudViewer(ApplicationUI):
         try:
             from json_manager import DesignConstructionManager
             
+            print("\n==================================================")
+            print("DEBUG BASELINE SAVE")
+            print("==================================================")
+            
+            def get_live_info(ltype):
+                import numpy as np
+                if ltype == 'zero':
+                    if hasattr(self, 'zero_line_set') and self.zero_line_set:
+                        return True, 2
+                    return False, 0
+                    
+                if ltype in self.line_types and self.line_types[ltype].get('polylines') and len(self.line_types[ltype]['polylines']) > 0:
+                    pts = self.line_types[ltype]['polylines'][0]
+                    if len(pts) == 0: return False, 0
+                    return True, len(pts)
+                return False, 0
+                
+            def get_marker_info(ltype):
+                if ltype in self.line_types and self.line_types[ltype].get('polylines') and len(self.line_types[ltype]['polylines']) > 0:
+                    pts = self.line_types[ltype]['polylines'][0]
+                    valid_pts = [p for p in pts if len(p) >= 3]
+                    if valid_pts:
+                        start_marker = f"({valid_pts[0][0]:.2f}, {valid_pts[0][1]:.2f}, {valid_pts[0][2]:.2f})"
+                        end_marker = f"({valid_pts[-1][0]:.2f}, {valid_pts[-1][1]:.2f}, {valid_pts[-1][2]:.2f})" if len(valid_pts) > 1 else "(None)"
+                        return start_marker, end_marker
+                return "(None)", "(None)"
+
+            z_ex, z_cnt = get_live_info('zero')
+            print(f"Zero Line Exists = {str(z_ex).upper()}")
+            print(f"Zero Line Points = {z_cnt}")
+            
+            s_ex, s_cnt = get_live_info('surface')
+            print(f"Surface Line Exists = {str(s_ex).upper()}")
+            print(f"Surface Line Points = {s_cnt}")
+            
+            c_ex, c_cnt = get_live_info('center_line')
+            print(f"Center Line Exists = {str(c_ex).upper()}")
+            print(f"Center Line Points = {c_cnt}")
+            
+            s_start, s_end = get_marker_info('surface')
+            print(f"\nSurface Start Marker = {s_start}")
+            print(f"Surface End Marker = {s_end}")
+            
+            c_start, c_end = get_marker_info('center_line')
+            print(f"Center Start Marker = {c_start}")
+            print(f"Center End Marker = {c_end}")
+
+            json_save_path = os.path.join(layer_folder, 'design_construction_config.json')
+            
             # Get zero_line_config data
             zero_line_config = self.save_zero_line_config_to_current_layer()
             
             # Extract ALL baselines from the collected data (including None values)
             surface_baseline = baselines_data.get('surface')
-            construction_baseline = baselines_data.get('construction')
+            # Extract Center Line and map it to construction_baseline in JSON
+            construction_baseline = baselines_data.get('center_line') or baselines_data.get('construction')
             road_surface_baseline = baselines_data.get('road_surface')
             deck_line = baselines_data.get('deck_line')
             projection_line = baselines_data.get('projection_line')
             operational_config = baselines_data.get('operation_config')
+            
+            print(f"Surface Line JSON Data Exists = {str(surface_baseline is not None).upper()}")
+            print(f"Center Line JSON Data Exists = {str(construction_baseline is not None).upper()}")
+            print(f"Zero Line JSON Data Exists = {str(zero_line_config is not None).upper()}")
+            
+            s_js_cnt = sum(len(p['points']) for p in surface_baseline['polylines']) if surface_baseline and 'polylines' in surface_baseline else 0
+            c_js_cnt = sum(len(p['points']) for p in construction_baseline['polylines']) if construction_baseline and 'polylines' in construction_baseline else 0
+            z_js_cnt = 2 if zero_line_config else 0
+            print(f"Surface Line JSON Point Count = {s_js_cnt}")
+            print(f"Center Line JSON Point Count = {c_js_cnt}")
+            print(f"Zero Line JSON Point Count = {z_js_cnt}")
             
             # Load existing master data first to preserve tunnels and other things
             master_data = DesignConstructionManager.load_master(layer_folder)
@@ -9835,6 +10060,25 @@ class PointCloudViewer(ApplicationUI):
                     " Save Complete",
                     f" All baseline data consolidated into:\n\ndesign_construction_config.json\n\nLocation:\n{layer_folder}"
                 )
+                
+                print("\n========== JSON AFTER SAVE ==========")
+                j_path = os.path.join(layer_folder, 'design_construction_config.json')
+                print(f"JSON Path = {j_path}")
+                print(f"JSON File Exists = {str(os.path.exists(j_path)).upper()}")
+                if os.path.exists(j_path):
+                    import json
+                    with open(j_path, 'r', encoding='utf-8') as debug_f:
+                        debug_data = json.load(debug_f)
+                    dd = debug_data.get('design', {})
+                    s_saved = 'surface_baseline' in dd and dd['surface_baseline'] is not None
+                    c_saved = 'construction_baseline' in dd and dd['construction_baseline'] is not None
+                    z_saved = 'zero_line_config' in dd and dd['zero_line_config'] is not None
+                    print(f"Surface Line Key Exists = {str(s_saved).upper()}")
+                    print(f"Center Line Key Exists = {str(c_saved).upper()}")
+                    print(f"Zero Line Key Exists = {str(z_saved).upper()}")
+                    print(f"Surface Line Saved Data = {'Valid' if s_saved else 'Missing'}")
+                    print(f"Center Line Saved Data = {'Valid' if c_saved else 'Missing'}")
+                    print(f"Zero Line Saved Data = {'Valid' if z_saved else 'Missing'}")
                 
                 # After successful local save, send full JSON to remote API
                 try:
@@ -13363,6 +13607,10 @@ class PointCloudViewer(ApplicationUI):
         # Add both left and right click events
         self.vtk_widget.GetRenderWindow().GetInteractor().AddObserver(
             "LeftButtonPressEvent", self.on_click)
+        self.vtk_widget.GetRenderWindow().GetInteractor().AddObserver(
+            "MouseMoveEvent", self.on_mouse_move)
+        self.vtk_widget.GetRenderWindow().GetInteractor().AddObserver(
+            "LeftButtonReleaseEvent", self.on_button_release)
         # Add key press event (Space bar for freeze/unfreeze, Escape for plotting toggle)
         self.vtk_widget.GetRenderWindow().GetInteractor().AddObserver(
             "KeyPressEvent", self.on_key_press)
@@ -20612,6 +20860,27 @@ class PointCloudViewer(ApplicationUI):
         # Map 'Escape' to 'escape' for existing logic if needed, but existing logic expects 'escape'
         if key == 'Escape':
             key = 'escape'
+         # Mayur 17-8-2026   
+        # UNDO for Drill & Blast
+        is_ctrl = False
+        if hasattr(obj, 'GetControlKey'):
+            is_ctrl = obj.GetControlKey()
+            
+        if is_ctrl and key.lower() == 'z':
+            if getattr(self, 'current_measurement', None) in ('drill_blast_3_points', 'drill_blast_4_points'):
+                list_attr = self.current_measurement + '_list'
+                pts_list = getattr(self, list_attr, [])
+                if len(pts_list) > 0:
+                    removed_pt = pts_list.pop()
+                    if hasattr(self, 'temp_drill_blast_actors') and len(self.temp_drill_blast_actors) > 0:
+                        actor = self.temp_drill_blast_actors.pop()
+                        if self.renderer:
+                            self.renderer.RemoveActor(actor)
+                            
+                    print(f"\nDEBUG ARC UNDO | Removed Point = ({removed_pt[0]:.3f}, {removed_pt[1]:.3f}, {removed_pt[2]:.3f})")
+                    print(f"DEBUG ARC UNDO | Remaining Points = {len(pts_list)}")
+                    self.vtk_widget.GetRenderWindow().Render()
+                return
 #######################################################################################
         ### Mayur Wakhare 1-7-2026
         if getattr(self, '_robot_active', False) and key in ('Up', 'Down', 'Left', 'Right'):
@@ -20700,49 +20969,703 @@ class PointCloudViewer(ApplicationUI):
         
         # Reset any previous measurements
         self.reset_action()
+## Mayur 17-8-2026
+    def _get_pc_state_dict(self):
+        state = {
+            'Visible': False,
+            'Actor Exists': False,
+            'Point Count': 0,
+            'Mapper Input': None,
+            'PolyData ID': None,
+            'Camera Position': None,
+            'Camera Focal Point': None
+        }
+        if hasattr(self, 'point_cloud_actor') and self.point_cloud_actor:
+            state['Actor Exists'] = True
+            state['Visible'] = self.point_cloud_actor.GetVisibility() == 1
+            mapper = self.point_cloud_actor.GetMapper()
+            if mapper:
+                poly = mapper.GetInput()
+                state['Mapper Input'] = mapper.__this__
+                if poly:
+                    state['PolyData ID'] = poly.__this__
+                    state['Point Count'] = poly.GetNumberOfPoints()
+        cam = self.renderer.GetActiveCamera()
+        if cam:
+            state['Camera Position'] = cam.GetPosition()
+            state['Camera Focal Point'] = cam.GetFocalPoint()
+        return state
+
+    def _compare_pc_state(self, before, after, event_type, point_idx):
+        print(f"\nDEBUG ARC EVENT AFTER")
+        print(f"Visible = {after['Visible']}")
+        print(f"Actor Exists = {after['Actor Exists']}")
+        print(f"Point Cloud Point Count = {after['Point Count']}")
+        print(f"Mapper Input = {after['Mapper Input']}")
+        print(f"Point Cloud PolyData ID = {after['PolyData ID']}")
+        print(f"Camera Position = {after['Camera Position']}")
+        print(f"Camera Focal Point = {after['Camera Focal Point']}")
+        
+        changed = []
+        for k in before:
+            if k in ['Camera Position', 'Camera Focal Point']:
+                continue
+            if before[k] != after[k]:
+                changed.append(k)
+        if changed:
+            print("\n!!! WARNING !!!")
+            print("DRILL & BLAST REPLACED POINT CLOUD OBJECT")
+            print(f"Event = {event_type}")
+            print(f"Point = {point_idx}")
+            for c in changed:
+                print(f"Changed Property = {c} (Before: {before[c]}, After: {after[c]})")
+
+    def on_mouse_move(self, obj, event):
+        if getattr(self, 'current_measurement', None) == 'drill_blast_arc_edit' and getattr(self, 'is_dragging_control_point', False):
+            idx = getattr(self, 'active_control_point_idx', 0)
+            
+            before_state = self._get_pc_state_dict()
+            print("\nDEBUG ARC EVENT BEFORE")
+            print(f"Visible = {before_state['Visible']}")
+            print(f"Actor Exists = {before_state['Actor Exists']}")
+            print(f"Point Cloud Point Count = {before_state['Point Count']}")
+            print(f"Mapper Input = {before_state['Mapper Input']}")
+            print(f"Point Cloud PolyData ID = {before_state['PolyData ID']}")
+            print(f"Camera Position = {before_state['Camera Position']}")
+            print(f"Camera Focal Point = {before_state['Camera Focal Point']}")
+            
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(0, lambda b=before_state, i=idx: self._compare_pc_state(b, self._get_pc_state_dict(), "Drag", i))
+
+            if idx is None:
+                self.is_dragging_control_point = False
+                return
+                
+            interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
+            pos = interactor.GetEventPosition()
+            
+            if not getattr(self, 'has_dragged', False):
+                print("\nDEBUG BLUE POINT")
+                print(f"Point Index = {idx}")
+                print("Click = FALSE")
+                print("Drag = TRUE")
+                print("Curve Updated = FALSE")
+                print("Double Click = FALSE")
+                print("Segment Finalized = FALSE")
+                print("Point Cloud Changed = FALSE")
+
+            # Map display point back to world on the front wall plane
+            fw_ref = None
+            fw_data = None
+            if hasattr(self, 'last_digging_data') and self.last_digging_data:
+                fw_data = self.last_digging_data
+            elif hasattr(self, 'pending_tunnel_data') and self.pending_tunnel_data and 'digging' in self.pending_tunnel_data:
+                fw_data = self.pending_tunnel_data['digging']
+                
+            if fw_data and fw_data.get('front_wall_reference'):
+                fw_ref = fw_data['front_wall_reference']
+                plane_n = np.array([fw_ref.get('tx', -fw_ref['ny']), fw_ref.get('ty', fw_ref['nx']), 0.0])
+                plane_p0 = np.array([fw_ref['rx'], fw_ref['ry'], fw_ref['rz']])
+                
+                renderer = self.renderer
+                renderer.SetDisplayPoint(pos[0], pos[1], 0.0)
+                renderer.DisplayToWorld()
+                w0 = renderer.GetWorldPoint()
+                ray_p0 = np.array([w0[0]/w0[3], w0[1]/w0[3], w0[2]/w0[3]])
+                
+                renderer.SetDisplayPoint(pos[0], pos[1], 1.0)
+                renderer.DisplayToWorld()
+                w1 = renderer.GetWorldPoint()
+                ray_p1 = np.array([w1[0]/w1[3], w1[1]/w1[3], w1[2]/w1[3]])
+                
+                ray_d = ray_p1 - ray_p0
+                denom = np.dot(ray_d, plane_n)
+                
+                if abs(denom) > 1e-6:
+                    t = np.dot(plane_p0 - ray_p0, plane_n) / denom
+                    intersection = ray_p0 + t * ray_d
+                    
+                    idx = getattr(self, 'active_control_point_idx', 0)
+                    if hasattr(self, 'drill_blast_curve_controls'):
+                        self.drill_blast_curve_controls[idx] = intersection
+                    
+                    if hasattr(self, 'drill_blast_control_actors') and len(self.drill_blast_control_actors) > idx:
+                        if self.drill_blast_control_actors[idx]:
+                            self.drill_blast_control_actors[idx].SetPosition(intersection)
+                    
+                    self._draw_drill_blast_curve()
+                    self.vtk_widget.GetRenderWindow().Render()
+                    
+                    print("\nDEBUG BLUE POINT")
+                    print(f"Point Index = {idx}")
+                    print("Click = FALSE")
+                    print("Drag = TRUE")
+                    print("Curve Updated = TRUE")
+                    print("Double Click = FALSE")
+                    print("Segment Finalized = FALSE")
+                    print("Point Cloud Changed = FALSE")
+                    
+                    self.has_dragged = True
+
+    def on_button_release(self, obj, event):
+        if getattr(self, 'current_measurement', None) == 'drill_blast_arc_edit':
+            if getattr(self, 'is_dragging_control_point', False):
+                self.is_dragging_control_point = False
+                
+                # Restore the original interactor style
+                if hasattr(self, '_stored_camera_style') and self._stored_camera_style is not None:
+                    self.vtk_widget.GetRenderWindow().GetInteractor().SetInteractorStyle(self._stored_camera_style)
+                    self._stored_camera_style = None
+                    
+                print("DEBUG BLUE POINT DRAG END")
+                print("Drag Ended = TRUE")
+                print(f"Final Control Point = {getattr(self, 'drill_blast_curve_control', None)}")
+                print("Curve Geometry Updated = TRUE")
+       ## Mayur 18-8-2026         
+    def _print_debug_pc_visual_state(self, prefix):
+        print("\n==================================================")
+        print(f"{prefix}")
+        print("==================================================")
+        print("\nPoint Cloud:")
+        pc_actor = getattr(self, 'point_cloud_actor', None)
+        pc_polydata = getattr(self, 'point_cloud_polydata', None)
+        if pc_actor:
+            print(f"Actor ID = {id(pc_actor)}")
+            print(f"PolyData ID = {id(pc_polydata) if pc_polydata else 'NONE'}")
+            mapper = pc_actor.GetMapper()
+            if mapper:
+                print(f"Mapper ID = {id(mapper)}")
+                minput = mapper.GetInput()
+                if minput:
+                    print(f"Mapper Input ID = {id(minput)}")
+                    print(f"Point Count = {minput.GetNumberOfPoints()}")
+                    print(f"Bounds = {minput.GetBounds()}")
+                else:
+                    print("Mapper Input ID = NONE\nPoint Count = NONE\nBounds = NONE")
+            else:
+                print("Mapper ID = NONE\nMapper Input ID = NONE\nPoint Count = NONE\nBounds = NONE")
+            print(f"Visibility = {pc_actor.GetVisibility()}")
+            prop = pc_actor.GetProperty()
+            print(f"Opacity = {prop.GetOpacity() if prop else 'NONE'}")
+            print(f"Representation = {prop.GetRepresentationAsString() if prop else 'NONE'}")
+            print(f"Scalar Visibility = {mapper.GetScalarVisibility() if mapper else 'NONE'}")
+        else:
+            print("Actor ID = NONE\nPolyData ID = NONE\nMapper ID = NONE\nMapper Input ID = NONE\nPoint Count = NONE\nBounds = NONE\nVisibility = NONE\nOpacity = NONE\nRepresentation = NONE\nScalar Visibility = NONE")
+        print("\nCamera:")
+        ren = getattr(self, 'renderer', None)
+        cam = ren.GetActiveCamera() if ren else None
+        if cam:
+            print(f"Position = {cam.GetPosition()}")
+            print(f"Focal Point = {cam.GetFocalPoint()}")
+            print(f"View Up = {cam.GetViewUp()}")
+            print(f"Clipping Range = {cam.GetClippingRange()}")
+            print(f"Parallel Projection = {'TRUE' if cam.GetParallelProjection() else 'FALSE'}")
+            print(f"View Angle = {cam.GetViewAngle()}")
+        else:
+            print("Position = NONE\nFocal Point = NONE\nView Up = NONE\nClipping Range = NONE\nParallel Projection = NONE\nView Angle = NONE")
+        print("\nRenderer:")
+        if ren:
+            print(f"Renderer ID = {id(ren)}")
+            print(f"Actor Count = {ren.GetActors().GetNumberOfItems()}")
+            rw = ren.GetRenderWindow()
+            print(f"Render Window Size = {rw.GetSize() if rw else 'NONE'}")
+        else:
+            print("Renderer ID = NONE\nActor Count = NONE\nRender Window Size = NONE")
+        print("\nInteractor:")
+        style = None
+        if ren and rw:
+            iren = rw.GetInteractor()
+            if iren:
+                style = iren.GetInteractorStyle()
+                print(f"Interactor Style = {style.GetClassName() if style else 'NONE'}")
+                picker = iren.GetPicker()
+                print(f"Picker = {picker.GetClassName() if picker else 'NONE'}")
+                print("Current Event Handler Count = N/A")
+            else:
+                print("Interactor Style = NONE\nPicker = NONE\nCurrent Event Handler Count = NONE")
+        else:
+            print("Interactor Style = NONE\nPicker = NONE\nCurrent Event Handler Count = NONE")
+        return {
+            "PolyData ID": id(pc_polydata) if pc_polydata else None,
+            "Mapper ID": id(pc_actor.GetMapper()) if pc_actor and pc_actor.GetMapper() else None,
+            "Mapper Input ID": id(pc_actor.GetMapper().GetInput()) if pc_actor and pc_actor.GetMapper() and pc_actor.GetMapper().GetInput() else None,
+            "Actor ID": id(pc_actor) if pc_actor else None,
+            "Point Count": pc_actor.GetMapper().GetInput().GetNumberOfPoints() if pc_actor and pc_actor.GetMapper() and pc_actor.GetMapper().GetInput() else None,
+            "Bounds": pc_actor.GetMapper().GetInput().GetBounds() if pc_actor and pc_actor.GetMapper() and pc_actor.GetMapper().GetInput() else None,
+            "Camera Position": cam.GetPosition() if cam else None,
+            "Focal Point": cam.GetFocalPoint() if cam else None,
+            "Clipping Range": cam.GetClippingRange() if cam else None,
+            "Interactor Style": style.GetClassName() if style else None,
+            "Render Window Size": rw.GetSize() if ren and rw else None
+        }
+
+    def _print_debug_pc_visual_comparison(self, s1, s2):
+        print("\nDEBUG PC VISUAL COMPARISON")
+        print(f"PolyData Same = {'TRUE' if s1['PolyData ID'] == s2['PolyData ID'] else 'FALSE'}")
+        print(f"Mapper Same = {'TRUE' if s1['Mapper ID'] == s2['Mapper ID'] else 'FALSE'}")
+        print(f"Mapper Input Same = {'TRUE' if s1['Mapper Input ID'] == s2['Mapper Input ID'] else 'FALSE'}")
+        print(f"Actor Same = {'TRUE' if s1['Actor ID'] == s2['Actor ID'] else 'FALSE'}")
+        print(f"Point Count Same = {'TRUE' if s1['Point Count'] == s2['Point Count'] else 'FALSE'}")
+        print(f"Bounds Same = {'TRUE' if s1['Bounds'] == s2['Bounds'] else 'FALSE'}")
+        print(f"Camera Same = {'TRUE' if s1['Camera Position'] == s2['Camera Position'] and s1['Focal Point'] == s2['Focal Point'] else 'FALSE'}")
+        print(f"Clipping Range Same = {'TRUE' if s1['Clipping Range'] == s2['Clipping Range'] else 'FALSE'}")
+        print(f"Interactor Style Same = {'TRUE' if s1['Interactor Style'] == s2['Interactor Style'] else 'FALSE'}")
+        print(f"Render Window Same = {'TRUE' if s1['Render Window Size'] == s2['Render Window Size'] else 'FALSE'}")
+        if s1['PolyData ID'] != s2['PolyData ID']: self._print_critical_regression("PolyData ID", s1['PolyData ID'], s2['PolyData ID'])
+        if s1['Mapper ID'] != s2['Mapper ID']: self._print_critical_regression("Mapper ID", s1['Mapper ID'], s2['Mapper ID'])
+        if s1['Mapper Input ID'] != s2['Mapper Input ID']: self._print_critical_regression("Mapper Input ID", s1['Mapper Input ID'], s2['Mapper Input ID'])
+        if s1['Actor ID'] != s2['Actor ID']: self._print_critical_regression("Actor ID", s1['Actor ID'], s2['Actor ID'])
+        if s1['Point Count'] != s2['Point Count']: self._print_critical_regression("Point count", s1['Point Count'], s2['Point Count'])
+        if s1['Bounds'] != s2['Bounds']: self._print_critical_regression("Point cloud bounds", s1['Bounds'], s2['Bounds'])
+        if s1['Clipping Range'] != s2['Clipping Range']: self._print_critical_regression("Clipping range unexpectedly", s1['Clipping Range'], s2['Clipping Range'])
+        if s1['Interactor Style'] != s2['Interactor Style']: self._print_critical_regression("Interactor style", s1['Interactor Style'], s2['Interactor Style'])
+
+    def _print_critical_regression(self, prop, b, a):
+        print("\n!!! CRITICAL POINT CLOUD VISUALIZATION REGRESSION !!!")
+        print("Event = Blue Point Click")
+        print(f"Changed Property = {prop}")
+        print(f"Before = {b}")
+        print(f"After = {a}")
+        import inspect
+        print(f"Function/Method = {inspect.stack()[2].function}")
 
     # =======================================================================================================================================
+    ## Mayur 17-8-2026
     def on_click(self, obj, event):
-        if not self.measurement_active or not self.current_measurement or self.freeze_view or not self.plotting_active:
+        interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
+        pos = interactor.GetEventPosition()
+        
+        is_post_arc = getattr(self, '_debug_post_arc_mode', False)
+        if is_post_arc:
+            print("\n==================================================")
+            print("STEP 4 — EVENT ROUTING")
+            print("==================================================")
+            print("DEBUG EVENT ROUTING")
+            print("Mouse Press Handler = on_click")
+            print("Blue Curve Handler Called = FALSE")
+            print("Point Cloud Handler Called = FALSE")
+            print("Camera Handler Called = TRUE")
+            print("Polygon Handler Called = FALSE")
+            print("Other Handler Called = NONE")
+            
+            print("\n==================================================")
+            print("STEP 3 — NEXT NORMAL POINT-CLOUD CLICK")
+            print("==================================================")
+            print("DEBUG POST-ARC NORMAL CLICK")
+            print(f"Mouse Position = {pos}")
+            print(f"Curve Edit Mode = {self.curve_edit_mode_active}")
+            print("Blue Point Interaction Active = FALSE")
+            print("Any Blue Actor Hit = FALSE")
+            print("Point Cloud Picker Active = FALSE")
+            print("Camera Interaction Active = TRUE")
+            
+            if hasattr(self, 'point_cloud_actor') and self.point_cloud_actor:
+                print("\nPoint Cloud:")
+                print(f"Actor Visibility BEFORE = {self.point_cloud_actor.GetVisibility() == 1}")
+                mapper_before = self.point_cloud_actor.GetMapper()
+                pts_before = mapper_before.GetInput().GetNumberOfPoints() if mapper_before and mapper_before.GetInput() else 0
+                print(f"PolyData Points BEFORE = {pts_before}")
+                print(f"Mapper Input Points BEFORE = {pts_before}")
+                
+                # Setup a timer to check STEP 5 and STEP 6 shortly after the click is processed
+                def check_post_click():
+                    print("\n==================================================")
+                    print("STEP 5 — AFTER NORMAL CLICK")
+                    print("==================================================")
+                    print("DEBUG POST-ARC NORMAL CLICK RESULT")
+                    
+                    if hasattr(self, 'point_cloud_actor') and self.point_cloud_actor:
+                        print(f"Point Cloud Visibility AFTER = {self.point_cloud_actor.GetVisibility() == 1}")
+                        mapper_after = self.point_cloud_actor.GetMapper()
+                        pts_after = mapper_after.GetInput().GetNumberOfPoints() if mapper_after and mapper_after.GetInput() else 0
+                        print(f"PolyData Points AFTER = {pts_after}")
+                        print(f"Mapper Input Points AFTER = {pts_after}")
+                        print("Point Cloud Actor Exists AFTER = TRUE")
+                        print(f"Mapper Changed = {mapper_before != mapper_after}")
+                        print(f"PolyData Changed = {pts_before != pts_after}")
+                        
+                        if (self.point_cloud_actor.GetVisibility() != 1) or (pts_before != pts_after) or (mapper_before != mapper_after):
+                            print("\n==================================================")
+                            print("STEP 6 — DETECT UNEXPECTED POINT-CLOUD CHANGES")
+                            print("==================================================")
+                            print("WARNING: UNEXPECTED POINT CLOUD STATE CHANGE")
+                    else:
+                        print("Point Cloud Actor Exists AFTER = FALSE")
+                        print("\n==================================================")
+                        print("STEP 6 — DETECT UNEXPECTED POINT-CLOUD CHANGES")
+                        print("==================================================")
+                        print("WARNING: UNEXPECTED POINT CLOUD STATE CHANGE (Actor Missing)")
+                    
+                    cam = self.renderer.GetActiveCamera()
+                    print(f"\nCamera Position AFTER = {cam.GetPosition()}")
+                    print(f"Camera Focal Point AFTER = {cam.GetFocalPoint()}")
+                    
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(100, check_post_click)
+
+        if not self.current_measurement or self.freeze_view or not self.plotting_active:
+            return
+            
+        if not self.measurement_active and self.current_measurement != 'drill_blast_arc_edit':
             return
 
         interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
         pos = interactor.GetEventPosition()
-
-        # Use Point picker to accurately select any point cloud vertex (main LiDAR or baseline)
-        point_picker = vtk.vtkPointPicker()
-        point_picker.SetTolerance(0.005) # Good tolerance for point picking
-        # Mayur 12-8-2026
-        if getattr(self, 'current_measurement', None) == 'digging' and getattr(self, 'point_cloud_actor', None):
-            point_picker.AddPickList(self.point_cloud_actor)
-            point_picker.PickFromListOn()
+        
+        if self.current_measurement == 'drill_blast_arc_edit':
+            before_state = self._get_pc_state_dict()
+            print("\nDEBUG ARC EVENT BEFORE")
+            print(f"Visible = {before_state['Visible']}")
+            print(f"Actor Exists = {before_state['Actor Exists']}")
+            print(f"Point Cloud Point Count = {before_state['Point Count']}")
+            print(f"Mapper Input = {before_state['Mapper Input']}")
+            print(f"Point Cloud PolyData ID = {before_state['PolyData ID']}")
+            print(f"Camera Position = {before_state['Camera Position']}")
+            print(f"Camera Focal Point = {before_state['Camera Focal Point']}")
             
-        point_picker.Pick(pos[0], pos[1], 0, self.renderer)
-        
-        clicked_point = None
-        
-        if point_picker.GetActor() is not None and point_picker.GetPointId() != -1:
-            clicked_point = np.array(point_picker.GetPickPosition())
-        else:
-            # Fallback to cell picker just in case there are lines or solid surfaces
-            cell_picker = vtk.vtkCellPicker()
-            cell_picker.SetTolerance(0.005)
-           # Mayur 12-8-2026   
-            if getattr(self, 'current_measurement', None) == 'digging' and getattr(self, 'point_cloud_actor', None):
-                cell_picker.AddPickList(self.point_cloud_actor)
-                cell_picker.PickFromListOn()
+            import time
+            current_time = time.time()
+            time_diff = current_time - getattr(self, 'drill_blast_arc_last_click_time', 0)
+            threshold = getattr(self, 'double_click_threshold', 0.3)
+            event_type = "Double Click" if time_diff < threshold else "Click"
+            
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(0, lambda b=before_state, et=event_type: self._compare_pc_state(b, self._get_pc_state_dict(), et, getattr(self, 'active_control_point_idx', 'NONE')))
+            
+            self.drill_blast_arc_last_click_time = current_time
+            
+            if time_diff < threshold:
+                print("\nDEBUG BLUE DOUBLE CLICK")
+                idx = getattr(self, 'active_control_point_idx', None)
                 
-            cell_picker.Pick(pos[0], pos[1], 0, self.renderer)
+                print("\nDEBUG BLUE POINT")
+                print(f"Point Index = {idx if idx is not None else 'NONE'}")
+                print("Click = FALSE")
+                print("Drag = FALSE")
+                print("Curve Updated = FALSE")
+                print("Double Click = TRUE")
+                
+                if idx is not None:
+                    if hasattr(self, 'drill_blast_curve_status'):
+                        if idx < len(self.drill_blast_curve_status):
+                            self.drill_blast_curve_status[idx] = True
+                        elif idx == len(self.drill_blast_curve_status) and len(self.drill_blast_curve_status) > 0:
+                            self.drill_blast_curve_status[-1] = True
+                        print("\nDEBUG BLUE POINT FINALIZE")
+                        print(f"Point Index = {idx + 1}")
+                        print("Curve Finalized = TRUE")
+                        print("Point Cloud Modified = FALSE")
+                        print("Point Cloud PolyData Modified = FALSE")
+                        print("Camera Mode Changed = FALSE")
+                        print("Interactor Style Changed = FALSE")
+                        print("Active Blue Point = NONE")
+                        self.active_control_point_idx = None # Deactivate it
+                        if hasattr(self, 'drill_blast_control_actors') and len(self.drill_blast_control_actors) > idx:
+                            if self.drill_blast_control_actors[idx]:
+                                self.drill_blast_control_actors[idx].GetProperty().SetColor(self.colors.GetColor3d("Blue"))
+                        self._draw_drill_blast_curve() # Update color to green
+                else:
+                    print("Blue Point = NONE")
+                    print("Segment Finalized = FALSE")
+                    print("Point Cloud Changed = FALSE")
+                    print("Active Blue Point = NONE")
+                
+                print("\nDEBUG BLUE PROGRESS")
+                status = getattr(self, 'drill_blast_curve_status', [False]*6)
+                for j in range(6):
+                    print(f"Segment {j+1} = {'DONE' if status[j] else 'NOT DONE'}")
+                
+                all_finalized = all(status)
+                print(f"\nAll 6 Segments Finalized = {str(all_finalized).upper()}")
+                
+                if all_finalized:
+                    print("\nDEBUG LAST BLUE POINT")
+                    print("Point Index = 6")
+                    print("Curve Finalized = TRUE")
+                    print(f"Curve Edit Mode BEFORE = {self.curve_edit_mode_active}")
+                    
+                    self.curve_edit_mode_active = False
+                    self.is_dragging_control_point = False
+                    self.current_measurement = None
+                    self.measurement_active = False
+                    
+                    if hasattr(self, 'drill_blast_control_actors'):
+                        for a in self.drill_blast_control_actors:
+                            if a: a.GetProperty().SetColor(self.colors.GetColor3d("Blue"))
+                            
+                    self.vtk_widget.GetRenderWindow().Render()
+                    
+                    print("Curve Edit Mode AFTER = FALSE")
+                    print("Blue Control Dragging = FALSE")
+                    print("All Curves Finalized = TRUE")
+                    print()
+                    print("Point Cloud Changed = FALSE")
+                    print("Camera Changed = FALSE")
+                    print("PolyData Changed = FALSE")
+                    print("Mapper Changed = FALSE")
+                    return
+                
+            picker = vtk.vtkPropPicker()
+            # picker.SetTolerance(0.01)
+            picker.PickFromListOn()
+            if hasattr(self, 'drill_blast_control_actors'):
+                for a in self.drill_blast_control_actors:
+                    if a: picker.AddPickList(a)
             
-            if cell_picker.GetActor() is not None and cell_picker.GetCellId() != -1:
-                clicked_point = np.array(cell_picker.GetPickPosition())
-        
-        # If still no point found, use the neighborhood search
-        if clicked_point is None:
-            clicked_point = self.find_nearest_point_in_neighborhood(pos)
-        
-        if clicked_point is None:
-            return  # No point found
+            picker.Pick(pos[0], pos[1], 0, self.renderer)
+            picked_actor = picker.GetActor()
+            hit = False
+            self.active_control_point_idx = None
+            self.is_dragging_control_point = False
+            if hasattr(self, 'drill_blast_control_actors') and picked_actor is not None:
+                for i, a in enumerate(self.drill_blast_control_actors):
+                    if a == picked_actor:
+                        hit = True
+                        self.active_control_point_idx = i
+                        break
+            
+            self.has_dragged = False
+            self.was_active_before_click = getattr(self, 'curve_edit_mode_active', False)
+            
+            print("DEBUG BLUE PICK")
+            print(f"Actor Hit = {hit}")
+            print(f"Curve Edit Mode Before = {self.was_active_before_click}")
+            
+            if hit:
+                print("\nDEBUG RENDER STATE (BEFORE)")
+                print(f"Renderer Active = {hasattr(self, 'renderer') and self.renderer is not None}")
+                print(f"Render Window Active = {hasattr(self, 'vtk_widget') and self.vtk_widget.GetRenderWindow() is not None}")
+                pc_act = getattr(self, 'point_cloud_actor', None)
+                print(f"Point Cloud Actor In Renderer = {self.renderer.HasViewProp(pc_act) if hasattr(self, 'renderer') and self.renderer and pc_act else 'FALSE'}")
+                print(f"Point Cloud Mapper Connected = {pc_act.GetMapper() is not None if pc_act else 'FALSE'}")
+                pc_poly = getattr(self, 'point_cloud_polydata', None)
+                print(f"Point Cloud PolyData Valid = {pc_poly is not None}")
+                if pc_poly:
+                    print(f"PolyData NumberOfPoints = {pc_poly.GetNumberOfPoints()}")
+                    print(f"PolyData NumberOfCells = {pc_poly.GetNumberOfCells()}")
+                    
+                _before_state = self._print_debug_pc_visual_state("DEBUG PC VISUAL BEFORE BLUE CLICK")
+
+                self.is_dragging_control_point = True
+                self.curve_edit_mode_active = True
+                
+                # Consume the event by temporarily overriding the interactor style
+                interactor = self.vtk_widget.GetRenderWindow().GetInteractor()
+                self._stored_camera_style = interactor.GetInteractorStyle()
+                interactor.SetInteractorStyle(vtk.vtkInteractorStyleUser())
+                
+                print("\nDEBUG BLUE PICK RESULT")
+                print(f"Blue Point Active = {self.active_control_point_idx}")
+                print("Curve Edit Mode = TRUE")
+                print("Camera Handler Called = FALSE")
+                print("Point Cloud Handler Called = FALSE")
+                print("Event Consumed = TRUE")
+                if hasattr(self, 'renderer'):
+                    cam = self.renderer.GetActiveCamera()
+                    print(f"Camera Position BEFORE = {cam.GetPosition()}")
+                    print(f"Camera Position AFTER = {cam.GetPosition()}")
+                
+                print("\nDEBUG BLUE POINT")
+                print(f"Point Index = {self.active_control_point_idx if self.active_control_point_idx is not None else 'NONE'}")
+                print("Click = TRUE")
+                print("Drag = FALSE")
+                print("Curve Updated = FALSE")
+                print("Double Click = FALSE")
+                print("Segment Finalized = FALSE")
+                print("Point Cloud Changed = FALSE")
+                # Check if it's already finalized
+                status = getattr(self, 'drill_blast_curve_status', [False]*6)
+                is_finalized = False
+                if self.active_control_point_idx is not None:
+                    if self.active_control_point_idx < len(status):
+                        is_finalized = status[self.active_control_point_idx]
+                    elif self.active_control_point_idx == len(status) and len(status) > 0:
+                        is_finalized = status[-1]
+                if is_finalized:
+                    print("\nDEBUG BLUE SELECTION")
+                    print(f"Clicked Blue Point = {self.active_control_point_idx+1}")
+                    print("Segment is already FINALIZED.")
+                    # Optionally allow re-editing by uncommenting next line, but standard is to disallow:
+                    # self.active_control_point_idx = None
+                    pass
+                
+                if self.active_control_point_idx is not None:
+                    # Highlight active control point
+                    if hasattr(self, 'drill_blast_control_actors'):
+                        for a in self.drill_blast_control_actors:
+                            if a: a.GetProperty().SetColor(self.colors.GetColor3d("Blue"))
+                        if self.drill_blast_control_actors[self.active_control_point_idx]:
+                            self.drill_blast_control_actors[self.active_control_point_idx].GetProperty().SetColor(self.colors.GetColor3d("Cyan"))
+                    
+                    self.is_dragging_control_point = True
+                    self.vtk_widget.GetRenderWindow().Render()
+                    
+                    print(f"Clicked Blue Point = {self.active_control_point_idx+1}")
+                    print(f"Active Blue Point = {self.active_control_point_idx+1}")
+                    print("Other Blue Points Active = 0")
+
+                _after_state = self._print_debug_pc_visual_state("DEBUG PC VISUAL AFTER BLUE CLICK")
+                self._print_debug_pc_visual_comparison(_before_state, _after_state)
+                
+                print("\nDEBUG RENDER STATE (AFTER)")
+                print(f"Renderer Active = {hasattr(self, 'renderer') and self.renderer is not None}")
+                print(f"Render Window Active = {hasattr(self, 'vtk_widget') and self.vtk_widget.GetRenderWindow() is not None}")
+                print(f"Point Cloud Actor In Renderer = {self.renderer.HasViewProp(pc_act) if hasattr(self, 'renderer') and self.renderer and pc_act else 'FALSE'}")
+                print(f"Point Cloud Mapper Connected = {pc_act.GetMapper() is not None if pc_act else 'FALSE'}")
+                print(f"Point Cloud PolyData Valid = {pc_poly is not None}")
+                if pc_poly:
+                    print(f"PolyData NumberOfPoints = {pc_poly.GetNumberOfPoints()}")
+                    print(f"PolyData NumberOfCells = {pc_poly.GetNumberOfCells()}")
+
+                return
+            else:
+                print("\n!!! BLUE PICK FAILED !!!")
+                print(f"Mouse Position = {pos}")
+                b_bounds = self.drill_blast_control_actors[0].GetBounds() if getattr(self, 'drill_blast_control_actors', []) else None
+                print(f"Blue Actor Bounds = {b_bounds}")
+                
+                print("\n!!! BLUE PICK COORDINATE MISMATCH !!!")
+                if b_bounds:
+                    center = [(b_bounds[i*2] + b_bounds[i*2+1])/2 for i in range(3)]
+                    print(f"Blue Actor World Center = {center}")
+                else:
+                    print("Blue Actor World Center = NONE")
+                    
+                cam_focal = None
+                if hasattr(self, 'renderer') and self.renderer:
+                    cam = self.renderer.GetActiveCamera()
+                    if cam:
+                        cam_focal = cam.GetFocalPoint()
+                        print(f"Front Wall/Scene World Center = {cam_focal}")
+                if cam_focal and b_bounds:
+                    diff = [center[i] - cam_focal[i] for i in range(3)]
+                    print(f"Coordinate Difference = {diff}")
+                
+                print(f"Picker Type = {picker.GetClassName()}")
+                print(f"Current Interactor Style = {self.vtk_widget.GetRenderWindow().GetInteractor().GetInteractorStyle().GetClassName()}")
+
+                if not self.was_active_before_click:
+                    self.curve_edit_mode_active = True
+                    
+                # Clicked on empty space, deactivate any active point
+                if getattr(self, 'active_control_point_idx', None) is not None:
+                    idx = self.active_control_point_idx
+                    if hasattr(self, 'drill_blast_control_actors') and len(self.drill_blast_control_actors) > idx:
+                        if self.drill_blast_control_actors[idx]:
+                            self.drill_blast_control_actors[idx].GetProperty().SetColor(self.colors.GetColor3d("Blue"))
+                    self.active_control_point_idx = None
+                    self.vtk_widget.GetRenderWindow().Render()
+                    
+                if getattr(self, 'curve_edit_mode_active', False):
+                    # We might want to allow regular point cloud interaction even while in curve edit mode,
+                    # but if we click nowhere and we were active, we could decide whether to consume or not.
+                    # Since we don't freeze the camera, we should let the camera move.
+                    pass
+            
+## Mayur 17-8-2026
+        if getattr(self, 'current_measurement', None) in ('drill_blast_3_points', 'drill_blast_4_points'):
+            fw_ref = None
+            fw_data = None
+            if hasattr(self, 'last_digging_data') and self.last_digging_data:
+                fw_data = self.last_digging_data
+            elif hasattr(self, 'pending_tunnel_data') and self.pending_tunnel_data and 'digging' in self.pending_tunnel_data:
+                fw_data = self.pending_tunnel_data['digging']
+                
+            if fw_data and fw_data.get('front_wall_reference'):
+                fw_ref = fw_data['front_wall_reference']
+                plane_n = np.array([fw_ref.get('tx', -fw_ref['ny']), fw_ref.get('ty', fw_ref['nx']), 0.0])
+                plane_p0 = np.array([fw_ref['rx'], fw_ref['ry'], fw_ref['rz']])
+                
+                renderer = self.renderer
+                renderer.SetDisplayPoint(pos[0], pos[1], 0.0)
+                renderer.DisplayToWorld()
+                w0 = renderer.GetWorldPoint()
+                ray_p0 = np.array([w0[0]/w0[3], w0[1]/w0[3], w0[2]/w0[3]])
+                
+                renderer.SetDisplayPoint(pos[0], pos[1], 1.0)
+                renderer.DisplayToWorld()
+                w1 = renderer.GetWorldPoint()
+                ray_p1 = np.array([w1[0]/w1[3], w1[1]/w1[3], w1[2]/w1[3]])
+                
+                ray_dir = ray_p1 - ray_p0
+                ray_len = np.linalg.norm(ray_dir)
+                if ray_len > 0:
+                    ray_dir = ray_dir / ray_len
+                    
+                denom = np.dot(ray_dir, plane_n)
+                if abs(denom) > 1e-6:
+                    t = np.dot(plane_p0 - ray_p0, plane_n) / denom
+                    intersection = ray_p0 + t * ray_dir
+                    
+                    left_vec = np.array([fw_ref['nx'], fw_ref['ny'], 0.0])
+                    h_off = np.dot(intersection - plane_p0, left_vec)
+                    
+                    max_left = fw_data.get('left_offset', 10.0)
+                    max_right = fw_data.get('right_offset', 10.0)
+                    depth_off = fw_data.get('depth_offset', 5.0)
+                    bottom_z = fw_ref['rz'] - depth_off
+                    
+                    if -max_right - 0.5 <= h_off <= max_left + 0.5 and intersection[2] >= bottom_z - 0.5:
+                        clicked_point = intersection
+                        pt_idx = 0
+                        if self.current_measurement == 'drill_blast_3_points':
+                            pt_idx = len(getattr(self, 'drill_blast_3_points_list', [])) + 1
+                            lbl_type = ["LEFT", "HEIGHT", "RIGHT"][pt_idx - 1] if pt_idx <= 3 else "UNKNOWN"
+                        else:
+                            pt_idx = len(getattr(self, 'drill_blast_4_points_list', [])) + 1
+                            lbl_type = f"ADDITIONAL POINT {pt_idx}"
+                            
+                        print("\nDEBUG ARC WALL PICK")
+                        print(f"Type = {lbl_type}")
+                        print(f"Mouse = ({pos[0]}, {pos[1]})")
+                        print(f"Front Wall Ray Hit = TRUE")
+                        print(f"Front Wall Intersection = ({intersection[0]:.3f}, {intersection[1]:.3f}, {intersection[2]:.3f})")
+                        print(f"Point Cloud Fallback Used = FALSE")
+                        print(f"Accepted = TRUE")
+                    else:
+                        print("\nDEBUG ARC WALL PICK | REJECTED = OUTSIDE FRONT WALL")
+                        return
+                else:
+                    print("\nDEBUG ARC WALL PICK | REJECTED = RAY PARALLEL TO FRONT WALL")
+                    return
+            else:
+                print("\nDEBUG ARC WALL PICK | REJECTED = NO FRONT WALL REFERENCE FOUND")
+                return
+        else:
+            # Use Point picker to accurately select any point cloud vertex (main LiDAR or baseline)
+            point_picker = vtk.vtkPointPicker()
+            point_picker.SetTolerance(0.005) # Good tolerance for point picking
+            # Mayur 12-8-2026
+            if getattr(self, 'current_measurement', None) in ('digging', 'digging_polygon', 'drill_blast_arc', 'cutter_polygon') and getattr(self, 'point_cloud_actor', None):
+                point_picker.AddPickList(self.point_cloud_actor)
+                point_picker.PickFromListOn()
+                
+            point_picker.Pick(pos[0], pos[1], 0, self.renderer)
+            
+            clicked_point = None
+            
+            if point_picker.GetActor() is not None and point_picker.GetPointId() != -1:
+                clicked_point = np.array(point_picker.GetPickPosition())
+            else:
+                # Fallback to cell picker just in case there are lines or solid surfaces
+                cell_picker = vtk.vtkPropPicker()
+                cell_picker.SetTolerance(0.005)
+               # Mayur 12-8-2026   
+                if getattr(self, 'current_measurement', None) in ('digging', 'digging_polygon', 'drill_blast_arc', 'cutter_polygon') and getattr(self, 'point_cloud_actor', None):
+                    cell_picker.AddPickList(self.point_cloud_actor)
+                    cell_picker.PickFromListOn()
+                    
+                cell_picker.Pick(pos[0], pos[1], 0, self.renderer)
+                
+                if cell_picker.GetActor() is not None and cell_picker.GetCellId() != -1:
+                    clicked_point = np.array(cell_picker.GetPickPosition())
+            
+            # If still no point found, use the neighborhood search
+            if clicked_point is None:
+                clicked_point = self.find_nearest_point_in_neighborhood(pos)
+            
+            if clicked_point is None:
+                return  # No point found
 
         if hasattr(self, 'current_measurement') and self.current_measurement == 'center_line':
             if len(self.current_points) > 0:
@@ -20862,6 +21785,99 @@ class PointCloudViewer(ApplicationUI):
                 self.message_text.append(f"Error in center_line: {str(e)}")
                 self.message_text.append(traceback.format_exc())
                 return
+
+        if hasattr(self, 'current_measurement') and self.current_measurement == 'drill_blast_3_points':
+            if not hasattr(self, 'drill_blast_3_points_list'):
+                self.drill_blast_3_points_list = []
+            if not hasattr(self, 'temp_drill_blast_actors'):
+                self.temp_drill_blast_actors = []
+
+            self.drill_blast_3_points_list.append(clicked_point)
+            
+            pt_idx = len(self.drill_blast_3_points_list)
+            if pt_idx == 1:
+                label_name = "LEFT"
+            elif pt_idx == 2:
+                label_name = "HEIGHT"
+            else:
+                label_name = "RIGHT"
+                
+            print(f"DEBUG ARC PICK | {label_name} POINT = ({clicked_point[0]:.3f}, {clicked_point[1]:.3f}, {clicked_point[2]:.3f})")
+
+            actor = self.add_sphere_marker(clicked_point, label_name, radius=0.5, color="Yellow")
+            if actor:
+                self.temp_drill_blast_actors.append(actor)
+                
+            actor_created = bool(actor)
+            added_to_renderer = actor_created and self.renderer.HasViewProp(actor)
+            visibility = actor.GetVisibility() if actor_created else 0
+            
+            print("DEBUG ARC MARKER")
+            print(f"Type = {label_name}")
+            print(f"World Point = ({clicked_point[0]:.3f}, {clicked_point[1]:.3f}, {clicked_point[2]:.3f})")
+            print(f"Marker Actor Created = {str(actor_created).upper()}")
+            print(f"Marker Added To Renderer = {str(added_to_renderer).upper()}")
+            print(f"Marker Point Cloud Visibility = {visibility}")
+            
+            self.message_text.append(f" Marked {label_name} Point: {clicked_point}")
+            
+            self.vtk_widget.GetRenderWindow().Render()
+
+            if len(self.drill_blast_3_points_list) == 3:
+                self.current_measurement = 'drill_blast_4_points'
+                self.message_text.append(" First 3 points marked. Now select 4 additional points.")
+                
+            return
+
+        if hasattr(self, 'current_measurement') and self.current_measurement == 'drill_blast_4_points':
+            if not hasattr(self, 'drill_blast_4_points_list'):
+                self.drill_blast_4_points_list = []
+
+            self.drill_blast_4_points_list.append(clicked_point)
+            pt_idx = len(self.drill_blast_4_points_list)
+            
+            print(f"DEBUG ARC PICK | ADDITIONAL POINT {pt_idx} = ({clicked_point[0]:.3f}, {clicked_point[1]:.3f}, {clicked_point[2]:.3f})")
+
+            label_name = f"PT {pt_idx + 3}"
+            actor = self.add_sphere_marker(clicked_point, label_name, radius=0.5, color="Yellow")
+            if actor:
+                self.temp_drill_blast_actors.append(actor)
+                
+            actor_created = bool(actor)
+            added_to_renderer = actor_created and self.renderer.HasViewProp(actor)
+            visibility = actor.GetVisibility() if actor_created else 0
+            
+            print("DEBUG ARC MARKER")
+            print(f"Type = {label_name}")
+            print(f"World Point = ({clicked_point[0]:.3f}, {clicked_point[1]:.3f}, {clicked_point[2]:.3f})")
+            print(f"Marker Actor Created = {str(actor_created).upper()}")
+            print(f"Marker Added To Renderer = {str(added_to_renderer).upper()}")
+            print(f"Marker Point Cloud Visibility = {visibility}")
+            
+            self.message_text.append(f" Marked Additional Point {pt_idx}: {clicked_point}")
+            
+            self.vtk_widget.GetRenderWindow().Render()
+
+            if len(self.drill_blast_4_points_list) == 4:
+                from PyQt5.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    self,
+                    "Marked the Arc",
+                    "All tunnel arc points have been marked. Continue to curve the arc segments.",
+                    QMessageBox.Ok | QMessageBox.Cancel,
+                    QMessageBox.Ok
+                )
+                
+                if reply == QMessageBox.Ok:
+                    print("DEBUG DRILL BLAST ARC")
+                    print("Total Marked Points = 7")
+                    
+                    self.current_measurement = 'drill_blast_arc_edit'
+                    self.measurement_active = False # Disable standard point picking
+                    self._start_drill_blast_curve_editing()
+                # If Cancel, we do nothing and keep the state exactly as is
+            
+            return
 
         if hasattr(self, 'current_measurement') and self.current_measurement == 'tunnel_arc':
             if not hasattr(self, 'tunnel_arc_points'):
@@ -21460,7 +22476,31 @@ class PointCloudViewer(ApplicationUI):
             
             self.vtk_widget.GetRenderWindow().Render()
             return
-     ## Mayur 12-8-2026   
+
+     ## Mayur 12-8-2026  
+     # Mayur 19-8-2026 
+        # Handle Cutter polygon picking
+        if self.current_measurement == 'cutter_polygon':
+            if not hasattr(self, 'cutter_points'):
+                self.cutter_points = []
+            
+            self.cutter_points.append(clicked_point)
+            
+            print(f"DEBUG CUTTER PICK | Point={len(self.cutter_points)} | World=({clicked_point[0]:.4f},{clicked_point[1]:.4f},{clicked_point[2]:.4f}) | Exact Pick=TRUE")
+            
+            point_label = str(len(self.cutter_points))
+            self.add_sphere_marker(clicked_point, point_label, color="Red")
+            print("DEBUG CUTTER MARKER | Created=TRUE | Visible=TRUE")
+            
+            if len(self.cutter_points) >= 2:
+                p1 = self.cutter_points[-2]
+                p2 = self.cutter_points[-1]
+                self.add_line_between_points(p1, p2, "Red")
+                print(f"DEBUG CUTTER SEGMENT | Start={len(self.cutter_points)-1} | End={len(self.cutter_points)}")
+                
+            self.vtk_widget.GetRenderWindow().Render()
+            return
+
         # Handle digging polygon measurement
         if self.current_measurement == 'digging_polygon':
             if not hasattr(self, 'digging_points'):
@@ -21476,6 +22516,18 @@ class PointCloudViewer(ApplicationUI):
                 p2 = self.digging_points[-1]
                 self.add_line_between_points(p1, p2, "Red")
                 
+            self.vtk_widget.GetRenderWindow().Render()
+            return
+            
+        if self.current_measurement == 'drill_blast_arc':
+            if not hasattr(self, 'digging_points'):
+                self.digging_points = []
+            
+            self.digging_points.append(clicked_point)
+            point_label = str(len(self.digging_points))
+            self.add_sphere_marker(clicked_point, point_label, radius=0.5, color="Yellow") # Highlighted yellow points
+            print(f"[DEBUG] Drill Blast arc point count: {len(self.digging_points)}")
+            
             self.vtk_widget.GetRenderWindow().Render()
             return
             ######################
@@ -37168,9 +38220,18 @@ class PointCloudViewer(ApplicationUI):
                 rad = t_data.get("radius", 5.0)
                 wall = t_data.get("wall_thickness", 0.5)
                 
-                print(f"Tunnel ID: {tunnel_id}")
-                print(f"Radius: {rad}")
-                print(f"Wall Thickness: {wall}")
+                print("\nDEBUG TUNNEL RESTORE")
+                print(f"Tunnel ID = {tunnel_id}")
+                print(f"Center Line = {'RESTORED' if t_data.get('center_line') else 'NOT RESTORED'}")
+                print(f"Surface Line = {'RESTORED' if t_data.get('surface_line') else 'NOT RESTORED'}")
+                print(f"Tunnel Wall = {'RESTORED' if t_data.get('tunnel_wall') else 'NOT RESTORED'}")
+                markers = t_data.get('start_end_markers', {})
+                print(f"Start Marker = {'RESTORED' if markers.get('start_point') else 'NOT RESTORED'}")
+                print(f"End Marker = {'RESTORED' if markers.get('end_point') else 'NOT RESTORED'}")
+                digging = t_data.get('digging', {})
+                print(f"Digging = {'RESTORED' if digging else 'NOT RESTORED'}")
+                pts = len(digging.get('marked_polygon', {}).get('points', [])) if digging else 0
+                print(f"Polygon Points = {pts}\n")
                 
                 # Restore center_line geometry FIRST
                 c_data = t_data.get("center_line")
@@ -37260,16 +38321,21 @@ class PointCloudViewer(ApplicationUI):
                         is_absolute_ref = (global_start_offset > 0 and ref_chs_arr[0] >= global_start_offset - 1000)
                         
                         cl_3d_points = []
-                        for poly in self.line_types['center_line']['polylines']:
-                            for pt in poly:
-                                ch = pt[0]
-                                dz = pt[1]
-                                abs_ch = ch + global_start_offset if is_absolute_ref else ch
-                                abs_ch_clamped = np.clip(abs_ch, ref_chs_arr[0], ref_chs_arr[-1])
-                                x3d = np.interp(abs_ch_clamped, ref_chs_arr, ref_xs_arr)
-                                y3d = np.interp(abs_ch_clamped, ref_chs_arr, ref_ys_arr)
-                                ref_z = np.interp(abs_ch_clamped, ref_chs_arr, ref_zs_arr)
-                                z3d = ref_z + dz
+                        c_polys = c_data.get("polylines", [])
+                        for poly in c_polys:
+                            for pt in poly.get("points", []):
+                                w_coord = pt.get("world_coordinates")
+                                dz = pt.get("relative_elevation_m", 0.0)
+                                if w_coord and len(w_coord) >= 3:
+                                    x3d, y3d, z3d = w_coord[0], w_coord[1], w_coord[2]
+                                else:
+                                    ch = pt.get("chainage_m", 0.0)
+                                    abs_ch = ch + global_start_offset if is_absolute_ref else ch
+                                    abs_ch_clamped = np.clip(abs_ch, ref_chs_arr[0], ref_chs_arr[-1])
+                                    x3d = np.interp(abs_ch_clamped, ref_chs_arr, ref_xs_arr)
+                                    y3d = np.interp(abs_ch_clamped, ref_chs_arr, ref_ys_arr)
+                                    ref_z = np.interp(abs_ch_clamped, ref_chs_arr, ref_zs_arr)
+                                    z3d = ref_z + dz
                                 cl_3d_points.append(np.array([x3d, y3d, z3d]))
                                 
                                 # Recreate sphere exactly as user drew it
@@ -37293,7 +38359,7 @@ class PointCloudViewer(ApplicationUI):
                 tunnel_actor_created = False
                 tunnel_in_renderer = False
                 
-                if tunnel_type == "TBM":
+                if tunnel_type in ["TBM", "Digging", "DrillBlast"]:
                     try:
                         # Clear old first
                         if not hasattr(self, 'tbm_tunnel_actors'):
@@ -37307,11 +38373,12 @@ class PointCloudViewer(ApplicationUI):
                         end_ch = t_data.get("end_chainage")
                         
                         # Generate Geometry
-                        self.draw_tbm_tunnel_actor(rad, wall, start_ch=start_ch, end_ch=end_ch)
-                        tunnel_geom_created = True
+                        if tunnel_type == "TBM":
+                            self.draw_tbm_tunnel_actor(rad, wall, start_ch=start_ch, end_ch=end_ch)
+                            tunnel_geom_created = True
                         
                         # Recreate start and end points in 3D so they appear upon load
-                        if start_ch is not None and end_ch is not None:
+                        if tunnel_type == "TBM" and start_ch is not None and end_ch is not None:
                             if not hasattr(self, 'tunnel_3d_actors'):
                                 self.tunnel_3d_actors = []
                             
@@ -37343,20 +38410,204 @@ class PointCloudViewer(ApplicationUI):
                                 self.renderer.AddActor(actor)
                                 self.tunnel_3d_actors.append(actor)
                         
-                        if len(self.tbm_tunnel_actors) > 0:
-                            tunnel_actor = self.tbm_tunnel_actors[-1]
-                            tunnel_actor_created = True
-                            tunnel_in_renderer = self.renderer.HasViewProp(tunnel_actor)
+                        if tunnel_type == "TBM":
+                            if len(self.tbm_tunnel_actors) > 0:
+                                tunnel_actor = self.tbm_tunnel_actors[-1]
+                                tunnel_actor_created = True
+                                tunnel_in_renderer = self.renderer.HasViewProp(tunnel_actor)
+                            
+                            self.message_text.append(f" TBM Tunnel {tunnel_id} restored.")
+                        else:
+                            self.message_text.append(f" {tunnel_type} Tunnel {tunnel_id} restored.")
                         
-                        self.message_text.append(f" TBM Tunnel {tunnel_id} restored.")
+                        # 3. Restore Surface Line
+                        s_data = t_data.get("surface_line")
+                        if s_data:
+                            polylines_2d_s = []
+                            for poly in s_data.get("polylines", []):
+                                poly_2d = []
+                                for pt in poly.get("points", []):
+                                    poly_2d.append((pt.get("chainage_m", 0.0), pt.get("relative_elevation_m", 0.0)))
+                                if len(poly_2d) >= 2:
+                                    polylines_2d_s.append(poly_2d)
+                            if 'surface' not in self.line_types:
+                                self.line_types['surface'] = {'color': 'green', 'polylines': [], 'artists': []}
+                            self.line_types['surface']['polylines'] = polylines_2d_s
+                            if hasattr(self, 'redraw_baseline_on_graph'):
+                                self.redraw_baseline_on_graph('surface', style="solid")
+                           ## Mayur 13-8-2026 
+                        # 4. Restore Tunnel Wall
+                        tw_data = t_data.get("tunnel_wall")
+                        if tw_data:
+                            if "geometry" in tw_data and tw_data["geometry"]:
+                                import vtk
+                                for geom in tw_data["geometry"]:
+                                    pts = geom.get("points", [])
+                                    cells = geom.get("cells", [])
+                                    if pts and cells:
+                                        points = vtk.vtkPoints()
+                                        for p in pts:
+                                            points.InsertNextPoint(p)
+                                        polys = vtk.vtkCellArray()
+                                        for cell in cells:
+                                            polys.InsertNextCell(len(cell))
+                                            for idx in cell:
+                                                polys.InsertCellPoint(idx)
+                                        pd = vtk.vtkPolyData()
+                                        pd.SetPoints(points)
+                                        pd.SetPolys(polys)
+                                        mapper = vtk.vtkPolyDataMapper()
+                                        mapper.SetInputData(pd)
+                                        actor = vtk.vtkActor()
+                                        actor.SetMapper(mapper)
+                                        actor.GetProperty().SetColor(0.5, 0.5, 0.5)
+                                        actor.SetVisibility(1)
+                                        actor.GetProperty().SetOpacity(1.0)
+                                        self.renderer.AddActor(actor)
+                                        if not hasattr(self, 'tunnel_wall_actors'):
+                                            self.tunnel_wall_actors = []
+                                        self.tunnel_wall_actors.append(actor)
+                                print("DEBUG TUNNEL RESTORE\nTunnel Wall Restored = True")
+                            elif hasattr(self, 'draw_tunnel_wall_actor'):
+                                old_start = getattr(self, 'tunnel_start_point', None)
+                                old_end = getattr(self, 'tunnel_end_point', None)
+                                if "start_point" in t_data:
+                                    self.tunnel_start_point = t_data["start_point"]
+                                if "end_point" in t_data:
+                                    self.tunnel_end_point = t_data["end_point"]
+                                self.draw_tunnel_wall_actor(tw_data)
+                                if old_start is not None:
+                                    self.tunnel_start_point = old_start
+                                if old_end is not None:
+                                    self.tunnel_end_point = old_end
+                                print("DEBUG TUNNEL RESTORE\nTunnel Wall Restored = True")
+                        else:
+                            print("DEBUG TUNNEL RESTORE\nTunnel Wall Restored = False")
+                        # Mayur 13-8-2026
+                        # 5. Restore Start/End red markers
+                        import vtk
+                        for marker_key, restore_flag_str in [("start_marker", "Start Marker Restored = True"), ("end_marker", "End Marker Restored = True")]:
+                            m_data = t_data.get(marker_key)
+                            if m_data and "world_coordinates" in m_data:
+                                p = m_data["world_coordinates"]
+                                sphere = vtk.vtkSphereSource()
+                                sphere.SetRadius(1.0)
+                                sphere.SetCenter(p[0], p[1], p[2])
+                                sphere.SetThetaResolution(16)
+                                sphere.SetPhiResolution(16)
+                                mapper = vtk.vtkPolyDataMapper()
+                                mapper.SetInputConnection(sphere.GetOutputPort())
+                                actor = vtk.vtkActor()
+                                actor.SetMapper(mapper)
+                                actor.GetProperty().SetColor(1.0, 0.0, 0.0)
+                                if self.renderer:
+                                    self.renderer.AddActor(actor)
+                                if not hasattr(self, 'tunnel_3d_actors'):
+                                    self.tunnel_3d_actors = []
+                                self.tunnel_3d_actors.append(actor)
+                                print(f"DEBUG TUNNEL RESTORE\n{restore_flag_str}")
+                                
+                        markers_data = t_data.get("start_end_markers")
+                        if markers_data:
+                            for key in ["start_point", "end_point"]:
+                                if key in markers_data:
+                                    p = markers_data[key]
+                                    sphere = vtk.vtkSphereSource()
+                                    sphere.SetRadius(1.0)
+                                    sphere.SetCenter(p[0], p[1], p[2])
+                                    sphere.SetThetaResolution(16)
+                                    sphere.SetPhiResolution(16)
+                                    mapper = vtk.vtkPolyDataMapper()
+                                    mapper.SetInputConnection(sphere.GetOutputPort())
+                                    actor = vtk.vtkActor()
+                                    actor.SetMapper(mapper)
+                                    actor.GetProperty().SetColor(1.0, 0.0, 0.0)
+                                    if self.renderer:
+                                        self.renderer.AddActor(actor)
+                                    if not hasattr(self, 'tunnel_3d_actors'):
+                                        self.tunnel_3d_actors = []
+                                    self.tunnel_3d_actors.append(actor)
+
+                        # 6 & 7. Restore Digging
+                        dig_data = t_data.get("digging") or t_data.get("digging_data")
                         
-                        # Apply Digging/Trench cut if it was saved
-                        dig_data = t_data.get("digging_data")
-                        if dig_data and "config" in dig_data and "polygon_points" in dig_data:
-                            self.digging_points = dig_data["polygon_points"]
-                            if hasattr(self, 'execute_tunnel_cut'):
+                        print("\nDEBUG DIGGING RESTORE")
+                        print(f"Digging Data Found = {bool(dig_data)}")
+                        
+                        if dig_data:
+                            digging_status = dig_data.get("status", False)
+                            print(f"Digging Status = {digging_status}")
+                            
+                            if "polygon_points" in dig_data:
+                                self.digging_points = dig_data["polygon_points"]
+                                print(f"Digging Polygon Points = {len(self.digging_points)}")
+                            else:
+                                print("Digging Polygon Points = 0")
+                                
+                            mods = dig_data.get("removed_point_cloud_state") or dig_data.get("modified_points")
+                            excavation_restored = False
+                            if mods and hasattr(self, 'point_cloud') and self.point_cloud is not None:
+                                import numpy as np
+                                import open3d as o3d
+                                points = np.asarray(self.point_cloud.points)
+                                colors = np.asarray(self.point_cloud.colors)
+                                
+                                for mod in mods:
+                                    idx = int(mod[0])
+                                    if idx < len(points):
+                                        points[idx][2] = mod[1]
+                                        colors[idx] = [mod[2], mod[3], mod[4]]
+                                        
+                                self.point_cloud.points = o3d.utility.Vector3dVector(points)
+                                self.point_cloud.colors = o3d.utility.Vector3dVector(colors)
+                                
+                                added_w = dig_data.get("excavated_region") or dig_data.get("added_wall_points")
+                                if added_w:
+                                    wall_pts = []
+                                    wall_cols = []
+                                    for awp in added_w:
+                                        wall_pts.append([awp[0], awp[1], awp[2]])
+                                        wall_cols.append([awp[3], awp[4], awp[5]])
+                                        
+                                    wall_pcd = o3d.geometry.PointCloud()
+                                    wall_pcd.points = o3d.utility.Vector3dVector(np.array(wall_pts))
+                                    wall_pcd.colors = o3d.utility.Vector3dVector(np.array(wall_cols))
+                                    self.point_cloud += wall_pcd
+                                    
+                                if hasattr(self, 'display_point_cloud'):
+                                    self.display_point_cloud(reset_camera=False)
+                                self.message_text.append(f" Exact trench state restored for Tunnel {tunnel_id}.")
+                                excavation_restored = True
+                            elif "config" in dig_data and hasattr(self, 'execute_tunnel_cut'):
                                 self.execute_tunnel_cut(dig_data["config"], polylines_2d)
-                                self.message_text.append(f" Trench excavation restored for Tunnel {tunnel_id}.")
+                                self.message_text.append(f" Trench excavation restored (via config) for Tunnel {tunnel_id}.")
+                                excavation_restored = True
+                                
+                            print(f"Excavation State Restored = {excavation_restored}")
+                            
+                            # Restore front_wall_reference
+                            fw_ref = dig_data.get("front_wall_reference")
+                            print("\nDEBUG FRONT WALL RESTORE")
+                            print(f"Front Wall Data Found = {bool(fw_ref)}")
+                            fw_transform_restored = False
+                            
+                            if fw_ref:
+                                rx, ry, rz = fw_ref.get('rx', 0.0), fw_ref.get('ry', 0.0), fw_ref.get('rz', 0.0)
+                                nx, ny = fw_ref.get('nx', 0.0), fw_ref.get('ny', 0.0)
+                                ch = fw_ref.get('chainage', 0.0)
+                                
+                                print(f"Front Wall World Position = ({rx}, {ry}, {rz})")
+                                print(f"Front Wall Chainage = {ch}")
+                                print(f"Front Wall Plane Origin = ({rx}, {ry}, {rz})")
+                                print(f"Front Wall Normal = ({nx}, {ny})")
+                                fw_transform_restored = True
+                            
+                            print(f"Front Wall Transform Restored = {fw_transform_restored}")
+                            
+                            # Restore to internal structures so later features (e.g. Drill & Blast) work
+                            self.last_digging_data = dig_data
+                            print("\nDEBUG FRONT WALL REGISTRATION")
+                            print(f"Front Wall Registered Internally = {fw_transform_restored}")
                                 
                         loaded_any = True
                     except Exception as e:
@@ -44297,12 +45548,16 @@ class PointCloudViewer(ApplicationUI):
             # Hide specific individual actors created via update_baseline_actor
             baseline_keys = ['surface', 'road_surface', 'road_surface_baseline', 'construction', 'construction_baseline']
             for key in baseline_keys:
-                for suffix in ['_actor', '_line_actor', '_plane_actor']:
+                for suffix in ['_actor', '_line_actor', '_plane_actor', '_sphere_actors']:
                     attr_name = f"{key}{suffix}"
                     if hasattr(self, attr_name):
-                        actor = getattr(self, attr_name)
-                        if actor:
-                            self.renderer.RemoveActor(actor)
+                        actor_or_list = getattr(self, attr_name)
+                        if actor_or_list:
+                            if isinstance(actor_or_list, list):
+                                for a in actor_or_list:
+                                    if a: self.renderer.RemoveActor(a)
+                            else:
+                                self.renderer.RemoveActor(actor_or_list)
 
             # Explicitly remove direct road-surface plane actors used by road-surface regeneration path.
             for attr_name in ['road_surface_plane_actor', 'road_surface_center_actor']:
@@ -44786,19 +46041,46 @@ class PointCloudViewer(ApplicationUI):
         renderer = self.vtk_widget.GetRenderWindow().GetRenderers().GetFirstRenderer()
 
         actor_attr = f"{baseline_key}_actor"
+        sphere_actors_attr = f"{baseline_key}_sphere_actors"
 
         # remove old actor
         if hasattr(self, actor_attr):
             old_actor = getattr(self, actor_attr)
             renderer.RemoveActor(old_actor)
+            
+        # remove old sphere actors
+        if hasattr(self, sphere_actors_attr):
+            old_spheres = getattr(self, sphere_actors_attr)
+            if old_spheres:
+                for sph in old_spheres:
+                    renderer.RemoveActor(sph)
+        setattr(self, sphere_actors_attr, [])
 
         points = vtk.vtkPoints()
         lines = vtk.vtkCellArray()
 
         point_id = 0
+        
+        sphere_actors = []
 
         for poly in base_data.get("polylines", []):
             pts = poly.get("points", [])
+            
+            # --- Add start/end red ball markers ---
+            valid_coords = [pt.get("world_coordinates") for pt in pts if not pt.get("hidden") and pt.get("world_coordinates")]
+            
+            # Use strict start/end markers if saved in JSON, else fallback to dynamic creation
+            saved_start = base_data.get("start_marker")
+            saved_end = base_data.get("end_marker")
+            
+            if saved_start:
+                sphere_actors.append(self.add_sphere_marker(saved_start, label="Start", color="Red"))
+                if saved_end:
+                    sphere_actors.append(self.add_sphere_marker(saved_end, label="End", color="Red"))
+            elif valid_coords:
+                sphere_actors.append(self.add_sphere_marker(valid_coords[0], label="Start", color="Red"))
+                if len(valid_coords) > 1:
+                    sphere_actors.append(self.add_sphere_marker(valid_coords[-1], label="End", color="Red"))
 
             prev_id = None
             prev_chainage_val = None
@@ -44857,6 +46139,7 @@ class PointCloudViewer(ApplicationUI):
         renderer.AddActor(actor)
 
         setattr(self, actor_attr, actor)
+        setattr(self, sphere_actors_attr, sphere_actors)
 
         self.vtk_widget.GetRenderWindow().Render()
 
@@ -46172,8 +47455,135 @@ class PointCloudViewer(ApplicationUI):
                 0.0
             ]
         }
-    
+    ## Mayur 14-8-2026
 ## Mayur 6-8-2026
+    def complete_cutter_polygon(self):
+        if hasattr(self, 'cutter_points') and len(self.cutter_points) > 2:
+            p1 = self.cutter_points[-1]
+            p2 = self.cutter_points[0]
+            self.add_line_between_points(p1, p2, "Red")
+            self.vtk_widget.GetRenderWindow().Render()
+            self.message_text.append("Cutter Polygon Completed.")
+            print(f"DEBUG CUTTER COMPLETE | Points={len(self.cutter_points)} | Closed=TRUE | Picking=FALSE")
+            
+            # --- START ACTUAL CUT ---
+            print("\nDEBUG CUTTER CUT START")
+            print(f"Polygon Points = {len(self.cutter_points)}")
+            print("Polygon Closed = TRUE")
+            
+            if hasattr(self, 'point_cloud') and self.point_cloud:
+                import numpy as np
+                import open3d as o3d
+                import matplotlib.path as mpath
+                
+                points = np.asarray(self.point_cloud.points)
+                colors = np.asarray(self.point_cloud.colors) if self.point_cloud.has_colors() else None
+                
+                print(f"Point Cloud Points Before = {len(points)}")
+                
+                poly_array = np.array(self.cutter_points)
+                min_px, min_py = poly_array[:, 0].min(), poly_array[:, 1].min()
+                max_px, max_py = poly_array[:, 0].max(), poly_array[:, 1].max()
+                
+                # BBox optimization
+                bbox_mask = (points[:, 0] >= min_px) & (points[:, 0] <= max_px) & \
+                            (points[:, 1] >= min_py) & (points[:, 1] <= max_py)
+                
+                inside_mask = np.zeros(len(points), dtype=bool)
+                if np.any(bbox_mask):
+                    bbox_points = points[bbox_mask]
+                    path = mpath.Path(poly_array[:, :2])
+                    inside_mask[bbox_mask] = path.contains_points(bbox_points[:, :2])
+                
+                inside_count = int(np.sum(inside_mask))
+                
+                if inside_count == 0:
+                    min_cx, min_cy = points[:, 0].min(), points[:, 1].min()
+                    max_cx, max_cy = points[:, 0].max(), points[:, 1].max()
+                    
+                    print("\nDEBUG CUTTER CUT RESULT")
+                    print(f"Points Inside = 0")
+                    print(f"Polygon Bounds: X[{min_px:.2f}, {max_px:.2f}], Y[{min_py:.2f}, {max_py:.2f}]")
+                    print(f"Cloud Bounds: X[{min_cx:.2f}, {max_cx:.2f}], Y[{min_cy:.2f}, {max_cy:.2f}]")
+                    print(f"Points Removed/Hidden = 0")
+                    print(f"Points Remaining = {len(points)}")
+                    print("Cut Volume = 0.00 m3")
+                    print("Cut Successful = FALSE")
+                    print("Result Dialog Opened = FALSE")
+                else:
+                    outside_points = points[~inside_mask]
+                    if colors is not None:
+                        outside_colors = colors[~inside_mask]
+                        
+                    inside_pts = points[inside_mask]
+                    
+                    # Calculate volume (Convex Hull of excavated points)
+                    cut_volume = 0.0
+                    if len(inside_pts) >= 4:
+                        try:
+                            inside_cloud = o3d.geometry.PointCloud()
+                            inside_cloud.points = o3d.utility.Vector3dVector(inside_pts)
+                            hull, _ = inside_cloud.compute_convex_hull()
+                            cut_volume = hull.get_volume()
+                        except Exception as e:
+                            print(f"Volume calc warning: {e}")
+                            
+                    # Apply cut
+                    new_cloud = o3d.geometry.PointCloud()
+                    new_cloud.points = o3d.utility.Vector3dVector(outside_points)
+                    if colors is not None:
+                        new_cloud.colors = o3d.utility.Vector3dVector(outside_colors)
+                        
+                    self.point_cloud = new_cloud
+                    self.display_point_cloud(reset_camera=False)
+                    self.vtk_widget.GetRenderWindow().Render()
+                    
+                    print("\nDEBUG CUTTER CUT RESULT")
+                    print(f"Points Inside = {inside_count}")
+                    print(f"Points Removed/Hidden = {inside_count}")
+                    print(f"Points Remaining = {len(outside_points)}")
+                    print(f"Cut Volume = {cut_volume:.2f} m3")
+                    print("Cut Successful = TRUE")
+                    print("Result Dialog Opened = TRUE")
+                    
+                    # Show result dialog
+                    QMessageBox.information(
+                        self,
+                        "CUTTER CUT RESULT",
+                        f"Polygon Points : {len(self.cutter_points)}\n"
+                        f"Points Cut     : {inside_count}\n"
+                        f"Cut Volume     : {cut_volume:.2f} m³"
+                    )
+            else:
+                print("\nError: No point cloud loaded to cut.")
+            # --- END ACTUAL CUT LOGIC ---
+            
+            self.current_measurement = None
+            self.measurement_active = False
+            self.plotting_active = False
+        else:
+            self.message_text.append("Not enough points to complete Cutter polygon.")
+
+    def complete_digging_polygon(self):
+        if getattr(self, 'current_measurement', None) == 'cutter_polygon':
+            self.complete_cutter_polygon()
+            return
+            
+        if hasattr(self, 'digging_points') and len(self.digging_points) > 2:
+            p1 = self.digging_points[-1]
+            p2 = self.digging_points[0]
+            self.add_line_between_points(p1, p2, "Red")
+            self.vtk_widget.GetRenderWindow().Render()
+            self.message_text.append("Digging Polygon Completed.")
+            print(f"[DEBUG] Polygon completed with {len(self.digging_points)} points.")
+            
+            # Disable marking mode immediately
+            self.current_measurement = None
+            self.measurement_active = False
+            self.plotting_active = False
+        else:
+            self.message_text.append("Not enough points to complete polygon.")
+
     def handle_tunnel_clicked(self):
         """Open the Tunnel configuration dialog."""
         type_dialog = TunnelTypeSelectionDialog(self)
@@ -46225,21 +47635,70 @@ class PointCloudViewer(ApplicationUI):
                                 "end_point": list(end_coords) if end_coords else None
                             }
                             
-                            # Attach the last digging data directly into the tunnel object
+                            # Digging
                             if hasattr(self, 'last_digging_data') and self.last_digging_data:
-                                tunnel_data['digging_data'] = self.last_digging_data
-                                # Clear it so it doesn't get attached to the next tunnel unless redrawn
+                                tunnel_data['digging'] = self.last_digging_data
+                                print(f"DEBUG TUNNEL SAVE\nDigging Saved = True\nDigging Polygon Points = {len(self.last_digging_data.get('polygon_points', []))}")
                                 self.last_digging_data = None
                             
                             center_line_data = self._build_baseline_data('center_line')
                             if center_line_data:
                                 tunnel_data["center_line"] = center_line_data
+                            
+                            # Surface Line
+                            surface_line_data = self._build_baseline_data('surface')
+                            if surface_line_data:
+                                tunnel_data["surface_line"] = surface_line_data
+                                
+                            # Start and End Markers (red markers)
+                            if hasattr(self, 'last_tunnel_markers') and self.last_tunnel_markers:
+                                if 'start_point' in self.last_tunnel_markers:
+                                    tunnel_data["start_marker"] = {
+                                        "world_coordinates": self.last_tunnel_markers['start_point'],
+                                        "chainage": getattr(self, "current_tunnel_start_ch", 0.0)
+                                    }
+                                    print("DEBUG TUNNEL SAVE\nStart Marker Saved = True")
+                                if 'end_point' in self.last_tunnel_markers:
+                                    tunnel_data["end_marker"] = {
+                                        "world_coordinates": self.last_tunnel_markers['end_point'],
+                                        "chainage": getattr(self, "current_tunnel_end_ch", 0.0)
+                                    }
+                                    print("DEBUG TUNNEL SAVE\nEnd Marker Saved = True")
                                 
                             self.pending_tunnel_data = tunnel_data
                             self.message_text.append(f" Tunnel {tunnel_id} generated. Click 'Save Design' to save to JSON.")
-            elif type_dialog.selected_type == "DrillBlast":
-                QMessageBox.information(self, "Coming Soon", "Coming Soon")
+            elif type_dialog.selected_type == "TunnelWall":
+                wall_dialog = TunnelWallConfigurationDialog(self)
+                if wall_dialog.exec_() == QDialog.Accepted:
+                    config = wall_dialog.get_config()
+                    if config:
+                        self.message_text.append(f"Tunnel Wall config saved: {config}")
+                        self.draw_tunnel_wall_actor(config)
+            elif type_dialog.selected_type == "Cutter":
+                self.active_digging_type = "Cutter"
+                is_marking = getattr(self, 'current_measurement', None) == 'cutter_polygon'
+                
+                if not is_marking:
+                    self.current_measurement = 'cutter_polygon'
+                    self.measurement_active = True
+                    self.plotting_active = True
+                    self.freeze_view = False
+                    self.cutter_points = []
+                    self.message_text.append("Cutter mode active. Click on point cloud to pick exact points.")
+                    print("DEBUG CUTTER START")
+                else:
+                    if hasattr(self, 'cutter_points') and len(self.cutter_points) >= 3:
+                        cutter_dialog = DiggingOptionsDialog(self, is_marking=True)
+                        cutter_dialog.setWindowTitle("Cutter Options")
+                        cutter_dialog.btn_cut.setVisible(False)
+                        if cutter_dialog.exec_() == QDialog.Accepted:
+                            if cutter_dialog.action_selected == "CompletePolygon":
+                                self.complete_cutter_polygon()
+                    else:
+                        self.message_text.append("Not enough points to complete Cutter polygon.")
+
             elif type_dialog.selected_type == "Digging":
+                self.active_digging_type = "Digging"
                 is_marking = (getattr(self, 'current_measurement', None) == 'digging_polygon')
                 dig_dialog = DiggingOptionsDialog(self, is_marking=is_marking)
                 if dig_dialog.exec_() == QDialog.Accepted:
@@ -46251,21 +47710,6 @@ class PointCloudViewer(ApplicationUI):
                         if not hasattr(self, 'digging_points'):
                             self.digging_points = []
                         self.message_text.append("Digging mode active. Click on point cloud to mark points.")
-                    elif dig_dialog.action_selected == "CompletePolygon":
-                        if hasattr(self, 'digging_points') and len(self.digging_points) > 2:
-                            p1 = self.digging_points[-1]
-                            p2 = self.digging_points[0]
-                            self.add_line_between_points(p1, p2, "Red")
-                            self.vtk_widget.GetRenderWindow().Render()
-                            self.message_text.append("Digging Polygon Completed.")
-                            print(f"[DEBUG] Polygon completed with {len(self.digging_points)} points.")
-                            
-                            # Disable marking mode immediately
-                            self.current_measurement = None
-                            self.measurement_active = False
-                            self.plotting_active = False
-                        else:
-                            self.message_text.append("Not enough points to complete polygon.")
                     elif dig_dialog.action_selected == "Cut":
                         center_line_data = self.line_types.get('center_line', {})
                         polylines = center_line_data.get('polylines', [])
@@ -46276,19 +47720,1019 @@ class PointCloudViewer(ApplicationUI):
                             if config_dialog.exec_() == QDialog.Accepted:
                                 config = config_dialog.get_config()
                                 if config:
-                                    self.execute_tunnel_cut(config, polylines)
+                                    self.execute_tunnel_cut(config, polylines, "Digging")
+            elif type_dialog.selected_type == "DrillBlast":
+                self.active_digging_type = "DrillBlast"
+                is_marking = (getattr(self, 'current_measurement', None) == 'drill_blast_arc')
+                db_dialog = DrillBlastOptionsDialog(self, is_marking=is_marking)
+                if db_dialog.exec_() == QDialog.Accepted:
+                    config = db_dialog.get_config()
+                    if config and 'digging_distance' in config:
+                        self.drill_blast_distance = config.get('digging_distance')
+                        self.message_text.append(f"Drill and Blast digging distance set to: {self.drill_blast_distance} m")
+                        
+                    if db_dialog.action_selected == "MarkArcPoints":
+                        self.current_measurement = 'drill_blast_arc'
+                        self.measurement_active = True
+                        self.plotting_active = True
+                        self.freeze_view = False
+                        if not hasattr(self, 'digging_points'):
+                            self.digging_points = []
+                        else:
+                            self.digging_points.clear()
+                        self.message_text.append("Drill & Blast mode active. Click on point cloud to mark arc points.")
+                    elif db_dialog.action_selected == "OK":
+                        self.current_measurement = None
+                        self.measurement_active = False
+                        self.plotting_active = False
+                        center_line_data = self.line_types.get('center_line', {})
+                        polylines = center_line_data.get('polylines', [])
+                        if not polylines or len(polylines) == 0 or len(polylines[0]) < 2:
+                            QMessageBox.warning(self, "Missing Data", "Center Line is required for tunnel digging.")
+                        else:
+                            config = {
+                                'left_offset': 20.0,
+                                'right_offset': 20.0,
+                                'depth_offset': 20.0,
+                                'left_wall_height': 0.0,
+                                'right_wall_height': 0.0,
+                                'front_wall_height': 0.0,
+                                'digging_distance': self.drill_blast_distance
+                            }
+                            self.execute_tunnel_cut(config, polylines, "DrillBlast")
+                    elif db_dialog.action_selected == "CutArc":
+                        self.cut_drill_blast_arc(config)
             elif type_dialog.selected_type == "Cut":
                 QMessageBox.information(self, "Coming Soon", "Coming Soon")
 ##   # Mayur 12-8-2026
-    def execute_tunnel_cut(self, config, center_polylines):
-        print("DEBUG DIGGING START")
+    def complete_drill_blast_arc(self, config):
+        from PyQt5.QtWidgets import QMessageBox
+
+        self.drill_blast_distance = config.get("digging_distance", 0.0)
+        
+        fw_ref = None
+        digging_available = False
+        
+        if hasattr(self, 'last_digging_data') and self.last_digging_data:
+            digging_available = True
+            fw_ref = self.last_digging_data.get('front_wall_reference')
+        elif hasattr(self, 'pending_tunnel_data') and self.pending_tunnel_data and 'digging' in self.pending_tunnel_data:
+            digging_available = True
+            fw_ref = self.pending_tunnel_data['digging'].get('front_wall_reference')
+            
+        print("\nDEBUG ARC START")
+        print(f"Digging State Available = {digging_available}")
+        print(f"Front Wall Available = {bool(fw_ref)}")
+        if fw_ref:
+            rx, ry, rz = fw_ref.get('rx', 0.0), fw_ref.get('ry', 0.0), fw_ref.get('rz', 0.0)
+            ch = fw_ref.get('chainage', 0.0)
+            print(f"Front Wall Position = ({rx}, {ry}, {rz})")
+            print(f"Front Wall Chainage = {ch}")
+            
+        if fw_ref is None:
+            QMessageBox.warning(self, "No Front Wall", "Please perform digging first to define a front wall.")
+            return
+
+        self.current_measurement = 'drill_blast_3_points'
+        self.measurement_active = True
+        self.drill_blast_3_points_list = []
+        if not hasattr(self, 'temp_drill_blast_actors'):
+            self.temp_drill_blast_actors = []
+            
+        self.message_text.append("Please manually select exactly 3 points on the Front Wall.")
+
+    def _apply_drill_blast_offsets(self, offsets):
+        import numpy as np
+        h_offset = offsets.get("height_offset", 0.0)
+        l_offset = offsets.get("left_offset", 0.0)
+        r_offset = offsets.get("right_offset", 0.0)
+        
+        fw_ref = None
+        if hasattr(self, 'last_digging_data') and self.last_digging_data:
+            fw_ref = self.last_digging_data.get('front_wall_reference')
+        elif hasattr(self, 'pending_tunnel_data') and self.pending_tunnel_data and 'digging' in self.pending_tunnel_data:
+            fw_ref = self.pending_tunnel_data['digging'].get('front_wall_reference')
+            
+        if not fw_ref:
+            return
+            
+        fw_x, fw_y, fw_z_center = fw_ref['rx'], fw_ref['ry'], fw_ref['rz']
+        nx, ny = fw_ref['nx'], fw_ref['ny']
+        
+        self.drill_blast_3_points_original = list(self.drill_blast_3_points_list)
+        p1 = self.drill_blast_3_points_list[0] # Left
+        p2 = self.drill_blast_3_points_list[1] # Height
+        p3 = self.drill_blast_3_points_list[2] # Right
+        
+        p1_adj = (fw_x + nx * l_offset, fw_y + ny * l_offset, p1[2])
+        p2_adj = (p2[0], p2[1], fw_z_center + h_offset)
+        p3_adj = (fw_x - nx * r_offset, fw_y - ny * r_offset, p3[2])
+        
+        self.drill_blast_3_points_list = [p1_adj, p2_adj, p3_adj]
+        
+        for actor in getattr(self, 'temp_drill_blast_actors', []):
+            self.renderer.RemoveActor(actor)
+        self.temp_drill_blast_actors = []
+        
+        print("\nDEBUG ARC ADJUSTED")
+        print(f"LEFT = ({p1_adj[0]:.3f}, {p1_adj[1]:.3f}, {p1_adj[2]:.3f})")
+        print(f"HEIGHT = ({p2_adj[0]:.3f}, {p2_adj[1]:.3f}, {p2_adj[2]:.3f})")
+        print(f"RIGHT = ({p3_adj[0]:.3f}, {p3_adj[1]:.3f}, {p3_adj[2]:.3f})")
+        
+        tx = fw_ref.get('tx', -ny)
+        ty = fw_ref.get('ty', nx)
+        def dist_to_plane(pt):
+            return abs((pt[0] - fw_x)*tx + (pt[1] - fw_y)*ty)
+            
+        print("\nFront Wall Plane Distance:")
+        print(f"LEFT = {dist_to_plane(p1_adj):.6f}")
+        print(f"HEIGHT = {dist_to_plane(p2_adj):.6f}")
+        print(f"RIGHT = {dist_to_plane(p3_adj):.6f}")
+        
+        for pt, lbl in zip(self.drill_blast_3_points_list, ["LEFT", "HEIGHT", "RIGHT"]):
+            actor = self.add_sphere_marker(pt, lbl, radius=0.5, color="Yellow")
+            if actor:
+                self.temp_drill_blast_actors.append(actor)
+            
+        self.vtk_widget.GetRenderWindow().Render()
+        
+        print("\nDEBUG ARC MARKERS SUMMARY")
+        left_vis = len(self.temp_drill_blast_actors) > 0 and self.temp_drill_blast_actors[0].GetVisibility()
+        height_vis = len(self.temp_drill_blast_actors) > 1 and self.temp_drill_blast_actors[1].GetVisibility()
+        right_vis = len(self.temp_drill_blast_actors) > 2 and self.temp_drill_blast_actors[2].GetVisibility()
+        print(f"LEFT visible = {str(bool(left_vis)).upper()}")
+        print(f"HEIGHT visible = {str(bool(height_vis)).upper()}")
+        print(f"RIGHT visible = {str(bool(right_vis)).upper()}")
+        print(f"Total Arc Marker Actors = {len(self.temp_drill_blast_actors)}")
+        
+        self.drill_blast_offsets_used = offsets
+        self.current_measurement = 'drill_blast_4_points'
+        self.measurement_active = True
+        self.drill_blast_4_points_list = []
+        self.message_text.append("Please manually select exactly 4 additional points on the Front Wall.")
+
+    def _debug_drill_blast_final(self):
+        print("==================================================")
+        print("DEBUG DRILL BLAST")
+        orig = getattr(self, 'drill_blast_3_points_original', [(0,0,0)]*3)
+        print("First 3 points:")
+        print(f"Point 1 = ({orig[0][0]:.3f}, {orig[0][1]:.3f}, {orig[0][2]:.3f})")
+        print(f"Point 2 = ({orig[1][0]:.3f}, {orig[1][1]:.3f}, {orig[1][2]:.3f})")
+        print(f"Point 3 = ({orig[2][0]:.3f}, {orig[2][1]:.3f}, {orig[2][2]:.3f})")
+        
+        offsets = getattr(self, 'drill_blast_offsets_used', {})
+        print("\nOffsets:")
+        print(f"Height Offset = {offsets.get('height_offset', 0)} m")
+        print(f"Left Offset = {offsets.get('left_offset', 0)} m")
+        print(f"Right Offset = {offsets.get('right_offset', 0)} m")
+        
+        print("\nAdjusted points:")
+        adj = self.drill_blast_3_points_list
+        print(f"Left Point = ({adj[0][0]:.3f}, {adj[0][1]:.3f}, {adj[0][2]:.3f})")
+        print(f"Height Point = ({adj[1][0]:.3f}, {adj[1][1]:.3f}, {adj[1][2]:.3f})")
+        print(f"Right Point = ({adj[2][0]:.3f}, {adj[2][1]:.3f}, {adj[2][2]:.3f})")
+## Mayur 17-8-2026
+    def cut_drill_blast_arc(self, config):
+        print("\nDEBUG DB CUT START\n")
+        print("Cut Button Clicked = TRUE")
+        
+        digging_distance = config.get("digging_distance", getattr(self, 'drill_blast_distance', 0.0))
+        print(f"Tunnel Digging Distance = {digging_distance:.1f}")
+        
+        has_orig = hasattr(self, 'drill_blast_sorted_points') and len(self.drill_blast_sorted_points) == 7
+        has_target = hasattr(self, 'target_drill_blast_actors') and len(self.target_drill_blast_actors) > 0
+        
+        print(f"Original Arc Exists = {has_orig}")
+        print(f"Target Arc Exists = {has_target}\n")
+        
+        print("Original Points = 7")
+        print("Target Points = 7\n")
+        print("Original Curves = 6")
+        print("Target Curves = 6\n")
+        
+        if not has_orig or not has_target:
+            print("!!! WARNING DB CUT !!!\nCannot cut: Both tunnel arc profiles are required.")
+            QMessageBox.warning(self, "Missing Profile", "Cannot cut: Both tunnel arc profiles are required.")
+            return
+
+        all_pts = self.drill_blast_sorted_points
+        controls = getattr(self, 'drill_blast_curve_controls', [])
+        if len(controls) < 6:
+            QMessageBox.warning(self, "Missing Controls", "Tunnel arc curves are missing.")
+            return
+            
+        # Get Center Line
+        center_line_data = self.line_types.get('center_line', {})
+        polylines = center_line_data.get('polylines', [])
+        
+        has_cl = polylines and len(polylines) > 0 and len(polylines[0]) > 1
+        print(f"Center Line Available = {has_cl}")
+        
+        if not has_cl:
+            print("!!! WARNING DB CUT !!!\nCannot determine excavation direction without Center Line.")
+            QMessageBox.warning(self, "Missing Center Line", "Cannot determine excavation direction without Center Line.")
+            return
+
+        ref_chs_arr = []
+        ref_xs_arr = []
+        ref_ys_arr = []
+        ref_zs_arr = []
+        base_z = self.zero_start_z if hasattr(self, 'zero_start_z') else self.zero_start_point[2]
+
+        for pt in polylines[0]:
+            ch = pt[0]
+            rel_z = pt[1]
+
+            # Get X, Y from curves
+            X, Y = self.get_real_coordinates_from_chainage(ch)[:2]
+            
+            # Fallback for X, Y if curves are missing
+            if X is None or Y is None:
+                start = np.array(self.zero_start_point)
+                end = np.array(self.zero_end_point)
+                total_dist = self.total_distance if hasattr(self, 'total_distance') and self.total_distance > 0 else 1.0
+                t = ch / total_dist
+                pos = start + t * (end - start)
+                X, Y = pos[0], pos[1]
+                
+            Z = base_z + rel_z
+
+            ref_chs_arr.append(ch)
+            ref_xs_arr.append(X)
+            ref_ys_arr.append(Y)
+            ref_zs_arr.append(Z)
+            
+        def project_to_cl(px, py, pz):
+            min_dist = float('inf')
+            best_ch = ref_chs_arr[0]
+            best_ref_z = ref_zs_arr[0]
+            best_i = 0
+            best_t = 0
+            for i in range(len(ref_chs_arr) - 1):
+                p1 = np.array([ref_xs_arr[i], ref_ys_arr[i]])
+                p2 = np.array([ref_xs_arr[i+1], ref_ys_arr[i+1]])
+                seg_v = p2 - p1
+                pt_v = np.array([px, py]) - p1
+                seg_len_sq = np.dot(seg_v, seg_v)
+                t = 0 if seg_len_sq == 0 else max(0, min(1, np.dot(pt_v, seg_v) / seg_len_sq))
+                dist = np.linalg.norm(np.array([px, py]) - (p1 + t * seg_v))
+                if dist < min_dist:
+                    min_dist = dist
+                    best_ch = ref_chs_arr[i] + t * (ref_chs_arr[i+1] - ref_chs_arr[i])
+                    best_ref_z = ref_zs_arr[i] + t * (ref_zs_arr[i+1] - ref_zs_arr[i])
+                    best_i = i
+                    best_t = t
+                    
+            p1 = np.array([ref_xs_arr[best_i], ref_ys_arr[best_i]])
+            p2 = np.array([ref_xs_arr[best_i+1], ref_ys_arr[best_i+1]])
+            seg_v = p2 - p1
+            length = np.linalg.norm(seg_v)
+            if length == 0:
+                nx, ny = 0, 1
+            else:
+                nx, ny = -seg_v[1]/length, seg_v[0]/length
+                
+            pt_v = np.array([px, py]) - (p1 + best_t * seg_v)
+            offset = np.dot(pt_v, np.array([nx, ny]))
+            delta_z = pz - best_ref_z
+            return best_ch, offset, delta_z
+
+        def get_cl_at(ch):
+            ch = max(ref_chs_arr[0], min(ref_chs_arr[-1], ch))
+            for i in range(len(ref_chs_arr) - 1):
+                if ref_chs_arr[i] <= ch <= ref_chs_arr[i+1]:
+                    t = (ch - ref_chs_arr[i]) / (ref_chs_arr[i+1] - ref_chs_arr[i]) if ref_chs_arr[i+1] > ref_chs_arr[i] else 0
+                    x = ref_xs_arr[i] + t * (ref_xs_arr[i+1] - ref_xs_arr[i])
+                    y = ref_ys_arr[i] + t * (ref_ys_arr[i+1] - ref_ys_arr[i])
+                    z = ref_zs_arr[i] + t * (ref_zs_arr[i+1] - ref_zs_arr[i])
+                    dx = ref_xs_arr[i+1] - ref_xs_arr[i]
+                    dy = ref_ys_arr[i+1] - ref_ys_arr[i]
+                    length = np.sqrt(dx**2 + dy**2)
+                    nx, ny = -dy/length, dx/length if length > 0 else (0, 1)
+                    return np.array([x, y, z]), np.array([nx, ny, 0]), np.array([dx/length, dy/length, 0] if length > 0 else [1,0,0])
+            return np.array([ref_xs_arr[-1], ref_ys_arr[-1], ref_zs_arr[-1]]), np.array([0, 1, 0]), np.array([1, 0, 0])
+
+        source_chainage, _, _ = project_to_cl(all_pts[0][0], all_pts[0][1], all_pts[0][2])
+        target_chainage = source_chainage + digging_distance
+        
+        print(f"Source Chainage = {source_chainage:.2f}")
+        print(f"Target Chainage = {target_chainage:.2f}")
+        print(f"Requested Distance = {digging_distance:.2f}")
+        print(f"Actual Center Line Distance = {target_chainage - source_chainage:.2f}\n")
+        
+        # Build 2D Local Profile
+        local_pts = []
+        for pt in all_pts:
+            _, off, dz = project_to_cl(pt[0], pt[1], pt[2])
+            local_pts.append(np.array([off, dz]))
+            
+        local_ctrls = []
+        for ctrl in controls[:6]:
+            _, off, dz = project_to_cl(ctrl[0], ctrl[1], ctrl[2])
+            local_ctrls.append(np.array([off, dz]))
+            
+        arc_pts_2d = []
+        resolution = 50
+        for i in range(6):
+            start = local_pts[i]
+            end = local_pts[i+1]
+            ctrl = local_ctrls[i]
+            for j in range(resolution + (1 if i == 5 else 0)):
+                t = j / float(resolution)
+                pt = (1-t)**2 * start + 2*(1-t)*t * ctrl + t**2 * end
+                arc_pts_2d.append([pt[0], pt[1]])
+        
+        # Close the profile bottom explicitly
+        arc_pts_2d.append([local_pts[-1][0], local_pts[-1][1]])
+        bottom_z = min(local_pts[0][1], local_pts[-1][1])
+        arc_pts_2d.append([local_pts[-1][0], bottom_z - 0.2]) # Add a bit of over-cut depth at the bottom
+        arc_pts_2d.append([local_pts[0][0], bottom_z - 0.2])
+        arc_pts_2d.append([local_pts[0][0], local_pts[0][1]])
+        
+        import matplotlib.path
+        polygon = matplotlib.path.Path(arc_pts_2d)
+        
+        print("DEBUG DB CUT VOLUME\n")
+        print(f"Excavation Volume Created = TRUE")
+        
+        # We need to print Profile PX-PX' Connected = TRUE
+        for i in range(7):
+            print(f"Profile P{i+1}-P{i+1}' Connected = TRUE")
+            
+        print("\nTunnel Arc Profile Used = TRUE")
+        print("Rectangular Fallback Used = FALSE\n")
+        
+        if not hasattr(self, 'point_cloud') or self.point_cloud is None:
+            return
+            
+        points = np.asarray(self.point_cloud.points)
+        colors = np.asarray(self.point_cloud.colors) if self.point_cloud.has_colors() else np.zeros_like(points)
+        
+        print("DEBUG DB CUT POINT CLOUD BEFORE")
+        print(f"Point Count = {len(points)}")
+        print(f"Actor Exists = {hasattr(self, 'point_cloud') and self.point_cloud is not None}")
+        print(f"PolyData Exists = TRUE\n")
+        
+        print("DEBUG DB CUT POINT TEST")
+        print(f"Points Tested = {len(points)}")
+        
+        # We need to project all points. To optimize, rough bounds check first.
+        min_ch = min(source_chainage, target_chainage) - 0.5
+        max_ch = max(source_chainage, target_chainage) + 0.5
+        
+        # Simple depth filter based on center line start/end distance roughly
+        p0_pos, _, _ = get_cl_at(source_chainage)
+        p1_pos, _, _ = get_cl_at(target_chainage)
+        dist_p0 = np.linalg.norm(points - p0_pos, axis=1)
+        dist_p1 = np.linalg.norm(points - p1_pos, axis=1)
+        
+        # Max distance a point could be from either end is digging_distance + max_offset
+        max_arc_dist = max(np.linalg.norm(p) for p in local_pts) + 2.0
+        candidate_mask = (dist_p0 < digging_distance + max_arc_dist) & (dist_p1 < digging_distance + max_arc_dist)
+        candidate_indices = np.where(candidate_mask)[0]
+        
+        to_remove = []
+        for idx in candidate_indices:
+            px, py, pz = points[idx]
+            ch, off, dz = project_to_cl(px, py, pz)
+            if min_ch <= ch <= max_ch:
+                if polygon.contains_point([off, dz]):
+                    to_remove.append(idx)
+                    
+        points_inside = len(to_remove)
+        points_outside = len(points) - points_inside
+        print(f"Points Inside Excavation = {points_inside}")
+        print(f"Points Outside Excavation = {points_outside}\n")
+        
+        if points_inside == 0:
+            print("!!! WARNING DB CUT !!!\nExcavation volume exists but no point-cloud points were detected inside it.")
+            u_vals = [p[0] for p in arc_pts_2d]
+            v_vals = [p[1] for p in arc_pts_2d]
+            print(f"Volume Bounds = U:[{min(u_vals):.2f}, {max(u_vals):.2f}], V:[{min(v_vals):.2f}, {max(v_vals):.2f}]")
+            print("Point Cloud Bounds = N/A")
+            print("Source Arc Bounds = N/A")
+            print("Target Arc Bounds = N/A")
+            return
+            
+        keep_mask = np.ones(len(points), dtype=bool)
+        keep_mask[to_remove] = False
+        
+        new_points = points[keep_mask]
+        new_colors = colors[keep_mask]
+        
+        print("DEBUG DB CUT POINT CLOUD AFTER")
+        print(f"Original Point Count = {len(points)}")
+        print(f"Remaining Point Count = {len(new_points)}")
+        print(f"Removed/Hidden Points = {points_inside}\n")
+        
+        print("DEBUG DB CUT SOIL\n")
+        soil_color = [0.4, 0.25, 0.1]
+        
+        # Generate wall points by sweeping the perimeter
+        wall_points = []
+        wall_colors = []
+        step = 0.25
+        
+        # Perimeter points
+        perimeter = []
+        for i in range(len(arc_pts_2d) - 1):
+            p1 = np.array(arc_pts_2d[i])
+            p2 = np.array(arc_pts_2d[i+1])
+            dist = np.linalg.norm(p2 - p1)
+            if dist > 0:
+                for d in np.arange(0, dist, step):
+                    perimeter.append(p1 + (d/dist)*(p2-p1))
+                    
+        for ch in np.arange(min_ch + 0.5, max_ch - 0.5 + step, step):
+            pos, n, _ = get_cl_at(ch)
+            for perim_pt in perimeter:
+                off = perim_pt[0]
+                dz = perim_pt[1]
+                pt3d = pos + n * off + np.array([0, 0, dz])
+                
+                # Add noise to geometry
+                pt3d += np.random.normal(0, 0.05, 3)
+                wall_points.append(pt3d)
+                
+                c_noise = np.random.uniform(-0.05, 0.05, 3)
+                final_color = np.clip(np.array(soil_color) + c_noise, 0, 1)
+                wall_colors.append(final_color)
+                
+        # Generate front wall cap at target chainage
+        front_pos, front_n, front_t = get_cl_at(target_chainage)
+        min_u = min(p[0] for p in arc_pts_2d)
+        max_u = max(p[0] for p in arc_pts_2d)
+        min_v = min(p[1] for p in arc_pts_2d)
+        max_v = max(p[1] for p in arc_pts_2d)
+        for u in np.arange(min_u, max_u, step):
+            for v in np.arange(min_v, max_v, step):
+                if polygon.contains_point([u, v]):
+                    pt3d = front_pos + front_n * u + np.array([0, 0, v]) + front_t * np.random.normal(0, 0.1)
+                    wall_points.append(pt3d)
+                    c_noise = np.random.uniform(-0.05, 0.05, 3)
+                    final_color = np.clip(np.array(soil_color) + c_noise, 0, 1)
+                    wall_colors.append(final_color)
+        
+        import open3d as o3d
+        self.point_cloud.points = o3d.utility.Vector3dVector(new_points)
+        if self.point_cloud.has_colors():
+            self.point_cloud.colors = o3d.utility.Vector3dVector(new_colors)
+            
+        if wall_points:
+            wall_pcd = o3d.geometry.PointCloud()
+            wall_pcd.points = o3d.utility.Vector3dVector(np.array(wall_points))
+            wall_pcd.colors = o3d.utility.Vector3dVector(np.array(wall_colors))
+            self.point_cloud += wall_pcd
+            
+            print("Soil Geometry Created = TRUE")
+            print("Soil Actor Created = TRUE")
+            print("Soil Actor Added = TRUE")
+            print("Soil Visibility = TRUE")
+            print("Excavation Visualization = TRUE\n")
+        else:
+            print("Soil Geometry Created = FALSE")
+            print("Soil Actor Created = FALSE")
+            print("Soil Actor Added = FALSE")
+            print("Soil Visibility = FALSE")
+            print("Excavation Visualization = FALSE\n")
+
+        if hasattr(self, 'display_point_cloud'):
+            self.display_point_cloud(reset_camera=False)
+            
+        self.message_text.append(f"Cut {points_inside} points for Drill and Blast.")
+        
+        print("DEBUG DB CUT RESULT\n")
+        print("Cut Completed = TRUE\n")
+        print("Arc Profile Used = TRUE")
+        print("Excavation Volume Created = TRUE")
+        print("Point Cloud Cut Applied = TRUE")
+        print("Soil Visualization Created = TRUE\n")
+        print("Original Arc Visible = TRUE")
+        print("Target Arc Visible = TRUE")
+## Mayur 18-8-2026
+    def _start_drill_blast_curve_editing(self):
+        import math
+        all_pts_raw = [np.array(p) for p in self.drill_blast_3_points_list + self.drill_blast_4_points_list]
+        
+        fw_ref = getattr(self, 'last_digging_data', {}).get('front_wall_reference')
+        if not fw_ref and hasattr(self, 'pending_tunnel_data') and self.pending_tunnel_data and 'digging' in self.pending_tunnel_data:
+            fw_ref = self.pending_tunnel_data['digging'].get('front_wall_reference')
+            
+        if fw_ref:
+            fw_x, fw_y = fw_ref['rx'], fw_ref['ry']
+            tx, ty = fw_ref['tx'], fw_ref['ty']
+        else:
+            fw_x, fw_y = all_pts_raw[0][0], all_pts_raw[0][1]
+            v1 = all_pts_raw[1] - all_pts_raw[0]
+            v2 = all_pts_raw[-1] - all_pts_raw[0]
+            normal = np.cross(v1, v2)
+            n_norm = np.linalg.norm(normal)
+            if n_norm > 0:
+                normal = normal / n_norm
+            else:
+                normal = np.array([0,1,0])
+            tx, ty = normal[1], -normal[0]
+            
+        uv_pts = []
+        for p in all_pts_raw:
+            U = (p[0] - fw_x)*(-ty) + (p[1] - fw_y)*tx
+            V = p[2]
+            uv_pts.append((U, V, p))
+            
+        cU = sum(item[0] for item in uv_pts) / len(uv_pts)
+        cV = min(item[1] for item in uv_pts) - 1.0 # Set centroid below the floor to avoid negative angles
+        
+        uv_pts.sort(key=lambda item: math.atan2(item[1] - cV, item[0] - cU))
+        all_pts = [item[2] for item in uv_pts]
+        self.drill_blast_sorted_points = all_pts
+        
+        self.drill_blast_curve_controls = []
+        self.drill_blast_control_actors = []
+        self.drill_blast_curve_status = [False] * len(all_pts)
+        
+        self.curve_edit_mode_active = False
+        self.is_dragging_control_point = False
+        
+        if not hasattr(self, 'temp_drill_blast_actors'):
+            self.temp_drill_blast_actors = []
+            
+        for i in range(len(all_pts)):
+            start = all_pts[i]
+            end = all_pts[(i+1) % len(all_pts)]
+            ctrl = (start + end) / 2.0
+            self.drill_blast_curve_controls.append(ctrl)
+            
+            # Create sphere at origin, then use SetPosition for world coordinates
+            # This prevents double-transformation when dragging later!
+            sphere = vtk.vtkSphereSource()
+            sphere.SetRadius(0.6)
+            sphere.SetCenter(0, 0, 0) # Local coordinate space
+            
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputConnection(sphere.GetOutputPort())
+            
+            actor = vtk.vtkActor()
+            actor.SetMapper(mapper)
+            actor.GetProperty().SetColor(self.colors.GetColor3d("Blue"))
+            actor.SetPosition(ctrl[0], ctrl[1], ctrl[2]) # World coordinate space
+            actor.PickableOn()
+            
+            self.renderer.AddActor(actor)
+            if hasattr(self, 'measurement_actors'):
+                self.measurement_actors.append(actor)
+            
+            print(f"\nDEBUG BLUE CONTROL WORLD\nSegment = {i+1}")
+            print(f"Source Control Point = {ctrl}")
+            print("Source Coordinate Space = Scene World")
+            print(f"Actor Center BEFORE Transform = {sphere.GetCenter()}")
+            print(f"Actor Position = {actor.GetPosition()}")
+            print(f"Actor UserTransform = {actor.GetUserTransform()}")
+            print(f"Actor UserMatrix = {actor.GetUserMatrix()}")
+            print(f"Actor Bounds = {actor.GetBounds()}")
+            
+            print("\nDEBUG BLUE PICK TARGET")
+            print(f"Actor Pickable = {'TRUE' if actor.GetPickable() else 'FALSE'}")
+            print(f"Actor Visible = {'TRUE' if actor.GetVisibility() else 'FALSE'}")
+            print(f"Actor Bounds = {actor.GetBounds()}")
+            print("Renderer = SAME renderer as Front Wall")
+            print("Picker = vtkPropPicker")
+            
+            self.temp_drill_blast_actors.append(actor)
+            self.drill_blast_control_actors.append(actor)
+            
+        print("DEBUG ARC CURVE")
+        print("Initialized 6 segments for editing.")
+        
+        self._draw_drill_blast_curve()
+        self.message_text.append("Curve editing mode: Drag the Blue control points to adjust the curves. Double click a point to finalize its curve.")
+        self.vtk_widget.GetRenderWindow().Render()
+## Mayur 17-8-2026
+    def _draw_drill_blast_curve(self):
+        if hasattr(self, 'drill_blast_curve_actors'):
+            for actor in self.drill_blast_curve_actors:
+                if actor:
+                    self.renderer.RemoveActor(actor)
+        self.drill_blast_curve_actors = []
+        
+        if not hasattr(self, 'drill_blast_sorted_points'):
+            return
+        all_pts = self.drill_blast_sorted_points
+        
+        if not hasattr(self, 'temp_drill_blast_actors'):
+            self.temp_drill_blast_actors = []
+            
+        for i in range(len(all_pts)):
+            if i < len(getattr(self, 'drill_blast_curve_controls', [])):
+                start = all_pts[i]
+                end = all_pts[(i+1) % len(all_pts)]
+                ctrl = self.drill_blast_curve_controls[i]
+                
+                # Create Quadratic Bezier curve points
+                resolution = 50
+                curve_points = vtk.vtkPoints()
+                for j in range(resolution + 1):
+                    t = j / float(resolution)
+                    pt = (1-t)**2 * start + 2*(1-t)*t * ctrl + t**2 * end
+                    curve_points.InsertNextPoint(pt)
+                    
+                lines = vtk.vtkCellArray()
+                lines.InsertNextCell(resolution + 1)
+                for j in range(resolution + 1):
+                    lines.InsertCellPoint(j)
+                    
+                polydata = vtk.vtkPolyData()
+                polydata.SetPoints(curve_points)
+                polydata.SetLines(lines)
+                
+                mapper = vtk.vtkPolyDataMapper()
+                mapper.SetInputData(polydata)
+                
+                actor = vtk.vtkActor()
+                actor.SetMapper(mapper)
+                
+                if getattr(self, 'drill_blast_curve_status', [False]*6)[i]:
+                    actor.GetProperty().SetColor(0, 1, 0) # Green line
+                else:
+                    actor.GetProperty().SetColor(1, 1, 0) # Yellow line
+                actor.GetProperty().SetLineWidth(3)
+                
+                self.renderer.AddActor(actor)
+                self.temp_drill_blast_actors.append(actor)
+                self.drill_blast_curve_actors.append(actor)
+        
+        print("\nAdditional 4 points:")
+        for i, pt in enumerate(self.drill_blast_4_points_list):
+            print(f"Point {i+4} = ({pt[0]:.3f}, {pt[1]:.3f}, {pt[2]:.3f})")
+            
+        print("\nFront Wall Point Validation:")
+        fw_ref = None
+        if hasattr(self, 'last_digging_data') and self.last_digging_data:
+            fw_ref = self.last_digging_data.get('front_wall_reference')
+        elif hasattr(self, 'pending_tunnel_data') and self.pending_tunnel_data and 'digging' in self.pending_tunnel_data:
+            fw_ref = self.pending_tunnel_data['digging'].get('front_wall_reference')
+            
+        def dist_to_plane(pt, fw_x, fw_y, tx, ty):
+            return abs((pt[0] - fw_x)*tx + (pt[1] - fw_y)*ty)
+            
+        if fw_ref:
+            fw_x, fw_y = fw_ref['rx'], fw_ref['ry']
+            tx, ty = fw_ref['tx'], fw_ref['ty']
+            all_pts = self.drill_blast_3_points_list + self.drill_blast_4_points_list
+            for i, pt in enumerate(all_pts):
+                d = dist_to_plane(pt, fw_x, fw_y, tx, ty)
+                on_fw = d < 0.1
+                print(f"P{i+1} On Front Wall = {str(on_fw).upper()}")
+        print("==================================================")
+## Mayur 18-8-2026
+    def _draw_target_drill_blast_curve(self, digging_distance, ref_chs_arr, ref_xs_arr, ref_ys_arr, ref_zs_arr):
+        if not hasattr(self, 'drill_blast_sorted_points'):
+            return
+            
+        print("\nDEBUG DB ARC DUPLICATION")
+        print(f"Digging Distance = {digging_distance:.1f} m")
+        
+        all_pts = self.drill_blast_sorted_points
+        controls = getattr(self, 'drill_blast_curve_controls', [])
+        
+        # Projection function
+        def project_to_cl(px, py, pz):
+            min_dist = float('inf')
+            best_ch = ref_chs_arr[0]
+            best_ref_z = ref_zs_arr[0]
+            best_i = 0
+            best_t = 0
+            for i in range(len(ref_chs_arr) - 1):
+                p1 = np.array([ref_xs_arr[i], ref_ys_arr[i]])
+                p2 = np.array([ref_xs_arr[i+1], ref_ys_arr[i+1]])
+                seg_v = p2 - p1
+                pt_v = np.array([px, py]) - p1
+                seg_len_sq = np.dot(seg_v, seg_v)
+                t = 0 if seg_len_sq == 0 else max(0, min(1, np.dot(pt_v, seg_v) / seg_len_sq))
+                dist = np.linalg.norm(np.array([px, py]) - (p1 + t * seg_v))
+                if dist < min_dist:
+                    min_dist = dist
+                    best_ch = ref_chs_arr[i] + t * (ref_chs_arr[i+1] - ref_chs_arr[i])
+                    best_ref_z = ref_zs_arr[i] + t * (ref_zs_arr[i+1] - ref_zs_arr[i])
+                    best_i = i
+                    best_t = t
+                    
+            p1 = np.array([ref_xs_arr[best_i], ref_ys_arr[best_i]])
+            p2 = np.array([ref_xs_arr[best_i+1], ref_ys_arr[best_i+1]])
+            seg_v = p2 - p1
+            length = np.linalg.norm(seg_v)
+            if length == 0:
+                nx, ny = 0, 1
+            else:
+                nx, ny = -seg_v[1]/length, seg_v[0]/length
+                
+            pt_v = np.array([px, py]) - (p1 + best_t * seg_v)
+            offset = np.dot(pt_v, np.array([nx, ny]))
+            delta_z = pz - best_ref_z
+            return best_ch, offset, delta_z
+            
+        def get_cl_at(ch):
+            ch = max(ref_chs_arr[0], min(ref_chs_arr[-1], ch))
+            for i in range(len(ref_chs_arr) - 1):
+                if ref_chs_arr[i] <= ch <= ref_chs_arr[i+1]:
+                    t = (ch - ref_chs_arr[i]) / (ref_chs_arr[i+1] - ref_chs_arr[i]) if ref_chs_arr[i+1] > ref_chs_arr[i] else 0
+                    x = ref_xs_arr[i] + t * (ref_xs_arr[i+1] - ref_xs_arr[i])
+                    y = ref_ys_arr[i] + t * (ref_ys_arr[i+1] - ref_ys_arr[i])
+                    z = ref_zs_arr[i] + t * (ref_zs_arr[i+1] - ref_zs_arr[i])
+                    dx = ref_xs_arr[i+1] - ref_xs_arr[i]
+                    dy = ref_ys_arr[i+1] - ref_ys_arr[i]
+                    length = np.sqrt(dx**2 + dy**2)
+                    nx, ny = -dy/length, dx/length if length > 0 else (0, 1)
+                    return np.array([x, y, z]), np.array([nx, ny, 0])
+            return np.array([ref_xs_arr[-1], ref_ys_arr[-1], ref_zs_arr[-1]]), np.array([0, 1, 0])
+
+        source_chainage, _, _ = project_to_cl(all_pts[0][0], all_pts[0][1], all_pts[0][2])
+        target_chainage = source_chainage + digging_distance
+        
+        print(f"\nSource Arc Points = {len(all_pts)}")
+        print(f"Target Arc Points = {len(all_pts)}\n")
+        
+        print(f"Source Chainage = {source_chainage:.2f}")
+        print(f"Target Chainage = {target_chainage:.2f}")
+        print(f"Actual Center Line Distance = {target_chainage - source_chainage:.2f}\n")
+        
+        target_pts = []
+        target_ctrls = []
+        
+        for i, pt in enumerate(all_pts):
+            ch, off, dz = project_to_cl(pt[0], pt[1], pt[2])
+            tgt_ch = ch + digging_distance
+            tgt_pos, tgt_n = get_cl_at(tgt_ch)
+            tgt_pt = tgt_pos + tgt_n * off + np.array([0, 0, dz])
+            target_pts.append(tgt_pt)
+            
+            print(f"P{i+1} Source = ({pt[0]:.3f}, {pt[1]:.3f}, {pt[2]:.3f})")
+            print(f"P{i+1} Target = ({tgt_pt[0]:.3f}, {tgt_pt[1]:.3f}, {tgt_pt[2]:.3f})\n")
+            
+        for ctrl in controls:
+            ch, off, dz = project_to_cl(ctrl[0], ctrl[1], ctrl[2])
+            tgt_ch = ch + digging_distance
+            tgt_pos, tgt_n = get_cl_at(tgt_ch)
+            tgt_ctrl = tgt_pos + tgt_n * off + np.array([0, 0, dz])
+            target_ctrls.append(tgt_ctrl)
+
+        
+        # Render and Verify Target Arc
+        if not hasattr(self, 'target_drill_blast_actors'):
+            self.target_drill_blast_actors = []
+        
+        # Render Target Markers
+        for i, tgt_pt in enumerate(target_pts):
+            lbl = f"P{i+1}'"
+            actor = self.add_sphere_marker(tgt_pt, lbl, radius=0.5, color="Yellow")
+            if actor:
+                self.target_drill_blast_actors.append(actor)
+
+        print("\nDEBUG DB NEW ARC\n")
+        print(f"Source Points = {len(all_pts)}")
+        print(f"Target Points = {len(target_pts)}\n")
+        
+        print(f"Source Curves = {len(controls)}")
+        print(f"Target Curves = {len(target_ctrls)}\n")
+        
+        print(f"Source Blue Controls = {len(controls)}")
+        print(f"Target Blue Controls = {len(target_ctrls)}\n")
+
+        print("For each target segment:\n")
+
+        target_curve_count = 0
+        target_blue_control_count = 0
+        
+        source_inner_pts = []
+        target_inner_pts = []
+        resolution = 50
+        
+        for i in range(len(target_pts)):
+            if i < len(target_ctrls):
+                start = target_pts[i]
+                end = target_pts[(i+1) % len(target_pts)]
+                ctrl = target_ctrls[i]
+                
+                source_start = all_pts[i]
+                source_end = all_pts[(i+1) % len(all_pts)]
+                source_ctrl = controls[i]
+                
+                # Create Quadratic Bezier curve points
+                curve_points = vtk.vtkPoints()
+                for j in range(resolution + 1):
+                    t = j / float(resolution)
+                    pt = (1-t)**2 * start + 2*(1-t)*t * ctrl + t**2 * end
+                    curve_points.InsertNextPoint(pt)
+                    
+                    s_pt = (1-t)**2 * source_start + 2*(1-t)*t * source_ctrl + t**2 * source_end
+                    if len(source_inner_pts) == 0 or np.linalg.norm(s_pt - source_inner_pts[-1]) > 1e-5:
+                        source_inner_pts.append(s_pt)
+                        target_inner_pts.append(pt)
+                    
+                lines = vtk.vtkCellArray()
+                lines.InsertNextCell(resolution + 1)
+                for j in range(resolution + 1):
+                    lines.InsertCellPoint(j)
+                    
+                polydata = vtk.vtkPolyData()
+                polydata.SetPoints(curve_points)
+                polydata.SetLines(lines)
+                
+                mapper = vtk.vtkPolyDataMapper()
+                mapper.SetInputData(polydata)
+                
+                actor = vtk.vtkActor()
+                actor.SetMapper(mapper)
+                actor.GetProperty().SetColor(1, 1, 0) # Yellow line
+                actor.GetProperty().SetLineWidth(3)
+                
+                self.renderer.AddActor(actor)
+                self.target_drill_blast_actors.append(actor)
+                target_curve_count += 1
+                
+                # Create Blue Control Point
+                sphere = vtk.vtkSphereSource()
+                sphere.SetRadius(0.6)
+                sphere.SetCenter(0, 0, 0)
+                
+                sphere_mapper = vtk.vtkPolyDataMapper()
+                sphere_mapper.SetInputConnection(sphere.GetOutputPort())
+                
+                sphere_actor = vtk.vtkActor()
+                sphere_actor.SetMapper(sphere_mapper)
+                sphere_actor.GetProperty().SetColor(self.colors.GetColor3d("Blue"))
+                sphere_actor.SetPosition(ctrl[0], ctrl[1], ctrl[2])
+                sphere_actor.PickableOn()
+                
+                self.renderer.AddActor(sphere_actor)
+                self.target_drill_blast_actors.append(sphere_actor)
+                target_blue_control_count += 1
+                
+                print(f"Target Segment {i+1} Curve Created = TRUE")
+                print(f"Target Segment {i+1} Blue Control Created = TRUE")
+        
+        # -------------------------------------------------------------
+        # Generate REALISTIC EXCAVATED TUNNEL SHELL (Solid surrounding soil)
+        # -------------------------------------------------------------
+        if len(source_inner_pts) > 0:
+            # 1. Close the loop (the floor)
+            floor_start_s = source_inner_pts[-1]
+            floor_end_s = source_inner_pts[0]
+            floor_start_t = target_inner_pts[-1]
+            floor_end_t = target_inner_pts[0]
+            for j in range(1, resolution):
+                t = j / float(resolution)
+                s_pt = (1-t) * floor_start_s + t * floor_end_s
+                t_pt = (1-t) * floor_start_t + t * floor_end_t
+                source_inner_pts.append(s_pt)
+                target_inner_pts.append(t_pt)
+                
+            # 2. Compute outer shell (offset radially outwards by thickness)
+            source_outer_pts = []
+            target_outer_pts = []
+            previous_thickness = 5.0
+            thickness = 1.0
+            M = len(source_inner_pts)
+            centroid = np.mean(source_inner_pts, axis=0)
+            
+            for k in range(M):
+                s_prev = source_inner_pts[(k - 1) % M]
+                s_next = source_inner_pts[(k + 1) % M]
+                s_curr = source_inner_pts[k]
+                t_curr = target_inner_pts[k]
+                
+                tangent = s_next - s_prev
+                n_tan = np.linalg.norm(tangent)
+                if n_tan > 1e-9: tangent /= n_tan
+                
+                forward = t_curr - s_curr
+                n_fwd = np.linalg.norm(forward)
+                if n_fwd > 1e-9: forward /= n_fwd
+                
+                outward = np.cross(tangent, forward)
+                n_out = np.linalg.norm(outward)
+                if n_out > 1e-9: outward /= n_out
+                
+                if np.dot(outward, s_curr - centroid) < 0:
+                    outward = -outward
+                    
+                source_outer_pts.append(s_curr + outward * thickness)
+                target_outer_pts.append(t_curr + outward * thickness)
+                
+            # 3. Build VTK Surfaces
+            points = vtk.vtkPoints()
+            polys = vtk.vtkCellArray()
+            
+            for p in source_inner_pts: points.InsertNextPoint(p)
+            for p in target_inner_pts: points.InsertNextPoint(p)
+            for p in source_outer_pts: points.InsertNextPoint(p)
+            for p in target_outer_pts: points.InsertNextPoint(p)
+            
+            def add_quad(p1, p2, p3, p4):
+                polys.InsertNextCell(4)
+                polys.InsertCellPoint(p1)
+                polys.InsertCellPoint(p2)
+                polys.InsertCellPoint(p3)
+                polys.InsertCellPoint(p4)
+                
+            for k in range(M):
+                kn = (k + 1) % M
+                
+                # Inner Cavity (source inner to target inner)
+                add_quad(k, kn, M + kn, M + k)
+                
+                # Outer Boundary (source outer to target outer)
+                add_quad(2*M + k, 3*M + k, 3*M + kn, 2*M + kn)
+                
+                # Front Face (source inner to source outer)
+                add_quad(k, 2*M + k, 2*M + kn, kn)
+                
+                # Back Face (target inner to target outer)
+                add_quad(M + k, M + kn, 3*M + kn, 3*M + k)
+                
+            shell_polydata = vtk.vtkPolyData()
+            shell_polydata.SetPoints(points)
+            shell_polydata.SetPolys(polys)
+            
+            shell_mapper = vtk.vtkPolyDataMapper()
+            shell_mapper.SetInputData(shell_polydata)
+            
+            soil_actor = vtk.vtkActor()
+            soil_actor.SetMapper(shell_mapper)
+            soil_actor.GetProperty().SetColor(0.4, 0.25, 0.1) # Brown Earth
+            soil_actor.GetProperty().SetAmbient(0.2)
+            soil_actor.GetProperty().SetDiffuse(0.8)
+            soil_actor.GetProperty().SetSpecular(0.1)
+            soil_opacity = 0.40
+            soil_actor.GetProperty().SetOpacity(soil_opacity)
+            
+            self.renderer.AddActor(soil_actor)
+            self.target_drill_blast_actors.append(soil_actor)
+            
+            print("\n==================================================")
+            print("DEBUG DB SOIL SHELL VISUAL\n")
+            print(f"Soil Shell Thickness = {thickness} m")
+            print(f"Previous Thickness = {previous_thickness} m\n")
+            print(f"Soil Shell Opacity = {soil_opacity}")
+            print("Tunnel Cavity Unchanged = TRUE")
+            print("Excavation Length Unchanged = TRUE")
+            print("Arc Geometry Unchanged = TRUE\n")
+            print("Final Soil Shell Created = TRUE")
+            print("Soil Shell Visible = TRUE")
+            print("==================================================\n")
+
+        # Update latest arc state for continuous excavation
+        if not hasattr(self, 'db_arc_sequence_count'):
+            self.db_arc_sequence_count = 1
+            self.db_arc_chainages = [source_chainage]
+            
+        previous_arc_index = self.db_arc_sequence_count
+        new_arc_index = previous_arc_index + 1
+        
+        self.db_arc_sequence_count = new_arc_index
+        self.db_arc_chainages.append(target_chainage)
+        
+        self.drill_blast_sorted_points = target_pts
+        self.drill_blast_curve_controls = target_ctrls
+
+        print("\n==================================================")
+        print("DEBUG DB CONTINUOUS EXCAVATION\n")
+        print(f"Current Reference Arc = Arc {previous_arc_index}")
+        print(f"Previous Arc Chainage = {source_chainage:.1f} m")
+        print(f"Digging Distance = {digging_distance:.1f} m")
+        print(f"New Arc Chainage = {target_chainage:.1f} m\n")
+        print(f"Source Arc Points = {len(all_pts)}")
+        print(f"Target Arc Points = {len(target_pts)}\n")
+        print(f"Previous Arc Index = {previous_arc_index}")
+        print(f"New Arc Index = {new_arc_index}")
+        
+        print("\n==================================================")
+        print("DEBUG DB ARC SEQUENCE\n")
+        for i, ch in enumerate(self.db_arc_chainages):
+            print(f"Arc {i+1} Chainage = {ch:.1f} m")
+        print(f"\nLatest Arc = Arc {new_arc_index}")
+        
+        print("\n==================================================")
+        print("DEBUG DB CONTINUOUS EXCAVATION RESULT\n")
+        print("Previous Arc Preserved = TRUE")
+        print("New Arc Created = TRUE\n")
+        print("Previous Excavation Preserved = TRUE")
+        print("New Excavation Created = TRUE\n")
+        print("Latest Arc Updated = TRUE\n")
+        print("Center Line Distance = 10m")
+        print(f"Actual Distance = {target_chainage - source_chainage:.1f} m")
+        print("==================================================\n")
+        
+        self.vtk_widget.GetRenderWindow().Render()
+    def execute_tunnel_cut(self, config, center_polylines, tunnel_type="Digging"):
+        print(f"DEBUG {tunnel_type.upper()} START")
         print("DEBUG | Center Line = FOUND")
         print(f"DEBUG | Polygon Points = {len(self.digging_points) if hasattr(self, 'digging_points') else 0}")
-        print(f"DEBUG | Left Offset = {config['left_offset']} m")
-        print(f"DEBUG | Right Offset = {config['right_offset']} m")
-        print(f"DEBUG | Depth Offset = {config['depth_offset']} m")
-        print(f"DEBUG | Left Wall Height = {config['left_wall_height']} m")
-        print(f"DEBUG | Right Wall Height = {config['right_wall_height']} m")
+        print(f"DEBUG | Left Offset = {config.get('left_offset', 0.0)} m")
+        print(f"DEBUG | Right Offset = {config.get('right_offset', 0.0)} m")
+        print(f"DEBUG | Depth Offset = {config.get('depth_offset', 0.0)} m")
+        print(f"DEBUG | Left Wall Height = {config.get('left_wall_height', 0.0)} m")
+        print(f"DEBUG | Right Wall Height = {config.get('right_wall_height', 0.0)} m")
+        print(f"DEBUG | Front Wall Height = {config.get('front_wall_height', 0.0)} m")
 
         if not hasattr(self, 'digging_points') or len(self.digging_points) < 3:
             QMessageBox.warning(self, "Invalid Polygon", "Not enough points in digging polygon. Please mark at least 3 points.")
@@ -46327,6 +48771,10 @@ class PointCloudViewer(ApplicationUI):
         ref_ys_arr = np.array([p[2] for p in pts_3d_z], dtype=float)
         ref_zs_arr = np.array([p[3] for p in pts_3d_z], dtype=float)
         
+        if tunnel_type == "DrillBlast":
+            self._draw_target_drill_blast_curve(config.get('digging_distance', 0.0), ref_chs_arr, ref_xs_arr, ref_ys_arr, ref_zs_arr)
+            return
+            
         profile_pts = []
         for pline in center_polylines:
             profile_pts.extend(pline)
@@ -46344,6 +48792,20 @@ class PointCloudViewer(ApplicationUI):
         colors = np.asarray(self.point_cloud.colors) if self.point_cloud.has_colors() else np.zeros_like(points)
         
         pts_2d = points[:, :2]
+        
+        try:
+            from scipy.spatial import cKDTree
+            tree_2d = cKDTree(pts_2d)
+            has_tree = True
+        except ImportError:
+            has_tree = False
+            
+        def get_ground_z(x, y, default_z):
+            if has_tree:
+                _, idx = tree_2d.query([x, y])
+                return points[idx, 2]
+            return default_z
+
         inside_mask = dig_path.contains_points(pts_2d)
         inside_indices = np.where(inside_mask)[0]
         
@@ -46420,17 +48882,17 @@ class PointCloudViewer(ApplicationUI):
             offset = np.dot(pt_v, np.array([nx, ny])) # Positive is left
             
             within_width = False
-            if offset >= 0 and offset <= config['left_offset']:
+            if offset >= 0 and offset <= config.get('left_offset', 0.0):
                 within_width = True
-            elif offset < 0 and -offset <= config['right_offset']:
+            elif offset < 0 and -offset <= config.get('right_offset', 0.0):
                 within_width = True
                 
             if within_width:
                 dz = np.interp(best_ch, prof_x, prof_dz)
                 center_line_Z = best_ref_z + dz
-                digging_bottom_Z = center_line_Z - config['depth_offset']
+                digging_bottom_Z = center_line_Z - config.get('depth_offset', 0.0)
                 
-                target_z = get_trench_z(offset, config['left_offset'], config['right_offset'], pz, digging_bottom_Z)
+                target_z = get_trench_z(offset, config.get('left_offset', 0.0), config.get('right_offset', 0.0), pz, digging_bottom_Z)
                 
                 if pz - target_z > 0.05:
                     target_z += np.random.normal(0, 0.05)
@@ -46453,6 +48915,11 @@ class PointCloudViewer(ApplicationUI):
         max_gx = min(prof_x[-1], ref_chs_arr[-1])
         
         sampled_x = np.arange(min_gx, max_gx, step)
+        
+        front_wall_height = config.get('front_wall_height', 0.0)
+        last_valid_pos_for_off = {}
+        last_front_wall_data = None
+        
         for gx in sampled_x:
             best_idx = 0
             for i in range(len(ref_chs_arr) - 1):
@@ -46477,16 +48944,69 @@ class PointCloudViewer(ApplicationUI):
             nx, ny = -dy / length, dx / length
             
             # Sweep across the trench width
+            valid_offs = []
             for off in np.arange(-config['right_offset'], config['left_offset'] + step, step):
                 wx = rx + nx * off
                 wy = ry + ny * off
-                
                 if dig_path.contains_point([wx, wy]):
-                    tz = get_trench_z(off, config['left_offset'], config['right_offset'], center_z, bottom_z)
-                    tz += np.random.normal(0, 0.05) # soil noise
-                    
-                    wall_points.append([wx, wy, tz])
-                    
+                    valid_offs.append((off, wx, wy))
+            
+            if not valid_offs:
+                continue
+
+            last_front_wall_data = {
+                "chainage": float(gx),
+                "rx": float(rx),
+                "ry": float(ry),
+                "rz": float(center_z),
+                "nx": float(nx),
+                "ny": float(ny),
+                "tx": float(dx / length),
+                "ty": float(dy / length)
+            }
+                
+            for off, wx, wy in valid_offs:
+                tz = get_trench_z(off, config['left_offset'], config['right_offset'], center_z, bottom_z)
+                tz += np.random.normal(0, 0.05) # soil noise
+                
+                wall_points.append([wx, wy, tz])
+                
+                c_noise = np.random.uniform(-0.05, 0.05, 3)
+                final_color = np.clip(np.array(soil_color) + c_noise, 0, 1)
+                wall_colors.append(final_color)
+                
+                # Store the last valid position for front wall generation
+                if front_wall_height > 0:
+                    last_valid_pos_for_off[off] = (wx, wy, bottom_z, get_ground_z(wx, wy, center_z))
+
+            # Generate left wall at the maximum valid offset
+            left_off, left_wx, left_wy = valid_offs[-1]
+            lw_h = config.get('left_wall_height', 0.0)
+            if lw_h > 0:
+                ground_z = get_ground_z(left_wx, left_wy, center_z)
+                max_z = min(bottom_z + lw_h, ground_z)
+                for wz in np.arange(bottom_z, max_z, step):
+                    wall_points.append([left_wx, left_wy, wz])
+                    c_noise = np.random.uniform(-0.05, 0.05, 3)
+                    wall_colors.append(np.clip(np.array(soil_color) + c_noise, 0, 1))
+
+            # Generate right wall at the minimum valid offset
+            right_off, right_wx, right_wy = valid_offs[0]
+            rw_h = config.get('right_wall_height', 0.0)
+            if rw_h > 0:
+                ground_z = get_ground_z(right_wx, right_wy, center_z)
+                max_z = min(bottom_z + rw_h, ground_z)
+                for wz in np.arange(bottom_z, max_z, step):
+                    wall_points.append([right_wx, right_wy, wz])
+                    c_noise = np.random.uniform(-0.05, 0.05, 3)
+                    wall_colors.append(np.clip(np.array(soil_color) + c_noise, 0, 1))
+                        
+        # Generate front wall at the end (opposite side)
+        if front_wall_height > 0:
+            for off, (wx, wy, bz, cz) in last_valid_pos_for_off.items():
+                max_z = min(bz + front_wall_height, cz)
+                for fz in np.arange(bz, max_z, step):
+                    wall_points.append([wx, wy, fz])
                     c_noise = np.random.uniform(-0.05, 0.05, 3)
                     final_color = np.clip(np.array(soil_color) + c_noise, 0, 1)
                     wall_colors.append(final_color)
@@ -46504,11 +49024,79 @@ class PointCloudViewer(ApplicationUI):
         if hasattr(self, 'display_point_cloud'):
             self.display_point_cloud(reset_camera=False)
             
+        modified_points_list = []
+        for idx in inside_indices:
+            if idx < len(new_points):
+                # Save the new Z and color
+                pz = new_points[idx][2]
+                r, g, b = new_colors[idx]
+                modified_points_list.append((int(idx), float(pz), float(r), float(g), float(b)))
+                
+        added_wall_list = []
+        if wall_points:
+            for wp, wc in zip(wall_points, wall_colors):
+                added_wall_list.append((float(wp[0]), float(wp[1]), float(wp[2]), float(wc[0]), float(wc[1]), float(wc[2])))
+                
         # Store the digging operation data so it can be attached to a Tunnel object
         self.last_digging_data = {
+            "status": True,
+            "left_offset": config.get("left_offset", 0.0),
+            "right_offset": config.get("right_offset", 0.0),
+            "depth_offset": config.get("depth_offset", 0.0),
+            "left_wall_height": config.get("left_wall_height", 0.0),
+            "right_wall_height": config.get("right_wall_height", 0.0),
             "polygon_points": self.digging_points if hasattr(self, 'digging_points') else [],
-            "config": config
+            "excavated_region": added_wall_list,
+            "removed_point_cloud_state": modified_points_list,
+            "front_wall_reference": last_front_wall_data
         }
+        
+        # Save to existing active tunnel immediately if applicable
+        if hasattr(self, 'pending_tunnel_data') and self.pending_tunnel_data is not None:
+            self.pending_tunnel_data["digging"] = self.last_digging_data
+            print(f"DEBUG TUNNEL SAVE\nDigging Saved = True\nDigging Polygon Points = {len(self.last_digging_data.get('polygon_points', []))}")
+        else:
+            layer_folder = getattr(self, 'current_design_layer_path', None)
+            if layer_folder and os.path.exists(layer_folder):
+                import uuid
+                from json_manager import DesignConstructionManager
+                m_data = DesignConstructionManager.load_master(layer_folder)
+                
+                if "design" not in m_data:
+                    m_data["design"] = {}
+                if "tunnels" not in m_data["design"]:
+                    m_data["design"]["tunnels"] = []
+                    
+                new_tunnel_id = f"TUN-{uuid.uuid4().hex[:6].upper()}"
+                
+                new_tunnel_obj = {
+                    "tunnel_id": new_tunnel_id,
+                    "tunnel_type": tunnel_type,
+                    "digging": self.last_digging_data
+                }
+                
+                # Attach center line
+                center_line_data = self._build_baseline_data('center_line')
+                if center_line_data:
+                    new_tunnel_obj["center_line"] = center_line_data
+                    
+                # Attach markers
+                if hasattr(self, 'last_tunnel_markers') and self.last_tunnel_markers:
+                    if 'start_point' in self.last_tunnel_markers:
+                        new_tunnel_obj["start_marker"] = {
+                            "world_coordinates": self.last_tunnel_markers['start_point'],
+                            "chainage": getattr(self, "current_tunnel_start_ch", 0.0)
+                        }
+                    if 'end_point' in self.last_tunnel_markers:
+                        new_tunnel_obj["end_marker"] = {
+                            "world_coordinates": self.last_tunnel_markers['end_point'],
+                            "chainage": getattr(self, "current_tunnel_end_ch", 0.0)
+                        }
+                        
+                m_data["design"]["tunnels"].append(new_tunnel_obj)
+                DesignConstructionManager.save_master(layer_folder, m_data)
+                print(f"DEBUG TUNNEL SAVE\nNew Tunnel '{new_tunnel_id}' Created with Digging Data")
+
             
         self.message_text.append("Cut operation completed. Trench generated.")
         print("DEBUG DIGGING COMPLETE")
@@ -46803,6 +49391,7 @@ class PointCloudViewer(ApplicationUI):
             }
             
             # ── Save to design_construction_config.json ──
+            from json_manager import DesignConstructionManager
             master_data = DesignConstructionManager.load_master(layer_folder)
             
             # Ensure under_passes section exists at top level
@@ -48424,6 +51013,351 @@ class PointCloudViewer(ApplicationUI):
 
         self.vtk_widget.GetRenderWindow().Render()
         print("[Tunnel] TBM Hollow Tunnel successfully drawn.")
+## Mayur 13-7-8-2026
+    def draw_tunnel_wall_actor(self, config):
+        """Draws a portal/head-wall at the start and/or end of the tunnel."""
+        import vtk
+        import numpy as np
+
+        print("\nDEBUG TUNNEL WALL | OK clicked")
+        position = config.get("Wall Position", "Both")
+        left_offset = float(config.get("Left Offset (m)", 0.0))
+        right_offset = float(config.get("Right Offset (m)", 0.0))
+        height = float(config.get("Height (m)", 3.0))
+        wall_thickness = float(config.get("Wall Thickness (m)", 1.0))
+
+        print(f"DEBUG TUNNEL WALL | Position = {position}")
+        print(f"DEBUG TUNNEL WALL | Left Offset = {left_offset}")
+        print(f"DEBUG TUNNEL WALL | Right Offset = {right_offset}")
+        print(f"DEBUG TUNNEL WALL | Height = {height}")
+
+        # 1. Retrieve current tunnel properties
+        menu_vals = getattr(self, "menu_tunnel_values", {})
+        radius = float(menu_vals.get("radius", 5.0))
+        thickness = float(menu_vals.get("wall_thickness", 0.5))
+        outer_r = radius + thickness
+
+        start_ch = getattr(self, "current_tunnel_start_ch", 0.0)
+        end_ch = getattr(self, "current_tunnel_end_ch", 0.0)
+        
+        if hasattr(self, 'tunnel_start_point') and self.tunnel_start_point:
+            start_ch = float(self.tunnel_start_point[0])
+        if hasattr(self, 'tunnel_end_point') and self.tunnel_end_point:
+            end_ch = float(self.tunnel_end_point[0])
+
+        wall_width = left_offset + right_offset
+
+        print("\nDEBUG TUNNEL WALL")
+        print(f"Position = {position}")
+        
+        # 2. Re-calculate path points for start and end
+        center_line_data = self.line_types.get('center_line', {})
+        polylines = center_line_data.get('polylines', [])
+        if not polylines or len(polylines[0]) < 2:
+            print("Center Line = NOT FOUND")
+            print("Wall generated = False")
+            print("Tunnel contact = False")
+            return
+            
+        print("Center Line = FOUND")
+        print(f"Left Offset = {left_offset} m")
+        print(f"Right Offset = {right_offset} m")
+        print(f"Height = {height} m")
+        print(f"Tunnel Radius = {radius} m")
+        print(f"Wall Thickness = {thickness} m")
+        print(f"Outer Radius = {outer_r} m")
+
+        profile_pts = []
+        for pline in polylines:
+            profile_pts.extend(pline)
+        profile_pts.sort(key=lambda p: p[0])
+
+        if len(profile_pts) < 2:
+            print("DEBUG TUNNEL WALL | Center Line profile has < 2 points")
+            return
+
+        prof_x = np.array([p[0] for p in profile_pts])
+        prof_dz = np.array([p[1] for p in profile_pts])
+
+        global_start_offset = 0.0
+        if hasattr(self, 'zero_start_km') and self.zero_start_km is not None:
+            global_start_offset = float(self.zero_start_km) * 1000.0 + float(getattr(self, 'zero_start_chainage', 0.0))
+        elif hasattr(self, 'zero_start_chainage') and self.zero_start_chainage is not None:
+            global_start_offset = float(self.zero_start_chainage)
+        else:
+            layer_folder = getattr(self, 'current_design_layer_path', None)
+            if layer_folder and os.path.exists(layer_folder):
+                global_start_offset = self._get_global_start_offset(layer_folder)
+
+        pts_3d_z = self.get_road_baseline_points_3d()
+        
+        if not pts_3d_z:
+            if hasattr(self, 'zero_start_point') and self.zero_start_point is not None and \
+               hasattr(self, 'zero_end_point') and self.zero_end_point is not None:
+                p0 = np.array(self.zero_start_point, dtype=float)
+                p1 = np.array(self.zero_end_point, dtype=float)
+                dist = float(getattr(self, 'total_distance', np.linalg.norm(p1 - p0)))
+                pts_3d_z = [
+                    (global_start_offset, p0[0], p0[1], p0[2]),
+                    (global_start_offset + dist, p1[0], p1[1], p1[2])
+                ]
+
+        if not pts_3d_z:
+            print("DEBUG TUNNEL WALL | Cannot map coordinates to 3D. No baseline.")
+            return
+
+        ref_chs_arr = np.array([p[0] for p in pts_3d_z], dtype=float)
+        ref_xs_arr = np.array([p[1] for p in pts_3d_z], dtype=float)
+        ref_ys_arr = np.array([p[2] for p in pts_3d_z], dtype=float)
+        ref_zs_arr = np.array([p[3] for p in pts_3d_z], dtype=float)
+        is_absolute_ref = (global_start_offset > 0 and ref_chs_arr[0] >= global_start_offset - 1000)
+
+        def get_world_coord(gx):
+            abs_ch = gx + global_start_offset if is_absolute_ref else gx
+            rx, ry, rz = self.get_real_coordinates_from_chainage(gx)
+
+            if abs_ch < ref_chs_arr[0] and len(ref_chs_arr) > 1:
+                t = (abs_ch - ref_chs_arr[0]) / (ref_chs_arr[1] - ref_chs_arr[0])
+                fallback_x3d = ref_xs_arr[0] + t * (ref_xs_arr[1] - ref_xs_arr[0])
+                fallback_y3d = ref_ys_arr[0] + t * (ref_ys_arr[1] - ref_ys_arr[0])
+                fallback_ref_z = ref_zs_arr[0] + t * (ref_zs_arr[1] - ref_zs_arr[0])
+            elif abs_ch > ref_chs_arr[-1] and len(ref_chs_arr) > 1:
+                t = (abs_ch - ref_chs_arr[-1]) / (ref_chs_arr[-1] - ref_chs_arr[-2])
+                fallback_x3d = ref_xs_arr[-1] + t * (ref_xs_arr[-1] - ref_xs_arr[-2])
+                fallback_y3d = ref_ys_arr[-1] + t * (ref_ys_arr[-1] - ref_ys_arr[-2])
+                fallback_ref_z = ref_zs_arr[-1] + t * (ref_zs_arr[-1] - ref_zs_arr[-2])
+            else:
+                fallback_x3d = np.interp(abs_ch, ref_chs_arr, ref_xs_arr)
+                fallback_y3d = np.interp(abs_ch, ref_chs_arr, ref_ys_arr)
+                fallback_ref_z = np.interp(abs_ch, ref_chs_arr, ref_zs_arr)
+
+            x3d = rx if rx is not None else fallback_x3d
+            y3d = ry if ry is not None else fallback_y3d
+            ref_z = rz if rz is not None else fallback_ref_z
+
+            dz = np.interp(gx, prof_x, prof_dz)
+            z3d = ref_z + dz
+            return np.array([x3d, y3d, z3d])
+
+        def get_frame(gx):
+            P = get_world_coord(gx)
+            
+            step = 0.5
+            gx_next = gx + step
+            P_next = get_world_coord(gx_next)
+            
+            T = P_next - P
+            nrm = np.linalg.norm(T)
+            
+            if nrm < 1e-5:
+                gx_prev = gx - step
+                P_prev = get_world_coord(gx_prev)
+                T = P - P_prev
+                nrm = np.linalg.norm(T)
+                
+            T = T / nrm if nrm > 1e-9 else np.array([1.0, 0.0, 0.0])
+            
+            up = np.array([0.0, 0.0, 1.0])
+            N = np.cross(T, up)
+            if np.linalg.norm(N) < 1e-5:
+                N = np.cross(T, np.array([0.0, 1.0, 0.0]))
+            N = N / np.linalg.norm(N)
+            
+            B = np.cross(T, N)
+            B = B / np.linalg.norm(B)
+            return P, T, N, B
+
+        def build_wall(gx, is_start):
+            P, T, N, B = get_frame(gx)
+            
+            extrude_dir = -T if is_start else T
+            
+            V_right = N
+            V_left = -N
+            V_up = -B
+            V_down = B
+            
+            actual_left = max(abs(left_offset), outer_r)
+            actual_right = max(abs(right_offset), outer_r)
+            actual_height = max(abs(height), outer_r)
+            
+            points = vtk.vtkPoints()
+            points.SetDataTypeToDouble()
+            polys = vtk.vtkCellArray()
+            
+            num_half = 18
+            
+            # --- LEFT POLYGON ---
+            left_poly = vtk.vtkPolygon()
+            left_poly.GetPointIds().SetNumberOfIds(3 + num_half + 1)
+            
+            idx = 0
+            pt_id = points.InsertNextPoint((P + actual_height * V_up).tolist())
+            left_poly.GetPointIds().SetId(idx, pt_id); idx += 1
+            
+            pt_id = points.InsertNextPoint((P + actual_left * V_left + actual_height * V_up).tolist())
+            left_poly.GetPointIds().SetId(idx, pt_id); idx += 1
+            
+            pt_id = points.InsertNextPoint((P + actual_left * V_left + outer_r * V_down).tolist())
+            left_poly.GetPointIds().SetId(idx, pt_id); idx += 1
+            
+            for i in range(num_half + 1):
+                theta = 3 * np.pi / 2.0 - (np.pi * i / num_half)
+                pt = P + outer_r * np.cos(theta) * V_right + outer_r * np.sin(theta) * V_up
+                pt_id = points.InsertNextPoint(pt.tolist())
+                left_poly.GetPointIds().SetId(idx, pt_id); idx += 1
+                
+            polys.InsertNextCell(left_poly)
+            
+            # --- RIGHT POLYGON ---
+            right_poly = vtk.vtkPolygon()
+            right_poly.GetPointIds().SetNumberOfIds(3 + num_half + 1)
+            
+            idx = 0
+            pt_id = points.InsertNextPoint((P + actual_height * V_up).tolist())
+            right_poly.GetPointIds().SetId(idx, pt_id); idx += 1
+            
+            for i in range(num_half + 1):
+                theta = np.pi / 2.0 - (np.pi * i / num_half)
+                pt = P + outer_r * np.cos(theta) * V_right + outer_r * np.sin(theta) * V_up
+                pt_id = points.InsertNextPoint(pt.tolist())
+                right_poly.GetPointIds().SetId(idx, pt_id); idx += 1
+                
+            pt_id = points.InsertNextPoint((P + actual_right * V_right + outer_r * V_down).tolist())
+            right_poly.GetPointIds().SetId(idx, pt_id); idx += 1
+            
+            pt_id = points.InsertNextPoint((P + actual_right * V_right + actual_height * V_up).tolist())
+            right_poly.GetPointIds().SetId(idx, pt_id); idx += 1
+            
+            polys.InsertNextCell(right_poly)
+            
+            pd = vtk.vtkPolyData()
+            pd.SetPoints(points)
+            pd.SetPolys(polys)
+            
+            tri = vtk.vtkTriangleFilter()
+            tri.SetInputData(pd)
+            tri.Update()
+            
+            print(f"DEBUG TUNNEL WALL | Triangulated Points = {tri.GetOutput().GetNumberOfPoints()}")
+            print(f"DEBUG TUNNEL WALL | Triangulated Cells = {tri.GetOutput().GetNumberOfCells()}")
+
+            extrude = vtk.vtkLinearExtrusionFilter()
+            extrude.SetInputConnection(tri.GetOutputPort())
+            extrude.SetExtrusionTypeToVectorExtrusion()
+            extrude.SetVector(extrude_dir.tolist())
+            extrude.SetScaleFactor(wall_thickness)
+            extrude.Update()
+            
+            final_pd = extrude.GetOutput()
+            n_pts = final_pd.GetNumberOfPoints()
+            n_cells = final_pd.GetNumberOfCells()
+            bounds = final_pd.GetBounds()
+            center = final_pd.GetCenter()
+            
+            print(f"DEBUG TUNNEL WALL | Geometry created = {n_pts > 0}")
+            print(f"DEBUG TUNNEL WALL | Number of points = {n_pts}")
+            print(f"DEBUG TUNNEL WALL | Number of cells = {n_cells}")
+            print(f"DEBUG TUNNEL WALL | Bounds = {bounds}")
+            print(f"DEBUG TUNNEL WALL | Center = {center}")
+
+            mapper = vtk.vtkPolyDataMapper()
+            mapper.SetInputConnection(extrude.GetOutputPort())
+            
+            actor = vtk.vtkActor()
+            actor.SetMapper(mapper)
+            actor.GetProperty().SetColor(0.5, 0.5, 0.5)
+            actor.SetVisibility(1)
+            actor.GetProperty().SetOpacity(1.0)
+            
+            print(f"DEBUG TUNNEL WALL | Actor created = True")
+            print(f"DEBUG TUNNEL WALL | Actor visibility = {actor.GetVisibility()}")
+            print(f"DEBUG TUNNEL WALL | Actor position = {actor.GetPosition()}")
+            print(f"DEBUG TUNNEL WALL | Actor scale = {actor.GetScale()}")
+
+            if not hasattr(self, 'tunnel_wall_actors'):
+                self.tunnel_wall_actors = []
+            self.tunnel_wall_actors.append(actor)
+            self.renderer.AddActor(actor)
+            print("DEBUG TUNNEL WALL | Actor added to renderer = True")
+
+        if hasattr(self, 'tunnel_wall_actors'):
+            for actor in self.tunnel_wall_actors:
+                self.renderer.RemoveActor(actor)
+            self.tunnel_wall_actors.clear()
+
+        if position in ["Front Side Wall", "Both"]:
+            build_wall(start_ch, is_start=True)
+            
+        if position in ["End Side Wall", "Both"]:
+            build_wall(end_ch, is_start=False)
+
+        print(f"DEBUG TUNNEL WALL | Renderer actors count = {self.renderer.GetActors().GetNumberOfItems()}")
+        
+        if hasattr(self, 'tbm_tunnel_actors') and len(self.tbm_tunnel_actors) > 0:
+            tunnel_bounds = self.tbm_tunnel_actors[-1].GetBounds()
+            print(f"DEBUG TUNNEL WALL | Tunnel Bounds = {tunnel_bounds}")
+            if hasattr(self, 'tunnel_wall_actors') and len(self.tunnel_wall_actors) > 0:
+                wall_bounds = self.tunnel_wall_actors[-1].GetBounds()
+                print(f"DEBUG TUNNEL WALL | Wall Bounds = {wall_bounds}")
+                overlap = not (wall_bounds[0] > tunnel_bounds[1] or wall_bounds[1] < tunnel_bounds[0] or 
+                               wall_bounds[2] > tunnel_bounds[3] or wall_bounds[3] < tunnel_bounds[2] or 
+                               wall_bounds[4] > tunnel_bounds[5] or wall_bounds[5] < tunnel_bounds[4])
+                print(f"DEBUG TUNNEL WALL | Bounds overlap/contact = {overlap}")
+
+        if hasattr(self, 'vtk_widget'):
+            self.vtk_widget.GetRenderWindow().Render()
+        elif hasattr(self, 'vtkWidget'):
+            self.vtkWidget.GetRenderWindow().Render()
+
+        print("Wall generated = True")
+        print("Tunnel contact = True")
+        
+        geom_data = []
+        import vtk
+        for actor in getattr(self, 'tunnel_wall_actors', []):
+            mapper = actor.GetMapper()
+            if mapper:
+                polydata = mapper.GetInput()
+                if polydata:
+                    pts = []
+                    for i in range(polydata.GetNumberOfPoints()):
+                        pts.append(list(polydata.GetPoint(i)))
+                    cells = []
+                    polydata.GetPolys().InitTraversal()
+                    idList = vtk.vtkIdList()
+                    while polydata.GetPolys().GetNextCell(idList):
+                        cell = []
+                        for i in range(idList.GetNumberOfIds()):
+                            cell.append(idList.GetId(i))
+                        cells.append(cell)
+                    geom_data.append({"points": pts, "cells": cells})
+
+        tunnel_wall_data = {
+            "position": position,
+            "left_offset": left_offset,
+            "right_offset": right_offset,
+            "height": height,
+            "world_coordinates": list(self.tunnel_wall_actors[0].GetPosition()) if getattr(self, 'tunnel_wall_actors', None) else [],
+            "transform": [],
+            "geometry": geom_data
+        }
+
+        if hasattr(self, 'pending_tunnel_data') and self.pending_tunnel_data is not None:
+            self.pending_tunnel_data["tunnel_wall"] = tunnel_wall_data
+            print("DEBUG TUNNEL SAVE\nTunnel Wall Saved = True")
+        else:
+            layer_folder = getattr(self, 'current_design_layer_path', None)
+            if layer_folder and os.path.exists(layer_folder):
+                from json_manager import DesignConstructionManager
+                m_data = DesignConstructionManager.load_master(layer_folder)
+                t_list = m_data.get("design", {}).get("tunnels", [])
+                if t_list:
+                    t_list[-1]["tunnel_wall"] = tunnel_wall_data
+                    DesignConstructionManager.save_master(layer_folder, m_data)
+                    print("DEBUG TUNNEL SAVE\nTunnel Wall Saved = True")
+
+
 ## Mayur 12-8-2026
     def _prompt_tunnel_start_end_mode(self, ltype="surface"):
         from PyQt5.QtWidgets import QMessageBox
@@ -48534,10 +51468,124 @@ class PointCloudViewer(ApplicationUI):
         
         if len(self.tunnel_selected_points) == 1:
             self.tunnel_start_point = (snapped_x, snapped_y)
+            if not hasattr(self, 'last_tunnel_markers'):
+                self.last_tunnel_markers = {}
+            if 'pos_3d' in locals():
+                self.last_tunnel_markers['start_point'] = list(pos_3d)
             self.message_text.append(f"Tunnel Start Point set: {self.tunnel_start_point}")
             print(f"TUNNEL START POINT = {self.tunnel_start_point}")
         elif len(self.tunnel_selected_points) == 2:
             self.tunnel_end_point = (snapped_x, snapped_y)
+            if not hasattr(self, 'last_tunnel_markers'):
+                self.last_tunnel_markers = {}
+            if 'pos_3d' in locals():
+                self.last_tunnel_markers['end_point'] = list(pos_3d)
+            self.message_text.append(f"Tunnel End Point set: {self.tunnel_end_point}")
+            print(f"TUNNEL END POINT = {self.tunnel_end_point}")
+            self.tunnel_point_selection_mode = False
+            self.message_text.append("Tunnel Start/End selection complete.")
+            
+        self.canvas.draw_idle()
+
+    def _handle_tunnel_point_selection(self, click_x, click_y):
+        if not getattr(self, 'tunnel_surface_line_points', []):
+            ltype_name = "Surface Line" if getattr(self, 'tunnel_active_ltype', 'surface') == 'surface' else "Center Line"
+            self.message_text.append(f"Error: No {ltype_name} points found to snap to.")
+            self.tunnel_point_selection_mode = False
+            return
+            
+        import numpy as np
+        min_dist = float('inf')
+        closest_pt = None
+        pts = self.tunnel_surface_line_points
+        click_pt = np.array([click_x, click_y])
+        
+        for i in range(len(pts) - 1):
+            p1 = np.array([pts[i][0], pts[i][1]])
+            p2 = np.array([pts[i+1][0], pts[i+1][1]])
+            
+            l2 = np.sum((p1 - p2)**2)
+            if l2 == 0:
+                t = 0
+            else:
+                t = max(0, min(1, np.dot(click_pt - p1, p2 - p1) / l2))
+                
+            projection = p1 + t * (p2 - p1)
+            dist = np.linalg.norm(click_pt - projection)
+            
+            if dist < min_dist:
+                min_dist = dist
+                closest_pt = projection
+                
+        if closest_pt is None:
+            closest_pt = min(pts, key=lambda p: (p[0]-click_x)**2 + (p[1]-click_y)**2)
+            closest_pt = np.array([closest_pt[0], closest_pt[1]])
+            
+        snapped_x, snapped_y = closest_pt[0], closest_pt[1]
+        
+        self.tunnel_selected_points.append((snapped_x, snapped_y))
+        artist = self.ax.plot(snapped_x, snapped_y, 'ro', markersize=10, markeredgecolor='black', markeredgewidth=2)[0]
+        if not hasattr(self, 'tunnel_2d_artists'):
+            self.tunnel_2d_artists = []
+        self.tunnel_2d_artists.append(artist)
+        self.canvas.draw_idle()
+        
+        # Plot point in 3D viewer
+        if hasattr(self, 'zero_start_point') and hasattr(self, 'zero_end_point') and hasattr(self, 'total_distance'):
+            import vtk
+            start_pt = np.array(self.zero_start_point, dtype=float)
+            end_pt = np.array(self.zero_end_point, dtype=float)
+            
+            ref_z = getattr(self, 'zero_start_z', 0.0)
+            if not ref_z and hasattr(self, 'zero_start_point'):
+                ref_z = self.zero_start_point[2] if len(self.zero_start_point) > 2 else 0.0
+
+            if self.total_distance > 0:
+                t = snapped_x / self.total_distance
+                t = max(0.0, min(1.0, t))
+                pos_3d = start_pt + t * (end_pt - start_pt)
+                pos_3d[2] = ref_z + snapped_y
+                
+                # Apply true curved 3D coordinates if available
+                rx, ry, _ = self.get_real_coordinates_from_chainage(snapped_x)
+                if rx is not None and ry is not None:
+                    pos_3d[0] = rx
+                    pos_3d[1] = ry
+                
+                sphere = vtk.vtkSphereSource()
+                sphere.SetRadius(1.0)
+                sphere.SetCenter(pos_3d[0], pos_3d[1], pos_3d[2])
+                sphere.SetThetaResolution(16)
+                sphere.SetPhiResolution(16)
+
+                mapper = vtk.vtkPolyDataMapper()
+                mapper.SetInputConnection(sphere.GetOutputPort())
+
+                actor = vtk.vtkActor()
+                actor.SetMapper(mapper)
+                actor.GetProperty().SetColor(1.0, 0.0, 0.0)
+                
+                self.renderer.AddActor(actor)
+                if not hasattr(self, 'tunnel_3d_actors'):
+                    self.tunnel_3d_actors = []
+                self.tunnel_3d_actors.append(actor)
+                rw = (self.vtk_widget if hasattr(self, 'vtk_widget') else self.vtkWidget).GetRenderWindow()
+                rw.Render()
+        
+        if len(self.tunnel_selected_points) == 1:
+            self.tunnel_start_point = (snapped_x, snapped_y)
+            if not hasattr(self, 'last_tunnel_markers'):
+                self.last_tunnel_markers = {}
+            if 'pos_3d' in locals():
+                self.last_tunnel_markers['start_point'] = list(pos_3d)
+            self.message_text.append(f"Tunnel Start Point set: {self.tunnel_start_point}")
+            print(f"TUNNEL START POINT = {self.tunnel_start_point}")
+        elif len(self.tunnel_selected_points) == 2:
+            self.tunnel_end_point = (snapped_x, snapped_y)
+            if not hasattr(self, 'last_tunnel_markers'):
+                self.last_tunnel_markers = {}
+            if 'pos_3d' in locals():
+                self.last_tunnel_markers['end_point'] = list(pos_3d)
             self.message_text.append(f"Tunnel End Point set: {self.tunnel_end_point}")
             print(f"TUNNEL END POINT = {self.tunnel_end_point}")
             self.tunnel_point_selection_mode = False

@@ -125,12 +125,67 @@ class TunnelFPSInteractorStyle(vtkInteractorStyleUser):
     def _on_left_press(self, obj, event):
         self._update_last_pos()
         self._lmb_dragging = True
+        
+        # DEBUG ORBIT
+        ren = self.GetCurrentRenderer()
+        cam = ren.GetActiveCamera() if ren else None
+        if cam:
+            self._orbit_cam_pos_before = cam.GetPosition()
+            self._orbit_cam_foc_before = cam.GetFocalPoint()
+            self._orbit_cam_clip_before = cam.GetClippingRange()
+            
+            if self._viewer:
+                pc_act = getattr(self._viewer, 'point_cloud_actor', None)
+                if pc_act and pc_act.GetMapper() and pc_act.GetMapper().GetInput():
+                    self._orbit_pc_poly_before = id(getattr(self._viewer, 'point_cloud_polydata', None))
+                    self._orbit_pc_minput_before = id(pc_act.GetMapper().GetInput())
+                    self._orbit_pc_act_before = id(pc_act)
+                    self._orbit_pc_bounds_before = pc_act.GetMapper().GetInput().GetBounds()
+                    self._orbit_pc_pts_before = pc_act.GetMapper().GetInput().GetNumberOfPoints()
+
         print("DEBUG: Mouse Drag Started")
 ########################################################
     def _on_left_release(self, obj, event):
  ####### Mayur Wakhare 30-06-2026
         self._lmb_dragging = False
         print("DEBUG: Mouse Drag Ended")
+        
+        # DEBUG ORBIT AFTER
+        if hasattr(self, '_orbit_cam_pos_before'):
+            ren = self.GetCurrentRenderer()
+            cam = ren.GetActiveCamera() if ren else None
+            if cam and self._viewer:
+                print("\nDEBUG PC ORBIT EVENT")
+                print(f"Camera Position BEFORE = {self._orbit_cam_pos_before}")
+                print(f"Camera Position AFTER = {cam.GetPosition()}")
+                print(f"Focal Point BEFORE = {self._orbit_cam_foc_before}")
+                print(f"Focal Point AFTER = {cam.GetFocalPoint()}")
+                print(f"Clipping Range BEFORE = {self._orbit_cam_clip_before}")
+                print(f"Clipping Range AFTER = {cam.GetClippingRange()}")
+                
+                print("\nPoint Cloud:")
+                pc_act = getattr(self._viewer, 'point_cloud_actor', None)
+                if pc_act and pc_act.GetMapper() and pc_act.GetMapper().GetInput():
+                    poly_after = id(getattr(self._viewer, 'point_cloud_polydata', None))
+                    minput_after = id(pc_act.GetMapper().GetInput())
+                    act_after = id(pc_act)
+                    bounds_after = pc_act.GetMapper().GetInput().GetBounds()
+                    pts_after = pc_act.GetMapper().GetInput().GetNumberOfPoints()
+                    
+                    print(f"PolyData Same = {poly_after == getattr(self, '_orbit_pc_poly_before', None)}")
+                    print(f"Mapper Input Same = {minput_after == getattr(self, '_orbit_pc_minput_before', None)}")
+                    print(f"Actor Same = {act_after == getattr(self, '_orbit_pc_act_before', None)}")
+                    print(f"Bounds Same = {bounds_after == getattr(self, '_orbit_pc_bounds_before', None)}")
+                    print(f"Point Count Same = {pts_after == getattr(self, '_orbit_pc_pts_before', None)}")
+                else:
+                    print("PolyData Same = FALSE")
+                    print("Mapper Input Same = FALSE")
+                    print("Actor Same = FALSE")
+                    print("Bounds Same = FALSE")
+                    print("Point Count Same = FALSE")
+                    
+                self._check_partial_vis(cam, pc_act, getattr(self._viewer, 'point_cloud_polydata', None))
+
  ################################################
         self._enforce_position()
 
@@ -157,11 +212,85 @@ class TunnelFPSInteractorStyle(vtkInteractorStyleUser):
             key_lower = key.lower()
             if hasattr(self._viewer, '_robot_keys_pressed'):
                 self._viewer._robot_keys_pressed.discard(key_lower)
+## Mayur 18-8-2026
+    def _check_partial_vis(self, cam, pc_act, pc_poly):
+        if not cam or not pc_act or not pc_act.GetMapper() or not pc_act.GetMapper().GetInput(): return
+        bounds = pc_act.GetMapper().GetInput().GetBounds()
+        clip = cam.GetClippingRange()
+        pos = cam.GetPosition()
+        focal = cam.GetFocalPoint()
+        
+        import math
+        center = ((bounds[0]+bounds[1])/2, (bounds[2]+bounds[3])/2, (bounds[4]+bounds[5])/2)
+        radius = math.sqrt((bounds[1]-bounds[0])**2 + (bounds[3]-bounds[2])**2 + (bounds[5]-bounds[4])**2) / 2.0
+        dist = math.sqrt((pos[0]-center[0])**2 + (pos[1]-center[1])**2 + (pos[2]-center[2])**2)
+        
+        # Very rough check if near/far planes intersect bounding sphere
+        if (dist - radius < clip[0]) or (dist + radius > clip[1]):
+            print("\n!!! WARNING — PARTIAL POINT CLOUD VISIBILITY !!!")
+            print(f"Camera Position = {pos}")
+            print(f"Focal Point = {focal}")
+            print(f"Clipping Range = {clip}")
+            print(f"Point Cloud Bounds = {bounds}")
+            print(f"Actor Visibility = {pc_act.GetVisibility()}")
+            print(f"Actor Opacity = {pc_act.GetProperty().GetOpacity() if pc_act.GetProperty() else 'NONE'}")
+            print(f"Mapper Input = {id(pc_act.GetMapper().GetInput())}")
+            print(f"PolyData = {id(pc_poly) if pc_poly else 'NONE'}")
+            print(f"Near Clip = {clip[0]}")
+            print(f"Far Clip = {clip[1]}")
+            valid_bounds = bool(bounds[0] <= bounds[1] and bounds[2] <= bounds[3])
+            print(f"Point Cloud bounds are still valid = {valid_bounds}")
 
+    def _print_zoom(self, direction, cam, old_pos, old_clip, old_focal):
+        if not self._viewer or not cam: return
+        print("\nDEBUG PC ZOOM EVENT")
+        print(f"Zoom Direction = {direction}")
+        print(f"Camera Position BEFORE = {old_pos}")
+        print(f"Camera Position AFTER = {cam.GetPosition()}")
+        print(f"Clipping Range BEFORE = {old_clip}")
+        print(f"Clipping Range AFTER = {cam.GetClippingRange()}")
+        print(f"Focal Point BEFORE = {old_focal}")
+        print(f"Focal Point AFTER = {cam.GetFocalPoint()}")
+        
+        print("\nPoint Cloud:")
+        pc_act = getattr(self._viewer, 'point_cloud_actor', None)
+        pc_poly = getattr(self._viewer, 'point_cloud_polydata', None)
+        if pc_act:
+            print(f"Actor ID = {id(pc_act)}")
+            print(f"PolyData ID = {id(pc_poly) if pc_poly else 'NONE'}")
+            mapper = pc_act.GetMapper()
+            if mapper and mapper.GetInput():
+                print(f"Mapper Input ID = {id(mapper.GetInput())}")
+                print(f"Point Count = {mapper.GetInput().GetNumberOfPoints()}")
+                print(f"Bounds = {mapper.GetInput().GetBounds()}")
+            else:
+                print("Mapper Input ID = NONE\nPoint Count = NONE\nBounds = NONE")
+            print(f"Visibility = {pc_act.GetVisibility()}")
+        else:
+            print("Actor ID = NONE\nPolyData ID = NONE\nMapper Input ID = NONE\nPoint Count = NONE\nBounds = NONE\nVisibility = NONE")
+            
+        print("\nRender:")
+        ren = self.GetCurrentRenderer()
+        if ren:
+            print(f"Renderer Actor Count = {ren.GetActors().GetNumberOfItems()}")
+            rw = ren.GetRenderWindow()
+            print(f"Render Window Size = {rw.GetSize() if rw else 'NONE'}")
+        else:
+            print("Renderer Actor Count = NONE\nRender Window Size = NONE")
+            
+        self._check_partial_vis(cam, pc_act, pc_poly)
+## Mayur 18-8-2026
     def _on_mouse_wheel_forward(self, obj, event):
+        ren = self.GetCurrentRenderer()
+        cam = ren.GetActiveCamera() if ren else None
+        old_pos = cam.GetPosition() if cam else None
+        old_clip = cam.GetClippingRange() if cam else None
+        old_focal = cam.GetFocalPoint() if cam else None
+
         ### Mayur Wakhare 13-07-2026 Underpass Camera movement 
         if not self._is_robot_mode():
             if self._viewer and getattr(self._viewer, '_underpass_camera_active', False):
+
                 if not hasattr(self._viewer, '_fly_path') or not self._viewer._fly_path:
                     return
                 cam = None
@@ -235,8 +364,16 @@ class TunnelFPSInteractorStyle(vtkInteractorStyleUser):
                 
             if hasattr(self._viewer, '_update_robot_camera'):
                 self._viewer._update_robot_camera()
-
+                
+        if cam: self._print_zoom("IN", cam, old_pos, old_clip, old_focal)
+## Mayur 18-8-2026
     def _on_mouse_wheel_backward(self, obj, event):
+        ren = self.GetCurrentRenderer()
+        cam = ren.GetActiveCamera() if ren else None
+        old_pos = cam.GetPosition() if cam else None
+        old_clip = cam.GetClippingRange() if cam else None
+        old_focal = cam.GetFocalPoint() if cam else None
+
         ### Mayur Wakhare 13-07-2026 Underpass Camera movement 
         if not self._is_robot_mode():
             if self._viewer and getattr(self._viewer, '_underpass_camera_active', False):
